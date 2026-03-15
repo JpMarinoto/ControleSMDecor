@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <h3>Registar Novo Cliente</h3>
+    <form method="POST" class="mt-3">
+        {% csrf_token %}
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label>Nome Completo</label>
+                <input type="text" name="nome" class="form-control" required>
+            </div>
+            <div class="col-md-3 mb-3">
+                <label>CPF</label>
+                <input type="text" name="cpf" class="form-control" placeholder="000.000.000-00">
+            </div>
+            <div class="col-md-3 mb-3">
+                <label>CNPJ</label>
+                <input type="text" name="cnpj" class="form-control" placeholder="00.000.000/0000-00">
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-4 mb-3">
+                <label>Telefone</label>
+                <input type="text" name="telefone" class="form-control">
+            </div>
+            <div class="col-md-8 mb-3">
+                <label>Endereço</label>
+                <input type="text" name="endereco" class="form-control">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-success">Salvar Cliente</button>
+        <a href="{% url 'lista_clientes' %}" class="btn btn-secondary">Cancelar</a>
+    </form>
+</div>
+{% endblock %}

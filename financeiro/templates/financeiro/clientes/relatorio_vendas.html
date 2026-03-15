@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container pb-5">
+    <div class="d-flex justify-content-between align-items-center mb-3 no-print">
+        <h2><i class="bi bi-file-earmark-text"></i> Fechamento – {{ cliente.nome }}</h2>
+        <button type="button" class="btn btn-primary" onclick="window.print();"><i class="bi bi-printer"></i> Imprimir relatório</button>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <p class="mb-1"><strong>Cliente:</strong> {{ cliente.nome }}</p>
+                    {% if cliente.telefone %}<p class="mb-1 text-muted small">{{ cliente.telefone }}</p>{% endif %}
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="mb-1"><strong>Vendas no relatório:</strong> {{ vendas|length }}</p>
+                    {% if data_inicio and data_fim %}
+                    <p class="mb-0 text-muted small">De {{ data_inicio|date:"d/m/Y" }} a {{ data_fim|date:"d/m/Y" }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            <hr>
+
+            {% for venda in vendas %}
+            <div class="mb-4">
+                <h6 class="text-muted mb-2">Venda #{{ venda.id }} – {{ venda.data_venda|date:"d/m/Y H:i" }}</h6>
+                <table class="table table-bordered table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Produto</th>
+                            <th class="text-center" style="width: 80px;">Qtd</th>
+                            <th class="text-end" style="width: 110px;">Preço un. (R$)</th>
+                            <th class="text-end" style="width: 110px;">Total (R$)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in venda.itens.all %}
+                        <tr>
+                            <td>{{ item.produto.nome }}</td>
+                            <td class="text-center">{{ item.quantidade }}</td>
+                            <td class="text-end">R$ {{ item.preco_unitario|floatformat:2 }}</td>
+                            <td class="text-end">R$ {{ item.total_item|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr>
+                            <th colspan="3" class="text-end">Subtotal desta venda:</th>
+                            <th class="text-end">R$ {{ venda.total_venda|floatformat:2 }}</th>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% endfor %}
+
+            <hr>
+            <div class="d-flex justify-content-end">
+                <div class="border rounded p-3 bg-light">
+                    <strong>Total do período (vendas selecionadas):</strong>
+                    <span class="fs-4 ms-2 text-primary">R$ {{ total_periodo|floatformat:2 }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="no-print">
+        <a href="{% url 'detalhe_cliente' cliente.id %}" class="btn btn-outline-secondary">← Voltar ao extrato do cliente</a>
+    </div>
+</div>
+{% endblock %}

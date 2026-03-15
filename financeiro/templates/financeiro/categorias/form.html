@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <h3>
+        <i class="bi bi-tag"></i>
+        {% if categoria %}Editar Categoria{% else %}Nova Categoria{% endif %}
+    </h3>
+    <hr>
+
+    <form method="POST" class="mt-3">
+        {% csrf_token %}
+
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label class="form-label fw-bold">Nome da Categoria</label>
+                <input type="text" name="nome" class="form-control"
+                       value="{{ categoria.nome|default_if_none:'' }}" required>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label class="form-label fw-bold">Tipo de Categoria</label>
+                <select name="tipo" class="form-select" required>
+                    <option value="produto" {% if categoria.tipo == 'produto' or not categoria %}selected{% endif %}>Categoria de Produto</option>
+                    <option value="material" {% if categoria.tipo == 'material' %}selected{% endif %}>Categoria de Material</option>
+                </select>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-12 mb-3">
+                <label class="form-label fw-bold">Descrição (opcional)</label>
+                <input type="text" name="descricao" class="form-control"
+                       value="{{ categoria.descricao|default_if_none:'' }}">
+            </div>
+        </div>
+
+        <div class="mt-3">
+            <button type="submit" class="btn btn-primary px-4">Salvar</button>
+            <a href="{% url 'lista_categorias' %}" class="btn btn-outline-secondary">Voltar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+

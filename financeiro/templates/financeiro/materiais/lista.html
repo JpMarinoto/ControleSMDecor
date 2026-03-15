@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-hammer"></i> Materiais e Insumos</h2>
+        <a href="{% url 'cadastrar_material' %}" class="btn btn-primary">+ Novo Material</a>
+    </div>
+
+    <table class="table table-hover">
+        <thead class="table-dark">
+            <tr>
+                <th>Nome</th>
+                <th>Categoria</th>
+                <th>Fornecedor Padrão</th>
+                <th>Estoque Atual</th>
+                <th>Custo Base</th>
+                <th class="text-center">Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in materiais %}
+            <tr>
+                <td><strong>{{ m.nome }}</strong></td>
+                <td>{{ m.categoria.nome|default:"---" }}</td>
+                <td>{{ m.fornecedor_padrao.nome|default:"---" }}</td>
+                <td>
+                    <span class="badge {% if m.estoque_atual < 5 %}bg-danger{% else %}bg-success{% endif %}">
+                        {{ m.estoque_atual }} unidades
+                    </span>
+                </td>
+                <td>R$ {{ m.preco_unitario_base }}</td>
+                <td class="text-center">
+                    <div class="btn-group">
+                        <a href="{% url 'registrar_compra' %}" class="btn btn-sm btn-outline-danger">Comprar +</a>
+                        <a href="{% url 'editar_material' m.id %}" class="btn btn-sm btn-warning" title="Editar">✏️</a>
+                        <a href="{% url 'excluir_material' m.id %}" class="btn btn-sm btn-danger"
+                           onclick="return confirm('Apagar este material?')" title="Excluir">🗑️</a>
+                    </div>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-center text-muted">Nenhum material cadastrado.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

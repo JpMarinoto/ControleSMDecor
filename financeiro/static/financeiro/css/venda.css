@@ -1,0 +1,6 @@
+/* financeiro/static/financeiro/css/venda.css */
+.venda-container { background: white; padding: 30px; border-radius: 10px; shadow: 0 4px 6px rgba(0,0,0,0.1); }
+.item-row { border-bottom: 1px solid #eee; padding: 15px 0; }
+.btn-add { background-color: #2980b9; color: white; margin-bottom: 20px; }
+.btn-save { background-color: #27ae60; color: white; width: 100%; font-size: 1.2rem; }
+.last-price-info { font-size: 0.8rem; color: #666; font-style: italic; }

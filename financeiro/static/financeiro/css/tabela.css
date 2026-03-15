@@ -1,0 +1,7 @@
+/* financeiro/static/financeiro/css/tabelas.css */
+.devedor-alto { color: #c0392b; font-weight: bold; background-color: #fce4e4; }
+.devedor-ok { color: #27ae60; }
+.tabela-clientes { width: 100%; border-collapse: separate; border-spacing: 0 10px; }
+.tabela-clientes tr { background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.tabela-clientes td, .tabela-clientes th { padding: 15px; border: none; }
+.badge-divida { padding: 5px 10px; border-radius: 20px; font-size: 0.85rem; }

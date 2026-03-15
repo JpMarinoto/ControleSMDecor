@@ -1,0 +1,209 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <h3><i class="bi bi-pencil-square"></i> Editar Venda #{{ venda.id }}</h3>
+    <hr>
+    <form method="POST" id="form-venda">
+        {% csrf_token %}
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <label class="form-label fw-bold">Cliente</label>
+                <select name="cliente" class="form-select" required>
+                    {% for c in clientes %}
+                    <option value="{{ c.id }}" {% if c.id == venda.cliente_id %}selected{% endif %}>{{ c.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="card border-primary mb-3">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-box-seam"></i> Itens da venda</span>
+                <button type="button" class="btn btn-light btn-sm" id="btn-adicionar">+ Adicionar produto</button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="tabela-itens">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Categoria</th>
+                                <th>Produto</th>
+                                <th style="width: 90px;">Qtd</th>
+                                <th style="width: 110px;">Preço un. (R$)</th>
+                                <th style="width: 120px;">Valor total</th>
+                                <th class="text-center" style="width: 140px;">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="corpo-itens">
+                            {% for item in venda.itens.all %}
+                            <tr class="item-row">
+                                <td>
+                                    <select class="form-select form-select-sm row-categoria">
+                                        <option value="">Selecione a categoria</option>
+                                        {% for c in categorias %}
+                                        <option value="{{ c.id }}" {% if item.produto.categoria_id == c.id %}selected{% endif %}>{{ c.nome }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm row-produto" name="produto_id[]">
+                                        <option value="{{ item.produto.id }}" selected>{{ item.produto.nome }}</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <input type="number" name="quantidade[]" class="form-control form-control-sm row-qtd" value="{{ item.quantidade }}" min="1">
+                                </td>
+                                <td>
+                                    <input type="number" step="0.01" name="preco[]" class="form-control form-control-sm row-preco" value="{{ item.preco_unitario|floatformat:2 }}">
+                                </td>
+                                <td class="align-middle"><span class="row-total fw-bold text-nowrap">R$ {{ item.total_item|floatformat:2 }}</span></td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary btn-copiar">Copiar</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger btn-remover">Remover</button>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr class="item-row">
+                                <td>
+                                    <select class="form-select form-select-sm row-categoria">
+                                        <option value="">Selecione a categoria</option>
+                                        {% for c in categorias %}
+                                        <option value="{{ c.id }}">{{ c.nome }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm row-produto" name="produto_id[]">
+                                        <option value="">— Selecione a categoria primeiro —</option>
+                                    </select>
+                                </td>
+                                <td><input type="number" name="quantidade[]" class="form-control form-control-sm row-qtd" value="1" min="1"></td>
+                                <td><input type="number" step="0.01" name="preco[]" class="form-control form-control-sm row-preco" placeholder="0,00"></td>
+                                <td class="align-middle"><span class="row-total fw-bold text-nowrap">R$ 0,00</span></td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary btn-copiar">Copiar</button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger btn-remover">Remover</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary px-5">Salvar alterações</button>
+        <a href="{% url 'detalhe_venda' venda.id %}" class="btn btn-outline-secondary">Cancelar</a>
+    </form>
+</div>
+
+<script>
+(function() {
+    const API_PRODUTOS = '{% url "api_produtos_por_categoria" %}';
+    const corpo = document.getElementById('corpo-itens');
+
+    function carregarProdutos(selectProduto, categoriaId, produtoIdSelecionado) {
+        if (!categoriaId) {
+            selectProduto.innerHTML = '<option value="">— Selecione a categoria primeiro —</option>';
+            return Promise.resolve();
+        }
+        return fetch(API_PRODUTOS + '?categoria_id=' + categoriaId).then(r => r.json()).then(function(produtos) {
+            selectProduto.innerHTML = '<option value="">Selecione o produto...</option>';
+            produtos.forEach(function(p) {
+                var opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.nome;
+                opt.dataset.preco = p.preco_venda || '0';
+                selectProduto.appendChild(opt);
+                if (String(p.id) === String(produtoIdSelecionado)) opt.selected = true;
+            });
+        });
+    }
+
+    function atualizarTotalRow(row) {
+        var qtd = parseFloat(row.querySelector('.row-qtd').value) || 0;
+        var preco = parseFloat(row.querySelector('.row-preco').value) || 0;
+        var el = row.querySelector('.row-total');
+        if (el) el.textContent = 'R$ ' + (qtd * preco).toFixed(2).replace('.', ',');
+    }
+
+    function novaLinha() {
+        var tr = document.createElement('tr');
+        tr.className = 'item-row';
+        tr.innerHTML = '<td><select class="form-select form-select-sm row-categoria"><option value="">Selecione a categoria</option>{% for c in categorias %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}</select></td><td><select class="form-select form-select-sm row-produto" name="produto_id[]"><option value="">— Selecione a categoria primeiro —</option></select></td><td><input type="number" name="quantidade[]" class="form-control form-control-sm row-qtd" value="1" min="1"></td><td><input type="number" step="0.01" name="preco[]" class="form-control form-control-sm row-preco" placeholder="0,00"></td><td class="align-middle"><span class="row-total fw-bold text-nowrap">R$ 0,00</span></td><td class="text-center"><button type="button" class="btn btn-sm btn-outline-secondary btn-copiar">Copiar</button><button type="button" class="btn btn-sm btn-outline-danger btn-remover">Remover</button></td>';
+        var cat = tr.querySelector('.row-categoria');
+        var prod = tr.querySelector('.row-produto');
+        cat.addEventListener('change', function() {
+            carregarProdutos(prod, this.value || null, null);
+            tr.querySelector('.row-preco').value = '';
+            atualizarTotalRow(tr);
+        });
+        prod.addEventListener('change', function() {
+            var opt = this.options[this.selectedIndex];
+            if (opt && opt.value) tr.querySelector('.row-preco').value = opt.dataset.preco || '';
+            atualizarTotalRow(tr);
+        });
+        tr.querySelector('.row-qtd').addEventListener('input', function() { atualizarTotalRow(tr); });
+        tr.querySelector('.row-preco').addEventListener('input', function() { atualizarTotalRow(tr); });
+        tr.querySelector('.btn-copiar').addEventListener('click', function() {
+            var r = tr;
+            var nova = novaLinha();
+            corpo.appendChild(nova);
+            nova.querySelector('.row-categoria').value = r.querySelector('.row-categoria').value;
+            var pid = r.querySelector('.row-produto').value;
+            var qtd = r.querySelector('.row-qtd').value;
+            var preco = r.querySelector('.row-preco').value;
+            carregarProdutos(nova.querySelector('.row-produto'), r.querySelector('.row-categoria').value || null, pid).then(function() {
+                nova.querySelector('.row-produto').value = pid;
+                nova.querySelector('.row-qtd').value = qtd;
+                nova.querySelector('.row-preco').value = preco;
+                atualizarTotalRow(nova);
+            });
+        });
+        tr.querySelector('.btn-remover').addEventListener('click', function() {
+            if (corpo.querySelectorAll('.item-row').length > 1) tr.remove();
+        });
+        carregarProdutos(prod, null);
+        return tr;
+    }
+
+    document.getElementById('btn-adicionar').addEventListener('click', function() {
+        corpo.appendChild(novaLinha());
+    });
+
+    corpo.querySelectorAll('.item-row').forEach(function(row) {
+        var cat = row.querySelector('.row-categoria');
+        var prod = row.querySelector('.row-produto');
+        if (cat.value) carregarProdutos(prod, cat.value, prod.value);
+        cat.addEventListener('change', function() {
+            carregarProdutos(prod, this.value || null, null);
+            row.querySelector('.row-preco').value = '';
+            atualizarTotalRow(row);
+        });
+        prod.addEventListener('change', function() {
+            var opt = this.options[this.selectedIndex];
+            if (opt && opt.value) row.querySelector('.row-preco').value = opt.dataset.preco || '';
+            atualizarTotalRow(row);
+        });
+        row.querySelector('.row-qtd').addEventListener('input', function() { atualizarTotalRow(row); });
+        row.querySelector('.row-preco').addEventListener('input', function() { atualizarTotalRow(row); });
+        row.querySelector('.btn-copiar').addEventListener('click', function() {
+            var nova = novaLinha();
+            corpo.appendChild(nova);
+            nova.querySelector('.row-categoria').value = cat.value;
+            var pid = prod.value;
+            carregarProdutos(nova.querySelector('.row-produto'), cat.value || null, pid).then(function() {
+                nova.querySelector('.row-produto').value = pid;
+                nova.querySelector('.row-qtd').value = row.querySelector('.row-qtd').value;
+                nova.querySelector('.row-preco').value = row.querySelector('.row-preco').value;
+                atualizarTotalRow(nova);
+            });
+        });
+        row.querySelector('.btn-remover').addEventListener('click', function() {
+            if (corpo.querySelectorAll('.item-row').length > 1) row.remove();
+        });
+    });
+})();
+</script>
+{% endblock %}

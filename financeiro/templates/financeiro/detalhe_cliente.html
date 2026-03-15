@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Extrato: {{ cliente.nome }}</h2>
+        <h3 class="text-danger">Dívida Atual: R$ {{ cliente.saldo_devedor|floatformat:2 }}</h3>
+    </div>
+
+    <div class="row">
+        <div class="col-md-7">
+            <h4>Histórico de Compras</h4>
+            {% for venda in vendas %}
+            <div class="card mb-3 shadow-sm">
+                <div class="card-header bg-light d-flex justify-content-between">
+                    <span>Pedido #{{ venda.id }}</span>
+                    <span>{{ venda.data_venda|date:"d/m/Y" }}</span>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Produto</th>
+                                <th>Qtd</th>
+                                <th>Preço Un.</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in venda.itens.all %}
+                            <tr>
+                                <td>{{ item.variacao.produto_pai.nome }} ({{ item.variacao.cor }})</td>
+                                <td>{{ item.quantidade }}</td>
+                                <td>R$ {{ item.preco_unitario }}</td>
+                                <td>R$ {{ item.total_item|floatformat:2 }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% empty %}
+            <p>Nenhuma compra registada.</p>
+            {% endfor %}
+        </div>
+
+        <div class="col-md-5">
+            <h4>Pagamentos Realizados</h4>
+            <ul class="list-group">
+                {% for pagamento in pagamentos %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    {{ pagamento.data_pagamento|date:"d/m/Y" }}
+                    <span class="badge bg-success rounded-pill">R$ {{ pagamento.valor }}</span>
+                </li>
+                {% empty %}
+                <li class="list-group-item">Nenhum pagamento recebido ainda.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

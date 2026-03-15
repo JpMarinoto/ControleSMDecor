@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container pb-5">
+    <div class="bg-white p-4 shadow-sm rounded mb-4 border-start border-4 {% if cliente.saldo_devedor > 0 %}border-danger{% else %}border-success{% endif %}">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="mb-1">{{ cliente.nome }}</h2>
+                <p class="text-muted mb-0"><i class="bi bi-telephone"></i> {{ cliente.telefone|default:"Sem telefone" }}</p>
+            </div>
+            <div class="text-end">
+                <small class="text-muted d-block text-uppercase fw-bold">Saldo Devedor Atual</small>
+                <h3 class="{% if cliente.saldo_devedor > 0 %}text-danger{% else %}text-success{% endif %}">
+                    R$ {{ cliente.saldo_devedor|floatformat:2 }}
+                </h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-7">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <span><i class="bi bi-cart3"></i> Histórico de Vendas</span>
+                    <form method="get" class="d-flex flex-wrap align-items-center gap-2" id="filtro-vendas">
+                        <input type="hidden" name="periodo" id="periodo-field" value="{{ periodo }}">
+                        <select class="form-select form-select-sm" style="width: auto;" id="periodo-select">
+                            <option value="" {% if not periodo %}selected{% endif %}>Todas</option>
+                            <option value="dia" {% if periodo == 'dia' %}selected{% endif %}>Último dia</option>
+                            <option value="semana" {% if periodo == 'semana' %}selected{% endif %}>Última semana</option>
+                            <option value="mes" {% if periodo == 'mes' %}selected{% endif %}>Último mês</option>
+                            <option value="personalizado" {% if periodo == 'personalizado' %}selected{% endif %}>Personalizado</option>
+                        </select>
+                        <span id="range-personalizado" class="d-none align-items-center gap-1">
+                            <input type="date" name="data_inicio" class="form-control form-control-sm" style="width: auto;" value="{{ data_inicio }}">
+                            <span>até</span>
+                            <input type="date" name="data_fim" class="form-control form-control-sm" style="width: auto;" value="{{ data_fim }}">
+                        </span>
+                        <button type="submit" class="btn btn-sm btn-light">Filtrar</button>
+                    </form>
+                </div>
+                <div class="card-body bg-white p-0">
+                    <div class="p-2 border-bottom bg-light d-flex flex-wrap align-items-center gap-2 no-print">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="sel-todas">Selecionar todas</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="sel-nenhuma">Desmarcar</button>
+                        <button type="button" class="btn btn-sm btn-primary ms-2" id="ver-relatorio" data-relatorio-url="{% url 'relatorio_vendas_cliente' cliente.id %}">Ver relatório das selecionadas</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="text-center" style="width: 50px;">
+                                        <input type="checkbox" class="form-check-input" id="check-todas" title="Selecionar todas">
+                                    </th>
+                                    <th>Data</th>
+                                    <th>Produtos</th>
+                                    <th class="text-end">Total</th>
+                                    <th class="text-center" style="width: 140px;">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for venda in vendas %}
+                                <tr>
+                                    <td class="text-center align-middle">
+                                        <input type="checkbox" class="form-check-input venda-check" value="{{ venda.id }}" data-venda-id="{{ venda.id }}">
+                                    </td>
+                                    <td>{{ venda.data_venda|date:"d/m/Y H:i" }}</td>
+                                    <td>
+                                        {% for item in venda.itens.all %}
+                                            <small class="d-block text-muted">• {{ item.quantidade }}x {{ item.produto.nome }}</small>
+                                        {% endfor %}
+                                    </td>
+                                    <td class="text-end fw-bold">R$ {{ venda.total_venda|floatformat:2 }}</td>
+                                    <td class="text-center">
+                                        <a href="{% url 'detalhe_venda' venda.id %}" class="btn btn-sm btn-outline-primary" title="Ver / Imprimir">Ver</a>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="5" class="text-center py-3 text-muted">Nenhuma venda registrada{% if periodo %} no período{% endif %}.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-success text-white fw-bold">
+                    <i class="bi bi-cash-coin"></i> Histórico de Pagamentos
+                </div>
+                <div class="card-body bg-white p-0">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Data</th>
+                                <th class="text-end">Valor Pago</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in pagamentos %}
+                            <tr>
+                                <td>{{ p.data_pagamento|date:"d/m/Y" }}</td>
+                                <td class="text-end text-success fw-bold">R$ {{ p.valor|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center py-3 text-muted">Nenhum pagamento efetuado.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="{% url 'lista_clientes' %}" class="btn btn-outline-secondary">Voltar para Lista</a>
+        <a href="{% url 'gerir_caixa' %}" class="btn btn-primary">Lançar Pagamento</a>
+    </div>
+</div>
+<script>
+(function() {
+    var sel = document.getElementById('periodo-select');
+    var field = document.getElementById('periodo-field');
+    var range = document.getElementById('range-personalizado');
+    var form = document.getElementById('filtro-vendas');
+    function atualizar() {
+        var v = sel.value;
+        field.value = v;
+        if (v === 'personalizado') {
+            range.classList.remove('d-none');
+            range.classList.add('d-flex');
+        } else {
+            range.classList.add('d-none');
+            range.classList.remove('d-flex');
+        }
+    }
+    sel.addEventListener('change', function() {
+        atualizar();
+        if (sel.value !== 'personalizado') form.submit();
+    });
+    atualizar();
+})();
+
+(function() {
+    var checkTodas = document.getElementById('check-todas');
+    var checks = document.querySelectorAll('.venda-check');
+    var btnSelTodas = document.getElementById('sel-todas');
+    var btnSelNenhuma = document.getElementById('sel-nenhuma');
+    var btnVerRelatorio = document.getElementById('ver-relatorio');
+
+    function atualizarCheckTodas() {
+        if (!checkTodas) return;
+        var n = checks.length;
+        var marcados = document.querySelectorAll('.venda-check:checked').length;
+        checkTodas.checked = n > 0 && marcados === n;
+        checkTodas.indeterminate = n > 0 && marcados > 0 && marcados < n;
+    }
+
+    if (checkTodas) {
+        checkTodas.addEventListener('change', function() {
+            checks.forEach(function(c) { c.checked = checkTodas.checked; });
+        });
+    }
+    checks.forEach(function(c) {
+        c.addEventListener('change', atualizarCheckTodas);
+    });
+    if (btnSelTodas) btnSelTodas.addEventListener('click', function() {
+        checkTodas.checked = true;
+        checks.forEach(function(c) { c.checked = true; });
+        atualizarCheckTodas();
+    });
+    if (btnSelNenhuma) btnSelNenhuma.addEventListener('click', function() {
+        checkTodas.checked = false;
+        checkTodas.indeterminate = false;
+        checks.forEach(function(c) { c.checked = false; });
+    });
+    if (btnVerRelatorio) btnVerRelatorio.addEventListener('click', function() {
+        var ids = [];
+        document.querySelectorAll('.venda-check:checked').forEach(function(c) {
+            ids.push(c.value);
+        });
+        if (ids.length === 0) {
+            alert('Selecione pelo menos uma venda para gerar o relatório.');
+            return;
+        }
+        var baseUrl = document.getElementById('ver-relatorio').getAttribute('data-relatorio-url');
+        window.location.href = baseUrl + '?vendas=' + ids.join(',');
+    });
+    atualizarCheckTodas();
+})();
+</script>
+{% endblock %}

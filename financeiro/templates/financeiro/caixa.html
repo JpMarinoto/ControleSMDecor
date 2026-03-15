@@ -1,0 +1,53 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-pt">
+<head>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'financeiro/css/caixa.css' %}">
+</head>
+<body class="bg-light p-4">
+<div class="container">
+    <h2>Movimentação de Caixa</h2>
+    
+    <div class="caixa-container">
+        <div class="form-section">
+            <h4 class="text-success">Receber de Cliente</h4>
+            <form method="POST">
+                {% csrf_token %}
+                <input type="hidden" name="tipo" value="pagamento_cliente">
+                <div class="mb-3">
+                    <label>Cliente</label>
+                    <select name="cliente" class="form-select" required>
+                        {% for c in clientes %}
+                        <option value="{{ c.id }}">{{ c.nome }} (Deve: R$ {{ c.saldo_devedor|floatformat:2 }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label>Valor Pago (R$)</label>
+                    <input type="number" step="0.01" name="valor" class="form-control" placeholder="0.00" required>
+                </div>
+                <button type="submit" class="btn-entrada">Confirmar Recebimento</button>
+            </form>
+        </div>
+
+        <div class="form-section">
+            <h4 class="text-danger">Registar Despesa</h4>
+            <form method="POST">
+                {% csrf_token %}
+                <input type="hidden" name="tipo" value="despesa_geral">
+                <div class="mb-3">
+                    <label>Descrição</label>
+                    <input type="text" name="descricao" class="form-control" placeholder="Ex: Rolo Dupla-face" required>
+                </div>
+                <div class="mb-3">
+                    <label>Valor (R$)</label>
+                    <input type="number" step="0.01" name="valor" class="form-control" placeholder="0.00" required>
+                </div>
+                <button type="submit" class="btn-saida">Lançar Saída</button>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

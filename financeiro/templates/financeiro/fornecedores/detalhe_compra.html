@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container pb-5">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-receipt"></i> Compra #{{ compra.id }}</h2>
+        <a href="{% url 'detalhe_fornecedor' compra.fornecedor_id %}" class="btn btn-outline-secondary">← Voltar ao extrato do fornecedor</a>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <p class="mb-1"><strong>Fornecedor:</strong> {{ compra.fornecedor.nome }}</p>
+                    {% if compra.fornecedor.telefone %}<p class="mb-1 text-muted small">{{ compra.fornecedor.telefone }}</p>{% endif %}
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="mb-1"><strong>Data:</strong> {{ compra.data_compra|date:"d/m/Y H:i" }}</p>
+                    <p class="mb-0"><strong>Compra nº:</strong> {{ compra.id }}</p>
+                </div>
+            </div>
+            <hr>
+            <table class="table table-bordered mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Material</th>
+                        <th class="text-center" style="width: 100px;">Qtd</th>
+                        <th class="text-end" style="width: 120px;">Preço un. (R$)</th>
+                        <th class="text-end" style="width: 120px;">Total (R$)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>{{ compra.material.nome }}</td>
+                        <td class="text-center">{{ compra.quantidade }}</td>
+                        <td class="text-end">R$ {{ compra.preco_no_dia|floatformat:2 }}</td>
+                        <td class="text-end">R$ {{ compra.total_compra|floatformat:2 }}</td>
+                    </tr>
+                </tbody>
+                <tfoot class="table-light">
+                    <tr>
+                        <th colspan="3" class="text-end">Total da compra:</th>
+                        <th class="text-end">R$ {{ compra.total_compra|floatformat:2 }}</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

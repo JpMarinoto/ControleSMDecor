@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    {% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+    </div>
+    {% endfor %}
+    {% endif %}
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-box-seam"></i> Catálogo de Produtos</h2>
+        <div class="btn-group">
+            <a href="{% url 'lista_categorias' %}" class="btn btn-outline-secondary">Categorias</a>
+            <a href="{% url 'novo_produto' %}" class="btn btn-primary">+ Novo Produto</a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width: 80px;">ID</th>
+                    <th>Nome</th>
+                    <th>Categoria</th>
+                    <th>Preço Venda (R$)</th>
+                    <th class="text-center">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for produto in produtos %}
+                <tr>
+                    <td><span class="badge bg-secondary">#{{ produto.id }}</span></td>
+                    <td><strong>{{ produto.nome }}</strong></td>
+                    <td>{{ produto.categoria.nome|default:"Sem categoria" }}</td>
+                    <td>R$ {{ produto.preco_venda|floatformat:2 }}</td>
+                    <td class="text-center">
+                        <div class="btn-group">
+                            <a href="{% url 'editar_produto' produto.id %}" class="btn btn-sm btn-warning" title="Editar">✏️</a>
+                            <a href="{% url 'excluir_produto' produto.id %}" class="btn btn-sm btn-danger" onclick="return confirm('Excluir produto?')" title="Excluir">🗑️</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" class="text-center py-4 text-muted">Nenhum produto cadastrado no sistema.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+/* financeiro/static/financeiro/css/dashboard.css */
+body { 
+    background-color: #f8f9fa; 
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+}
+
+.card-financeiro { 
+    border: none; 
+    border-radius: 15px; 
+    color: white; 
+    transition: 0.3s; 
+}
+
+.card-financeiro:hover { 
+    transform: translateY(-5px); 
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1); 
+}
+
+/* Estilo para o Total a Receber baseado no saldo devedor do cliente */
+.bg-receber { 
+    background: linear-gradient(45deg, #2980b9, #3498db); 
+} 
+
+/* Estilo para Entradas (Pagamentos) */
+.bg-entrada { 
+    background: linear-gradient(45deg, #27ae60, #2ecc71); 
+} 
+
+/* Estilo para Saídas (Despesas) */
+.bg-saida { 
+    background: linear-gradient(45deg, #c0392b, #e74c3c); 
+}   
+
+.value { 
+    font-size: 2rem; 
+    font-weight: bold; 
+}
+
+.dashboard-total tr td {
+    padding: 0.5rem 0.75rem;
+    vertical-align: middle;
+}

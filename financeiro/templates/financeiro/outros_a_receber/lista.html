@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-wallet2"></i> Outros a receber</h2>
+        <a href="{% url 'novo_outros_a_receber' %}" class="btn btn-success">+ Adicionar</a>
+    </div>
+    <p class="text-muted">Valores a receber de outras fontes: e-commerce, marketplace, etc.</p>
+
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Descrição</th>
+                    <th>Data prevista</th>
+                    <th class="text-end">Valor (R$)</th>
+                    <th class="text-center">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in itens %}
+                <tr>
+                    <td><strong>{{ item.descricao }}</strong></td>
+                    <td>{{ item.data_prevista|date:"d/m/Y"|default:"—" }}</td>
+                    <td class="text-end text-success fw-bold">R$ {{ item.valor|floatformat:2 }}</td>
+                    <td class="text-center">
+                        <a href="{% url 'editar_outros_a_receber' item.id %}" class="btn btn-sm btn-outline-primary">Editar</a>
+                        <a href="{% url 'excluir_outros_a_receber' item.id %}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Excluir?')">Excluir</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="text-center py-4 text-muted">Nenhum item. Adicione o que você tem a receber (ex.: e-commerce).</td></tr>
+                {% endfor %}
+            </tbody>
+            {% if itens %}
+            <tfoot class="table-light">
+                <tr>
+                    <th colspan="2">Total a receber</th>
+                    <th class="text-end text-success">R$ {{ total|floatformat:2 }}</th>
+                    <th></th>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary mt-3">Voltar ao dashboard</a>
+</div>
+{% endblock %}

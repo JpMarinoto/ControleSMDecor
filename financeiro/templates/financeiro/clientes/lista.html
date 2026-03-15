@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-people"></i> Gestão de Clientes</h2>
+        <a href="{% url 'novo_cliente' %}" class="btn btn-primary">+ Novo Cliente</a>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>Nome</th>
+                    <th>Identificação (CPF/CNPJ)</th>
+                    <th>Telefone</th>
+                    <th>Endereço</th>
+                    <th>Saldo Devedor</th>
+                    <th class="text-center">Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cliente in clientes %}
+                <tr>
+                    <td><strong>{{ cliente.nome }}</strong></td>
+                    <td>{{ cliente.cpf|default:cliente.cnpj|default:"Não informado" }}</td>
+                    <td>{{ cliente.telefone|default:"---" }}</td>
+                    <td><small class="text-muted">{{ cliente.endereco|truncatechars:30|default:"---" }}</small></td>
+                    <td>
+                        <span class="badge {% if cliente.saldo_devedor > 0 %}bg-danger{% else %}bg-success{% endif %}">
+                            R$ {{ cliente.saldo_devedor|floatformat:2 }}
+                        </span>
+                    </td>
+                    <td class="text-center">
+                        <div class="btn-group">
+                            <a href="{% url 'detalhe_cliente' cliente.id %}" class="btn btn-sm btn-info" title="Ver Extrato">📋</a>
+                            <a href="{% url 'editar_cliente' cliente.id %}" class="btn btn-sm btn-warning" title="Editar">✏️</a>
+                            <a href="{% url 'excluir_cliente' cliente.id %}" class="btn btn-sm btn-danger" 
+                               onclick="return confirm('Apagar este cliente?')" title="Excluir">🗑️</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center py-4 text-muted">Nenhum cliente cadastrado.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

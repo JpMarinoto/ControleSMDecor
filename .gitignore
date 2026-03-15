@@ -1,0 +1,34 @@
+# Python / Django
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.log
+
+# Arquivos de ambiente / segredos
+.env
+.env.*
+*.env
+
+# Node / Vite (frontend)
+node_modules/
+Financial Control System/node_modules/
+Financial Control System/dist/
+Financial Control System/.vite/
+Financial Control System/.turbo/
+Financial Control System/.eslintcache
+
+# Arquivos de build / estáticos gerados
+staticfiles/
+media/
+
+# Arquivos temporários / sistema operacional
+.DS_Store
+Thumbs.db
+*.swp
+
+# Configurações de IDE / editor
+.vscode/
+.idea/
+.cursor/
+

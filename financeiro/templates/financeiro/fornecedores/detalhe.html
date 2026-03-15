@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container pb-5">
+    <div class="bg-white p-4 shadow-sm rounded mb-4 border-start border-4 {% if fornecedor.saldo_devedor > 0 %}border-danger{% else %}border-success{% endif %}">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="mb-1">{{ fornecedor.nome }}</h2>
+                <p class="text-muted mb-0"><i class="bi bi-telephone"></i> {{ fornecedor.telefone|default:"Sem telefone" }}</p>
+            </div>
+            <div class="text-end">
+                <small class="text-muted d-block text-uppercase fw-bold">Valor que devo ao fornecedor</small>
+                <h3 class="{% if fornecedor.saldo_devedor > 0 %}text-danger{% else %}text-success{% endif %}">
+                    R$ {{ fornecedor.saldo_devedor|floatformat:2 }}
+                </h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-7">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white fw-bold d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <span><i class="bi bi-cart-plus"></i> Histórico de Compras</span>
+                    <form method="get" class="d-flex flex-wrap align-items-center gap-2" id="filtro-compras">
+                        <input type="hidden" name="periodo" id="periodo-field" value="{{ periodo }}">
+                        <select class="form-select form-select-sm" style="width: auto;" id="periodo-select">
+                            <option value="" {% if not periodo %}selected{% endif %}>Todas</option>
+                            <option value="dia" {% if periodo == 'dia' %}selected{% endif %}>Último dia</option>
+                            <option value="semana" {% if periodo == 'semana' %}selected{% endif %}>Última semana</option>
+                            <option value="mes" {% if periodo == 'mes' %}selected{% endif %}>Último mês</option>
+                            <option value="personalizado" {% if periodo == 'personalizado' %}selected{% endif %}>Personalizado</option>
+                        </select>
+                        <span id="range-personalizado" class="d-none align-items-center gap-1">
+                            <input type="date" name="data_inicio" class="form-control form-control-sm" style="width: auto;" value="{{ data_inicio }}">
+                            <span>até</span>
+                            <input type="date" name="data_fim" class="form-control form-control-sm" style="width: auto;" value="{{ data_fim }}">
+                        </span>
+                        <button type="submit" class="btn btn-sm btn-light">Filtrar</button>
+                    </form>
+                </div>
+                <div class="card-body bg-white p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Material / Descrição</th>
+                                    <th class="text-center">Qtd</th>
+                                    <th class="text-end">Preço un.</th>
+                                    <th class="text-end">Total</th>
+                                    <th class="text-center" style="width: 90px;">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for compra in compras %}
+                                <tr>
+                                    <td>{{ compra.data_compra|date:"d/m/Y H:i" }}</td>
+                                    <td>{{ compra.material.nome }}</td>
+                                    <td class="text-center">{{ compra.quantidade }}</td>
+                                    <td class="text-end">R$ {{ compra.preco_no_dia|floatformat:2 }}</td>
+                                    <td class="text-end fw-bold">R$ {{ compra.total_compra|floatformat:2 }}</td>
+                                    <td class="text-center">
+                                        <a href="{% url 'detalhe_compra' compra.id %}" class="btn btn-sm btn-outline-primary" title="Ver compra">Ver</a>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="6" class="text-center py-3 text-muted">Nenhuma compra registrada{% if periodo %} no período{% endif %}.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if compras and periodo %}
+                    <div class="p-2 bg-light border-top text-end">
+                        <strong>Total no período:</strong> R$ {{ total_compras_periodo|floatformat:2 }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-header bg-success text-white fw-bold py-2">
+                    <i class="bi bi-cash-coin"></i> Dar baixa (Lançar pagamento)
+                </div>
+                <div class="card-body">
+                    <form action="{% url 'pagar_fornecedor' fornecedor.id %}" method="post" class="row g-2 align-items-end">
+                        {% csrf_token %}
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">Valor pago (R$)</label>
+                            <input type="number" step="0.01" name="valor" class="form-control" placeholder="0,00" required>
+                        </div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-success w-100">Confirmar pagamento</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-secondary text-white fw-bold">
+                    <i class="bi bi-check2-circle"></i> Pagamentos realizados
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Data</th>
+                                <th class="text-end">Valor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in pagamentos %}
+                            <tr>
+                                <td>{{ p.data_pagamento|date:"d/m/Y H:i" }}</td>
+                                <td class="text-end text-success fw-bold">R$ {{ p.valor|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center py-3 text-muted">Nenhum pagamento registrado.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="{% url 'lista_fornecedores' %}" class="btn btn-outline-secondary">Voltar para lista</a>
+        <a href="{% url 'registrar_compra' %}" class="btn btn-primary">Nova compra</a>
+    </div>
+</div>
+
+<script>
+(function() {
+    var sel = document.getElementById('periodo-select');
+    var field = document.getElementById('periodo-field');
+    var range = document.getElementById('range-personalizado');
+    var form = document.getElementById('filtro-compras');
+    function atualizar() {
+        var v = sel.value;
+        field.value = v;
+        if (v === 'personalizado') {
+            range.classList.remove('d-none');
+            range.classList.add('d-flex');
+        } else {
+            range.classList.add('d-none');
+            range.classList.remove('d-flex');
+        }
+    }
+    if (sel) sel.addEventListener('change', function() {
+        atualizar();
+        if (sel.value !== 'personalizado') form.submit();
+    });
+    atualizar();
+})();
+</script>
+{% endblock %}

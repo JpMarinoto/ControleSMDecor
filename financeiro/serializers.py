@@ -1,0 +1,204 @@
+"""
+Serializers para a API REST consumida pelo frontend React (Financial Control System).
+"""
+from rest_framework import serializers
+from decimal import Decimal
+from .models import (
+    Cliente,
+    Fornecedor,
+    Produto,
+    Material,
+    CategoriaProduto,
+    Venda,
+    ItemVenda,
+    CompraMaterial,
+    OrdemCompra,
+    Pagamento,
+    PagamentoFornecedor,
+    MovimentoCaixa,
+    ContaBanco,
+)
+
+
+class ClienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cliente
+        fields = [
+            'id', 'ativo', 'nome', 'cpf', 'cnpj', 'telefone', 'chave_pix',
+            'endereco', 'logradouro', 'bairro', 'numero', 'ponto_referencia', 'cep', 'cidade', 'estado',
+        ]
+
+
+class FornecedorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Fornecedor
+        fields = [
+            'id', 'nome', 'cpf', 'cnpj', 'telefone', 'chave_pix',
+            'endereco', 'logradouro', 'bairro', 'numero', 'ponto_referencia', 'cep', 'cidade', 'estado',
+        ]
+
+
+class CategoriaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CategoriaProduto
+        fields = ['id', 'nome', 'tipo', 'descricao']
+
+
+class ProdutoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Produto
+        fields = ['id', 'ativo', 'nome', 'categoria', 'preco_venda', 'descricao']
+
+
+class MaterialSerializer(serializers.ModelSerializer):
+    nome = serializers.CharField()
+    precoUnitarioBase = serializers.DecimalField(source='preco_unitario_base', max_digits=10, decimal_places=2)
+
+    class Meta:
+        model = Material
+        fields = ['id', 'nome', 'precoUnitarioBase', 'estoque_atual', 'categoria', 'fornecedor_padrao']
+
+
+class ContaBancoSerializer(serializers.ModelSerializer):
+    saldo = serializers.DecimalField(source='saldo_atual', max_digits=12, decimal_places=2, read_only=True)
+    saldo_atual = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
+
+    class Meta:
+        model = ContaBanco
+        fields = ['id', 'nome', 'saldo', 'saldo_atual']
+
+
+# --- Vendas (formato esperado pelo front: clienteNome, data, total) ---
+class ItemVendaSerializer(serializers.ModelSerializer):
+    produto_nome = serializers.CharField(source='produto.nome', read_only=True)
+
+    class Meta:
+        model = ItemVenda
+        fields = ['id', 'produto', 'produto_nome', 'quantidade', 'preco_unitario']
+
+
+class VendaSerializer(serializers.ModelSerializer):
+    clienteNome = serializers.CharField(source='cliente.nome', read_only=True)
+    data = serializers.SerializerMethodField()
+    total = serializers.SerializerMethodField()
+    itens = ItemVendaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Venda
+        fields = ['id', 'cliente', 'clienteNome', 'data_venda', 'data', 'total', 'cancelada', 'itens']
+
+    def get_data(self, obj):
+        return obj.data_venda.date().isoformat() if obj.data_venda else None
+
+    def get_total(self, obj):
+        return float(obj.total_venda)
+
+    def create(self, validated_data):
+        itens_data = self.initial_data.get('itens', [])
+        cliente_id = validated_data.get('cliente')
+        if isinstance(cliente_id, Cliente):
+            cliente = cliente_id
+        else:
+            cliente = Cliente.objects.get(pk=cliente_id)
+        venda = Venda.objects.create(cliente=cliente)
+        for item in itens_data:
+            ItemVenda.objects.create(
+                venda=venda,
+                produto_id=item['produto'],
+                quantidade=item.get('quantidade', 1),
+                preco_unitario=item.get('preco_unitario', Produto.objects.get(pk=item['produto']).preco_venda),
+            )
+        return venda
+
+
+class VendaCreateSerializer(serializers.Serializer):
+    cliente = serializers.PrimaryKeyRelatedField(queryset=Cliente.objects.all())
+    itens = serializers.ListField(
+        child=serializers.DictField()
+    )
+
+
+# --- Compras (ordem com itens, como Venda) ---
+class ItemCompraSerializer(serializers.ModelSerializer):
+    material_nome = serializers.CharField(source='material.nome', read_only=True)
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CompraMaterial
+        fields = ['id', 'material', 'material_nome', 'quantidade', 'preco_no_dia', 'total']
+
+    def get_total(self, obj):
+        return float(obj.total_compra)
+
+
+class OrdemCompraSerializer(serializers.ModelSerializer):
+    fornecedor = serializers.CharField(source='fornecedor.nome', read_only=True)
+    fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
+    data = serializers.SerializerMethodField()
+    itens = ItemCompraSerializer(many=True, read_only=True)
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdemCompra
+        fields = ['id', 'fornecedor_id', 'fornecedor', 'data', 'itens', 'total']
+
+    def get_data(self, obj):
+        return obj.data_compra.date().isoformat() if obj.data_compra else None
+
+    def get_total(self, obj):
+        return float(obj.total_ordem)
+
+
+# Serializer para um item avulso (edição/exclusão/copiar)
+class CompraSerializer(serializers.ModelSerializer):
+    fornecedor = serializers.CharField(source='fornecedor.nome', read_only=True)
+    material_nome = serializers.CharField(source='material.nome', read_only=True)
+    fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
+    data = serializers.SerializerMethodField()
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CompraMaterial
+        fields = ['id', 'material', 'material_nome', 'fornecedor_id', 'fornecedor', 'quantidade', 'preco_no_dia', 'data_compra', 'data', 'total']
+
+    def get_data(self, obj):
+        return obj.data_compra.date().isoformat() if obj.data_compra else None
+
+    def get_total(self, obj):
+        return float(obj.total_compra)
+
+    def create(self, validated_data):
+        validated_data.pop('fornecedor_id', None)
+        return CompraMaterial.objects.create(**validated_data)
+
+
+# --- Transações (entradas/saídas genéricas + pagamentos) ---
+class TransacaoSerializer(serializers.Serializer):
+    id = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    amount = serializers.SerializerMethodField()
+    type = serializers.SerializerMethodField()
+    date = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    createdAt = serializers.SerializerMethodField()
+
+    def get_id(self, obj):
+        return obj.get('id')
+
+    def get_description(self, obj):
+        return obj.get('description', '')
+
+    def get_amount(self, obj):
+        return float(obj.get('amount', 0))
+
+    def get_type(self, obj):
+        return obj.get('type', 'expense')
+
+    def get_date(self, obj):
+        return obj.get('date', '')
+
+    def get_category(self, obj):
+        return obj.get('category', 'Outros')
+
+    def get_createdAt(self, obj):
+        return obj.get('createdAt', '')

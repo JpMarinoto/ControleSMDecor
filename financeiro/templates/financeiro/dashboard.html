@@ -1,0 +1,415 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'financeiro/css/dashboard.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid pb-5">
+    <h2 class="mb-3">Painel Principal</h2>
+
+    <!-- Gráficos: A receber | A pagar | Série semanal -->
+    <div class="row g-3 mb-3">
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-success text-white py-2">
+                    <strong>A receber</strong>
+                </div>
+                <div class="card-body d-flex align-items-center justify-content-center">
+                    <canvas id="chartReceber" height="160"></canvas>
+                </div>
+                <div class="card-footer bg-success bg-opacity-10 py-2 text-center">
+                    <strong>R$ {{ total_a_receber|floatformat:2 }}</strong>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-danger text-white py-2">
+                    <strong>A pagar</strong>
+                </div>
+                <div class="card-body d-flex align-items-center justify-content-center">
+                    <canvas id="chartPagar" height="160"></canvas>
+                </div>
+                <div class="card-footer bg-danger bg-opacity-10 py-2 text-center">
+                    <strong>R$ {{ total_dividas_fornecedores|floatformat:2 }}</strong>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-primary text-white py-2">
+                    <strong>Total geral — semanal (caixa ao fim da semana)</strong>
+                </div>
+                <div class="card-body">
+                    <canvas id="chartSemanal" height="160"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Total | A Receber | A Pagar | Histórico + Últimos pagamentos -->
+    <div class="row g-3">
+        <!-- Total -->
+        <div class="col-lg-3">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-dark text-white py-2">
+                    <strong>Total</strong>
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-borderless mb-0 dashboard-total">
+                        <tbody>
+                            <tr class="table-danger">
+                                <td class="ps-3">Dívidas Fornecedores</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ total_dividas_fornecedores|floatformat:2 }}</td>
+                            </tr>
+                            <tr class="table-warning">
+                                <td class="ps-3">Dívidas Gerais</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ dividas_gerais|floatformat:2 }}</td>
+                            </tr>
+                            <tr class="table-success">
+                                <td class="ps-3">Clientes (a receber)</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ total_a_receber|floatformat:2 }}</td>
+                            </tr>
+                            <tr class="table-success" style="background-color: #d1e7dd;">
+                                <td class="ps-3">Outros a receber</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ total_outros_a_receber|floatformat:2 }}</td>
+                            </tr>
+                            <tr style="background-color: #cce5ff;">
+                                <td class="ps-3">Saldo banco</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ saldo_banco|floatformat:2 }}</td>
+                            </tr>
+                            <tr style="background-color: #cfe2ff;">
+                                <td class="ps-3">Estoque</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ valor_estoque|floatformat:2 }}</td>
+                            </tr>
+                            <tr class="table-primary">
+                                <td class="ps-3 fw-bold">Saldo</td>
+                                <td class="text-end pe-3 fw-bold">R$ {{ saldo_geral|floatformat:2 }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- A Receber -->
+        <div class="col-lg-3">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-success text-white py-2 d-flex justify-content-between align-items-center">
+                    <strong>A Receber</strong>
+                    <a href="{% url 'lista_clientes' %}" class="btn btn-sm btn-light">Clientes</a>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 280px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr><th>Cliente</th><th class="text-end">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for item in clientes_a_receber %}
+                            <tr>
+                                <td><a href="{% url 'detalhe_cliente' item.id %}">{{ item.nome }}</a></td>
+                                <td class="text-end fw-bold text-success">R$ {{ item.valor|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center text-muted py-3">Nenhum valor a receber.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-footer bg-success bg-opacity-10 py-2">
+                    <strong>Total: R$ {{ total_a_receber|floatformat:2 }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- A Pagar -->
+        <div class="col-lg-3">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-danger text-white py-2 d-flex justify-content-between align-items-center">
+                    <strong>A Pagar</strong>
+                    <a href="{% url 'lista_fornecedores' %}" class="btn btn-sm btn-light">Fornecedores</a>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 280px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr><th>Fornecedor</th><th class="text-end">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for item in fornecedores_a_pagar %}
+                            <tr>
+                                <td><a href="{% url 'detalhe_fornecedor' item.id %}">{{ item.nome }}</a></td>
+                                <td class="text-end fw-bold text-danger">R$ {{ item.valor|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center text-muted py-3">Nenhum valor a pagar.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-footer bg-danger bg-opacity-10 py-2">
+                    <strong>Total: R$ {{ total_dividas_fornecedores|floatformat:2 }}</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Histórico de saídas + Últimos pagamentos -->
+        <div class="col-lg-3">
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-header bg-danger bg-opacity-10 py-2 d-flex justify-content-between align-items-center">
+                    <strong>Histórico de saídas</strong>
+                    <a href="{% url 'lista_movimentacoes' %}" class="btn btn-sm btn-outline-danger">Ver todas</a>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 140px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr><th>Data</th><th>Descrição</th><th class="text-end">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for s in historico_saidas %}
+                            <tr>
+                                <td>{{ s.data|date:"d/m" }}</td>
+                                <td class="small text-truncate" style="max-width:90px;">{{ s.descricao }}</td>
+                                <td class="text-end text-danger">− {{ s.valor|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="text-center text-muted small">Nenhuma saída.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-success bg-opacity-10 py-2">
+                    <strong>Últimos pagamentos (recebidos)</strong>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 140px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr><th>Data</th><th>Descrição</th><th class="text-end">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for p in ultimos_pagamentos %}
+                            <tr>
+                                <td>{{ p.data|date:"d/m" }}</td>
+                                <td class="small text-truncate" style="max-width:90px;">{{ p.descricao }}</td>
+                                <td class="text-end text-success">+ {{ p.valor|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="text-center text-muted small">Nenhum recebimento.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cadastro rápido -->
+    <div class="mt-3">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-secondary text-white py-2">
+                <strong>Cadastro</strong>
+            </div>
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="{% url 'lista_clientes' %}" class="btn btn-sm btn-outline-primary">Clientes</a>
+                    <a href="{% url 'lista_fornecedores' %}" class="btn btn-sm btn-outline-primary">Fornecedores</a>
+                    <a href="{% url 'lista_produtos' %}" class="btn btn-sm btn-outline-primary">Produtos</a>
+                    <a href="{% url 'lista_materiais' %}" class="btn btn-sm btn-outline-primary">Materiais</a>
+                    <a href="{% url 'lista_categorias' %}" class="btn btn-sm btn-outline-secondary">Categorias</a>
+                    <a href="{% url 'gerir_caixa' %}" class="btn btn-sm btn-success">Caixa</a>
+                    <a href="{% url 'conta_banco' %}" class="btn btn-sm btn-outline-primary">Conta banco</a>
+                    <a href="{% url 'lista_dividas_gerais' %}" class="btn btn-sm btn-outline-warning">Dívidas gerais</a>
+                    <a href="{% url 'lista_outros_a_receber' %}" class="btn btn-sm btn-outline-success">Outros a receber</a>
+                    <a href="{% url 'lista_movimentacoes' %}" class="btn btn-sm btn-outline-danger">Saídas</a>
+                    <a href="{% url 'estoque_ajuste' %}" class="btn btn-sm btn-outline-primary">Estoque</a>
+                    <a href="{% url 'lista_logs' %}" class="btn btn-sm btn-outline-secondary">Logs</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diário Finanças | Estoque (à direita) -->
+    <div class="row g-3 mt-1">
+        <div class="col-lg-6">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-secondary text-white py-2 d-flex justify-content-between align-items-center">
+                    <strong>Diário Finanças</strong>
+                    <a href="{% url 'gerir_caixa' %}" class="btn btn-sm btn-light">Lançar</a>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 260px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Data</th>
+                                <th class="text-end">Saldo diário</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in diario_financas %}
+                            <tr>
+                                <td>{{ d.data|date:"d/m/Y" }}</td>
+                                <td class="text-end fw-bold">R$ {{ d.saldo_acumulado|floatformat:2 }}</td>
+                                <td>
+                                    <a href="{% url 'dashboard' %}?dia={{ d.data|date:'Y-m-d' }}" class="btn btn-sm btn-outline-primary">Ver</a>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="text-center text-muted py-2">Nenhum lançamento no período.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                    <strong>Estoque total</strong>
+                    <span class="badge bg-primary fs-6">R$ {{ soma_estoque|floatformat:2 }}</span>
+                </div>
+                <div class="card-body p-0 overflow-auto" style="max-height: 260px;">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light"><tr><th>Material</th><th class="text-center">Qtd</th><th class="text-end">Total</th></tr></thead>
+                        <tbody>
+                            {% for e in estoque_lista %}
+                            <tr>
+                                <td>{{ e.material.nome }}</td>
+                                <td class="text-center">{{ e.quantidade }}</td>
+                                <td class="text-end">R$ {{ e.total|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3" class="text-center text-muted py-2">Nenhum material em estoque.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-footer bg-light py-1">
+                    <a href="{% url 'estoque_ajuste' %}" class="btn btn-sm btn-outline-primary">Ajustar estoque</a>
+                    <a href="{% url 'lista_materiais' %}" class="btn btn-sm btn-outline-secondary">Materiais</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Detalhe do dia (saldo do último dia completo) -->
+{% if dia_detalhe %}
+<div class="modal fade show d-block" id="modalDetalheDia" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Saldo em {{ dia_detalhe.data|date:"d/m/Y" }}</h5>
+                <a href="{% url 'dashboard' %}" class="btn-close"></a>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">Caixa ao fim do dia + valores atuais (clientes, banco, etc.).</p>
+                <table class="table table-sm">
+                    <tr><td>Dívidas gerais</td><td class="text-end">R$ {{ dia_detalhe.dividas_gerais|floatformat:2 }}</td></tr>
+                    <tr><td>Clientes (a receber)</td><td class="text-end">R$ {{ dia_detalhe.total_a_receber|floatformat:2 }}</td></tr>
+                    <tr><td>Outros a receber</td><td class="text-end">R$ {{ dia_detalhe.total_outros_a_receber|floatformat:2 }}</td></tr>
+                    <tr><td>Saldo banco</td><td class="text-end">R$ {{ dia_detalhe.saldo_banco|floatformat:2 }}</td></tr>
+                    <tr><td>Estoque</td><td class="text-end">R$ {{ dia_detalhe.valor_estoque|floatformat:2 }}</td></tr>
+                    <tr class="table-info"><td><strong>Saldo do dia (caixa fim do dia)</strong></td><td class="text-end fw-bold">R$ {{ dia_detalhe.saldo_fim_dia|floatformat:2 }}</td></tr>
+                    <tr class="table-primary"><td><strong>Saldo total</strong></td><td class="text-end fw-bold">R$ {{ dia_detalhe.saldo_total_dia|floatformat:2 }}</td></tr>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <a href="{% url 'dashboard' %}" class="btn btn-primary">Fechar</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    var aReceber = {{ total_a_receber_js|default:0 }};
+    var aPagar = {{ total_dividas_fornecedores_js|default:0 }};
+
+    // Gráfico A receber (barra única)
+    var ctxReceber = document.getElementById('chartReceber');
+    if (ctxReceber) {
+        var vReceber = Math.max(0, parseFloat(aReceber));
+        new Chart(ctxReceber, {
+            type: 'bar',
+            data: {
+                labels: ['A receber'],
+                datasets: [{
+                    label: 'R$',
+                    data: [vReceber],
+                    backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                    borderColor: '#28a745',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true } }
+            }
+        });
+    }
+
+    // Gráfico A pagar (barra única)
+    var ctxPagar = document.getElementById('chartPagar');
+    if (ctxPagar) {
+        var vPagar = Math.max(0, parseFloat(aPagar));
+        new Chart(ctxPagar, {
+            type: 'bar',
+            data: {
+                labels: ['A pagar'],
+                datasets: [{
+                    label: 'R$',
+                    data: [vPagar],
+                    backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                    borderColor: '#dc3545',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: { x: { beginAtZero: true } }
+            }
+        });
+    }
+
+    // Série semanal
+    var ctxSemanal = document.getElementById('chartSemanal');
+    if (ctxSemanal) {
+        var labelsSemanal = {{ saldo_semanal_labels_js|safe }};
+        var dataSemanal = {{ saldo_semanal_valores_js|safe }};
+        new Chart(ctxSemanal, {
+            type: 'bar',
+            data: {
+                labels: labelsSemanal,
+                datasets: [{
+                    label: 'Saldo (R$)',
+                    data: dataSemanal,
+                    backgroundColor: 'rgba(13, 110, 253, 0.6)',
+                    borderColor: '#0d6efd',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container pb-5">
+    <div class="d-flex justify-content-between align-items-center mb-4 bg-white p-4 shadow-sm rounded">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-calendar-check"></i> Fechamento Semanal</h2>
+            <p class="text-muted mb-0">Resumo de compras e pagamentos dos últimos 7 dias</p>
+        </div>
+        <div class="text-end">
+            <a href="{% url 'registrar_pagamento_fornecedor' 0 %}" class="btn btn-success">
+                <i class="bi bi-cash-stack"></i> Lançar Pagamento
+            </a>
+        </div>
+    </div>
+
+    {% for r in relatorio %}
+    <div class="card mb-4 shadow-sm border-0">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">{{ r.fornecedor }}</h5>
+            <span class="badge {% if r.devendo > 0 %}bg-danger{% else %}bg-success{% endif %}">
+                {% if r.devendo > 0 %}Dívida na Semana: R$ {{ r.devendo|floatformat:2 }}{% else %}Tudo Pago{% endif %}
+            </span>
+        </div>
+        <div class="card-body bg-white">
+            <div class="row text-center mb-3">
+                <div class="col-md-4">
+                    <small class="text-muted d-block">Comprado (7 dias)</small>
+                    <span class="h5 text-danger">R$ {{ r.comprado|floatformat:2 }}</span>
+                </div>
+                <div class="col-md-4 border-start border-end">
+                    <small class="text-muted d-block">Pago (7 dias)</small>
+                    <span class="h5 text-success">R$ {{ r.pago|floatformat:2 }}</span>
+                </div>
+                <div class="col-md-4">
+                    <small class="text-muted d-block">Itens Comprados</small>
+                    <span class="h5">{{ r.itens.count }} itens</span>
+                </div>
+            </div>
+
+            <table class="table table-sm table-hover mt-3">
+                <thead class="table-light">
+                    <tr>
+                        <th>Data</th>
+                        <th>Material</th>
+                        <th>Qtd</th>
+                        <th>Preço Unit.</th>
+                        <th class="text-end">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in r.itens %}
+                    <tr>
+                        <td>{{ item.data_compra|date:"d/m" }}</td>
+                        <td>{{ item.material.nome }}</td>
+                        <td>{{ item.quantidade }}</td>
+                        <td>R$ {{ item.preco_no_dia }}</td>
+                        <td class="text-end fw-bold">R$ {{ item.total_compra|floatformat:2 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% empty %}
+    <div class="alert alert-info text-center">
+        <i class="bi bi-info-circle"></i> Nenhuma movimentação registada nos últimos 7 dias.
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

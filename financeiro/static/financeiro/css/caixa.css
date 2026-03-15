@@ -1,0 +1,6 @@
+/* financeiro/static/financeiro/css/caixa.css */
+.caixa-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+.form-section { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+.btn-entrada { background-color: #27ae60; color: white; width: 100%; border: none; padding: 10px; border-radius: 5px; }
+.btn-saida { background-color: #e74c3c; color: white; width: 100%; border: none; padding: 10px; border-radius: 5px; }
+.historico-caixa { margin-top: 30px; background: white; padding: 20px; border-radius: 10px; }

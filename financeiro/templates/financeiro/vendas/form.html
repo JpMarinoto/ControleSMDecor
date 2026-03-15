@@ -1,0 +1,348 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container bg-white p-4 shadow-sm rounded">
+    <h3><i class="bi bi-cart-plus"></i> Lançar Nova Venda</h3>
+    <hr>
+    <form method="POST" id="form-venda">
+        {% csrf_token %}
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <label class="form-label fw-bold">Cliente</label>
+                <select name="cliente" class="form-select" required>
+                    <option value="">Selecione o Cliente...</option>
+                    {% for c in clientes %}
+                    <option value="{{ c.id }}">{{ c.nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="card border-primary mb-3">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-box-seam"></i> Produtos da venda</span>
+                <button type="button" class="btn btn-light btn-sm" id="btn-adicionar">
+                    <i class="bi bi-plus-lg"></i> Adicionar produto
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="tabela-itens">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 70px;">ID</th>
+                                <th>Categoria</th>
+                                <th>Produto</th>
+                                <th style="width: 90px;">Qtd</th>
+                                <th style="width: 110px;">Preço un. (R$)</th>
+                                <th style="width: 120px;">Valor total</th>
+                                <th class="text-center" style="width: 140px;">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="corpo-itens">
+                            <tr class="item-row">
+                                <td>
+                                    <input type="number" class="form-control form-control-sm row-id" placeholder="ID" min="1" title="Digite o ID para buscar">
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm row-categoria" title="Escolha a categoria (produtos listados serão só desta categoria)">
+                                        <option value="">Selecione a categoria</option>
+                                        {% for c in categorias %}
+                                        <option value="{{ c.id }}">{{ c.nome }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm row-produto" name="produto_id[]" title="Selecione o produto (apenas da categoria acima)">
+                                        <option value="">— Selecione a categoria primeiro —</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <input type="number" name="quantidade[]" class="form-control form-control-sm row-qtd" value="1" min="1">
+                                </td>
+                                <td>
+                                    <input type="number" step="0.01" name="preco[]" class="form-control form-control-sm row-preco" placeholder="0,00">
+                                </td>
+                                <td class="align-middle">
+                                    <span class="row-total fw-bold text-nowrap">R$ 0,00</span>
+                                </td>
+                                <td class="text-center">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary btn-copiar" title="Copiar esta linha (mesmo produto/valor)">
+                                        <i class="bi bi-copy"></i> Copiar
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger btn-remover" title="Remover linha">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary px-5">
+            <i class="bi bi-check-lg"></i> Finalizar venda
+        </button>
+    </form>
+</div>
+
+<script>
+(function() {
+    const API_PRODUTOS = '{% url "api_produtos_por_categoria" %}';
+    const API_BUSCAR = '{% url "api_buscar_produto" %}';
+    const API_ULTIMO_PRECO = '{% url "api_ultimo_preco_cliente_categoria" %}';
+    const corpo = document.getElementById('corpo-itens');
+    const form = document.getElementById('form-venda');
+
+    function getClienteId() {
+        const sel = form.querySelector('select[name="cliente"]');
+        return sel ? sel.value : '';
+    }
+
+    function carregarProdutos(selectProduto, categoriaId, produtoIdSelecionado) {
+        if (!categoriaId && !produtoIdSelecionado) {
+            selectProduto.innerHTML = '<option value="">— Selecione a categoria primeiro —</option>';
+            return Promise.resolve();
+        }
+        var url = categoriaId ? `${API_PRODUTOS}?categoria_id=${categoriaId}` : API_PRODUTOS;
+        return fetch(url)
+            .then(r => r.json())
+            .then(produtos => {
+                selectProduto.innerHTML = '<option value="">Selecione o produto...</option>';
+                produtos.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.nome;
+                    opt.dataset.preco = p.preco_venda || '0';
+                    opt.dataset.categoriaId = (p.categoria_id != null && p.categoria_id !== '') ? String(p.categoria_id) : '';
+                    selectProduto.appendChild(opt);
+                    if (String(p.id) === String(produtoIdSelecionado)) opt.selected = true;
+                });
+                dispararChange(selectProduto);
+            });
+    }
+
+    function dispararChange(el) {
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function atualizarTotalRow(row) {
+        var qtd = parseFloat(row.querySelector('.row-qtd').value) || 0;
+        var preco = parseFloat(row.querySelector('.row-preco').value) || 0;
+        var total = qtd * preco;
+        var el = row.querySelector('.row-total');
+        if (el) el.textContent = 'R$ ' + total.toFixed(2).replace('.', ',');
+    }
+
+    function atualizarNomePreco(select, row) {
+        const opt = select.options[select.selectedIndex];
+        const precoInput = row.querySelector('.row-preco');
+        if (!opt || !opt.value) {
+            precoInput.value = '';
+            row.dataset.currentCategoria = '';
+            atualizarTotalRow(row);
+            return;
+        }
+        var newCategoria = opt.dataset.categoriaId || '';
+        var prevCategoria = row.dataset.currentCategoria || '';
+        if (prevCategoria !== '' && newCategoria === prevCategoria) {
+            return;
+        }
+        row.dataset.currentCategoria = newCategoria;
+        var clienteId = getClienteId();
+        if (clienteId && newCategoria) {
+            fetch(`${API_ULTIMO_PRECO}?cliente_id=${clienteId}&categoria_id=${newCategoria}`)
+                .then(r => r.json())
+                .then(function(data) {
+                    precoInput.value = (data.preco != null && data.preco !== '') ? data.preco : (opt.dataset.preco || '');
+                    atualizarTotalRow(row);
+                });
+        } else {
+            precoInput.value = opt.dataset.preco || '';
+            atualizarTotalRow(row);
+        }
+    }
+
+    function buscarPorId(inputId, row) {
+        const id = inputId.value.trim();
+        if (!id) return;
+        fetch(`${API_BUSCAR}?id=${id}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.sucesso) {
+                    const cat = row.querySelector('.row-categoria');
+                    const prod = row.querySelector('.row-produto');
+                    const precoInput = row.querySelector('.row-preco');
+                    const catId = data.categoria_id || '';
+                    cat.value = catId;
+                    carregarProdutos(prod, catId || null, id).then(function() {
+                        row.dataset.currentCategoria = catId ? String(catId) : '';
+                        var clienteId = getClienteId();
+                        if (clienteId && catId) {
+                            fetch(`${API_ULTIMO_PRECO}?cliente_id=${clienteId}&categoria_id=${catId}`)
+                                .then(r => r.json())
+                                .then(function(res) {
+                                    precoInput.value = (res.preco != null && res.preco !== '') ? res.preco : (data.preco || '');
+                                    atualizarTotalRow(row);
+                                });
+                        } else {
+                            precoInput.value = data.preco || '';
+                            atualizarTotalRow(row);
+                        }
+                    });
+                }
+            });
+    }
+
+    function novaLinha(dados) {
+        const tr = document.createElement('tr');
+        tr.className = 'item-row';
+        tr.innerHTML = `
+            <td>
+                <input type="number" class="form-control form-control-sm row-id" placeholder="ID" min="1" title="Digite o ID para buscar">
+            </td>
+            <td>
+                <select class="form-select form-select-sm row-categoria" title="Escolha a categoria">
+                    <option value="">Selecione a categoria</option>
+                    {% for c in categorias %}
+                    <option value="{{ c.id }}">{{ c.nome }}</option>
+                    {% endfor %}
+                </select>
+            </td>
+            <td>
+                <select class="form-select form-select-sm row-produto" name="produto_id[]" title="Produtos só da categoria acima">
+                    <option value="">— Selecione a categoria primeiro —</option>
+                </select>
+            </td>
+            <td>
+                <input type="number" name="quantidade[]" class="form-control form-control-sm row-qtd" value="${dados ? dados.qtd : '1'}" min="1">
+            </td>
+            <td>
+                <input type="number" step="0.01" name="preco[]" class="form-control form-control-sm row-preco" placeholder="0,00" value="${dados ? dados.preco : ''}">
+            </td>
+            <td class="align-middle">
+                <span class="row-total fw-bold text-nowrap">R$ 0,00</span>
+            </td>
+            <td class="text-center">
+                <button type="button" class="btn btn-sm btn-outline-secondary btn-copiar" title="Copiar esta linha">
+                    <i class="bi bi-copy"></i> Copiar
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger btn-remover" title="Remover linha">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+
+        const cat = tr.querySelector('.row-categoria');
+        const prod = tr.querySelector('.row-produto');
+        const idInput = tr.querySelector('.row-id');
+
+        cat.addEventListener('change', function() {
+            var catId = this.value || null;
+            carregarProdutos(prod, catId, null);
+            tr.querySelector('.row-preco').value = '';
+            tr.dataset.currentCategoria = catId ? String(catId) : '';
+            atualizarTotalRow(tr);
+        });
+
+        prod.addEventListener('change', function() {
+            atualizarNomePreco(this, tr);
+        });
+
+        tr.querySelector('.row-qtd').addEventListener('input', function() { atualizarTotalRow(tr); });
+        tr.querySelector('.row-qtd').addEventListener('change', function() { atualizarTotalRow(tr); });
+        tr.querySelector('.row-preco').addEventListener('input', function() { atualizarTotalRow(tr); });
+        tr.querySelector('.row-preco').addEventListener('change', function() { atualizarTotalRow(tr); });
+
+        idInput.addEventListener('change', function() {
+            buscarPorId(this, tr);
+        });
+        idInput.addEventListener('blur', function() {
+            if (this.value) buscarPorId(this, tr);
+        });
+
+        tr.querySelector('.btn-copiar').addEventListener('click', function() {
+            const pid = prod.value;
+            const opt = prod.options[prod.selectedIndex];
+            const qtd = tr.querySelector('.row-qtd').value;
+            const preco = tr.querySelector('.row-preco').value;
+            const nova = novaLinha(null);
+            corpo.appendChild(nova);
+            nova.dataset.currentCategoria = (opt && opt.dataset.categoriaId) ? opt.dataset.categoriaId : '';
+            const sel = nova.querySelector('.row-produto');
+            const catNova = nova.querySelector('.row-categoria');
+            catNova.value = cat.value;
+            carregarProdutos(sel, cat.value || null, pid).then(function() {
+                sel.value = pid;
+                nova.querySelector('.row-qtd').value = qtd;
+                nova.querySelector('.row-preco').value = preco;
+                atualizarTotalRow(nova);
+            });
+        });
+
+        tr.querySelector('.btn-remover').addEventListener('click', function() {
+            if (corpo.querySelectorAll('.item-row').length > 1) tr.remove();
+        });
+
+        if (dados && dados.catId) {
+            cat.value = dados.catId;
+            carregarProdutos(prod, dados.catId, dados.pid || null);
+        }
+        return tr;
+    }
+
+    document.getElementById('btn-adicionar').addEventListener('click', function() {
+        corpo.appendChild(novaLinha(null));
+    });
+
+    corpo.querySelectorAll('.item-row').forEach(function(row) {
+        const cat = row.querySelector('.row-categoria');
+        const prod = row.querySelector('.row-produto');
+        const idInput = row.querySelector('.row-id');
+        cat.addEventListener('change', function() {
+            var catId = this.value || null;
+            carregarProdutos(prod, catId, null);
+            row.querySelector('.row-preco').value = '';
+            row.dataset.currentCategoria = catId ? String(catId) : '';
+            atualizarTotalRow(row);
+        });
+        prod.addEventListener('change', function() {
+            atualizarNomePreco(this, row);
+        });
+        row.querySelector('.row-qtd').addEventListener('input', function() { atualizarTotalRow(row); });
+        row.querySelector('.row-qtd').addEventListener('change', function() { atualizarTotalRow(row); });
+        row.querySelector('.row-preco').addEventListener('input', function() { atualizarTotalRow(row); });
+        row.querySelector('.row-preco').addEventListener('change', function() { atualizarTotalRow(row); });
+        idInput.addEventListener('change', function() {
+            buscarPorId(this, row);
+        });
+        idInput.addEventListener('blur', function() {
+            if (this.value) buscarPorId(this, row);
+        });
+        row.querySelector('.btn-copiar').addEventListener('click', function() {
+            const pid = prod.value;
+            const opt = prod.options[prod.selectedIndex];
+            const qtd = row.querySelector('.row-qtd').value;
+            const preco = row.querySelector('.row-preco').value;
+            const nova = novaLinha(null);
+            corpo.appendChild(nova);
+            nova.dataset.currentCategoria = (opt && opt.dataset.categoriaId) ? opt.dataset.categoriaId : '';
+            const sel = nova.querySelector('.row-produto');
+            const catNova = nova.querySelector('.row-categoria');
+            catNova.value = cat.value;
+            carregarProdutos(sel, cat.value || null, pid).then(function() {
+                sel.value = pid;
+                nova.querySelector('.row-qtd').value = qtd;
+                nova.querySelector('.row-preco').value = preco;
+                atualizarTotalRow(nova);
+            });
+        });
+        row.querySelector('.btn-remover').addEventListener('click', function() {
+            if (corpo.querySelectorAll('.item-row').length > 1) row.remove();
+        });
+    });
+
+})();
+</script>
+{% endblock %}
