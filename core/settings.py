@@ -42,6 +42,16 @@ def _env_list(key: str) -> list[str]:
     return [x.strip() for x in raw.split(',') if x.strip()]
 
 
+def _env_int(key: str, default: int) -> int:
+    raw = os.environ.get(key)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -218,6 +228,19 @@ CSRF_COOKIE_SECURE = not DEBUG
 # Atrás de Nginx (ou outro proxy) terminando TLS
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    USE_X_FORWARDED_HOST = _env_bool('DJANGO_USE_X_FORWARDED_HOST', True)
+    SECURE_SSL_REDIRECT = _env_bool('DJANGO_SECURE_SSL_REDIRECT', True)
+    SECURE_HSTS_SECONDS = _env_int('DJANGO_SECURE_HSTS_SECONDS', 31536000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool(
+        'DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', True
+    )
+    SECURE_HSTS_PRELOAD = _env_bool('DJANGO_SECURE_HSTS_PRELOAD', False)
+    SECURE_CONTENT_TYPE_NOSNIFF = _env_bool('DJANGO_SECURE_CONTENT_TYPE_NOSNIFF', True)
+    X_FRAME_OPTIONS = os.environ.get('DJANGO_X_FRAME_OPTIONS', 'DENY')
+    REFERRER_POLICY = os.environ.get(
+        'DJANGO_REFERRER_POLICY',
+        'strict-origin-when-cross-origin',
+    )
 
 # API REST: autenticação por Token (header Authorization: Token <key>). Sem cookies/sessão.
 REST_FRAMEWORK = {
