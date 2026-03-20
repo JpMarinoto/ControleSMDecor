@@ -8,6 +8,7 @@ __pycache__/
 # Arquivos de ambiente / segredos
 .env
 .env.*
+!.env.example
 *.env
 
 # Node / Vite (frontend)

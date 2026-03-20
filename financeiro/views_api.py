@@ -1565,14 +1565,15 @@ class FornecedorDetalhe(APIView):
                 data_str = _data_historico_iso(data_pag)
                 pagamentos_data.append({'id': id_, 'data': data_str, 'valor': _safe_float(val), 'metodo': metodo, 'conta_nome': conta_nome})
             saldo = _safe_float(total_compras - total_pago)
-            compras_data = [{
-                'id': c.id,
-                'data': c.data_compra.date().isoformat() if c.data_compra else '',
-                'material': c.material.nome,
-                'quantidade': int(c.quantidade),
-                'preco_no_dia': _safe_float(c.preco_no_dia),
-                'total': _safe_float(c.total_compra),
-            } for c in compras[:50]]
+            compras_data = [
+                {
+                    'id': c.id,
+                    'data': c.data_compra.date().isoformat() if c.data_compra else '',
+                    'material': c.material.nome,
+                    'total': _safe_float(c.total_compra),
+                }
+                for c in compras[:50]
+            ]
             return Response({
                 'fornecedor': {'id': fornecedor.id, 'nome': fornecedor.nome, 'telefone': fornecedor.telefone or ''},
                 'total_compras': total_compras, 'total_pago': total_pago, 'saldo_devedor': saldo,

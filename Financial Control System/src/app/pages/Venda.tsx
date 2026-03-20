@@ -217,56 +217,121 @@ export function Venda() {
     const clienteDoc = clienteInfo?.cpf || clienteInfo?.cnpj || "";
     const clienteTelefone = clienteInfo?.telefone || "";
     const itensRows = (venda.itens || [])
-      .map(
-        (i) =>
-          `<tr><td>${i.produto_nome || `Produto #${i.produto}`}</td><td class="text-right">${i.quantidade}</td></tr>`
-      )
+      .map((i) => {
+        const totalItem = (i as any).total_item ?? (i as any).total ?? 0;
+        const precoUnit = (i as any).preco_unitario ?? (totalItem && i.quantidade ? totalItem / i.quantidade : 0);
+        if (isChefe) {
+          // Chefe vê quantidade, valor unitário e total
+          return `<tr>
+            <td>${i.produto_nome || `Produto #${i.produto}`}</td>
+            <td class="num">${i.quantidade}</td>
+            <td class="num">${formatCurrency(precoUnit)}</td>
+            <td class="num">${formatCurrency(totalItem)}</td>
+          </tr>`;
+        }
+        // Funcionário vê apenas produto e quantidade
+        return `<tr>
+          <td>${i.produto_nome || `Produto #${i.produto}`}</td>
+          <td class="num">${i.quantidade}</td>
+        </tr>`;
+      })
       .join("");
     const numeroVenda = venda.id != null ? String(venda.id) : "";
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Venda ${numeroVenda ? "nº " + numeroVenda : ""} – ${venda.clienteNome}</title>
-<style>
-  @page{size:105mm 148mm;margin:6mm}
-  @media print{body,.pagina{width:93mm!important;max-width:93mm!important;min-height:136mm}}
-  body{font-family:system-ui,sans-serif;padding:8px;margin:0 auto;width:93mm;max-width:93mm;box-sizing:border-box}
-  .pagina{width:93mm;max-width:93mm}
-  *{box-sizing:border-box}
-  h1{font-size:1rem;margin:0 0 4px 0}
-  .meta{color:#555;font-size:0.7rem;margin-bottom:8px;line-height:1.3}
-  table{width:100%;border-collapse:collapse;margin-top:6px;font-size:0.75rem}
-  th,td{border:1px solid #ccc;padding:4px 6px;text-align:left}
-  th{background:#f5f5f5}
-  .text-right{text-align:right}
-  .footer{font-size:0.6rem;color:#888;margin-top:8px}
-  .os-header{display:flex;gap:8px;align-items:center;margin-bottom:6px}
-  .os-logo img{max-height:56px;max-width:56px;object-fit:contain}
-  .empresa-block{font-size:0.7rem}
-  .empresa-nome{font-weight:600;font-size:0.85rem}
-  .empresa-fantasia{font-size:0.7rem;color:#555}
-  .empresa-docs span + span{margin-left:6px}
-  .empresa-endereco,.empresa-contato{font-size:0.65rem;color:#555}
-  .assinatura{margin-top:16px;width:100%;border-bottom:1px solid #333;height:2.2em}
-</style></head>
-<body>
-<div class="pagina">
-${getEmpresaHeaderHtml()}
-<h1>Venda${numeroVenda ? " nº " + numeroVenda : ""}</h1>
-<p class="meta">
-  <strong>Cliente:</strong> ${venda.clienteNome}<br/>
-  ${clienteDoc ? `<strong>Doc:</strong> ${clienteDoc} ` : ""}<br/>
-  ${clienteTelefone ? `<strong>Tel:</strong> ${clienteTelefone} ` : ""}<br/>
-  <strong>Data:</strong> ${dataFormatada}<br/>
-  <strong>Lançado por:</strong> ${usuarioNome || "-"}
-</p>
-<table>
-  <thead>
-    <tr><th>Produto</th><th class="text-right">Qtd</th></tr>
-  </thead>
-  <tbody>${itensRows}</tbody>
-</table>
-<div class="assinatura" title="Assinatura do cliente"></div>
-<p class="footer">Impresso em ${new Date().toLocaleString("pt-BR")}</p>
-</div>
-</body></html>`;
+    const html = `<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><title>Venda ${numeroVenda ? "nº " + numeroVenda : ""} – ${venda.clienteNome}</title>
+    <style>
+      @page { size: A4; margin: 15mm; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; color: #1a1a1a; line-height: 1.45; max-width: 210mm; margin: 0 auto; padding: 16px; background: #f3f4f6; }
+      .doc { background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 18px 20px 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }
+      .os-header{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+      .os-logo img{max-height:56px;max-width:56px;object-fit:contain}
+      .empresa-block { font-size: 0.7rem; }
+      .empresa-nome { font-size: 0.85rem; font-weight: 600; color: #111827; letter-spacing: 0.02em; line-height: 1.3; }
+      .empresa-fantasia { font-size: 0.7rem; color: #4b5563; margin-top: 2px; }
+      .empresa-docs { font-size: 0.65rem; color: #6b7280; margin-top: 4px; }
+      .empresa-docs span + span::before { content: " | "; }
+      .empresa-endereco { font-size: 0.65rem; color: #6b7280; margin-top: 2px; }
+      .empresa-contato { font-size: 0.65rem; color: #6b7280; margin-top: 2px; }
+      .doc-title { text-align: right; margin-bottom: 10px; }
+      .doc-title h1 { margin: 0; font-size: 16px; letter-spacing: 0.16em; color: #111827; }
+      .doc-title .sub { font-size: 11px; color: #6b7280; margin-top: 4px; }
+      .info {
+        background: #f9fafb;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 18px;
+        font-size: 12px;
+        border: 1px solid #e5e7eb;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 14px;
+      }
+      .info strong { font-weight: 600; color: #374151; }
+      .tabela-itens table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; border-radius: 6px; overflow: hidden; }
+      .tabela-itens th, .tabela-itens td { border: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; }
+      .tabela-itens th { background: #f3f4f6; font-weight: 600; color: #374151; }
+      .tabela-itens .num { text-align: right; white-space: nowrap; }
+      .muted { color: #6b7280; font-size: 11px; margin-top: 18px; display: flex; justify-content: space-between; gap: 8px; }
+      .assinatura { margin-top: 28px; text-align: center; }
+      .assinatura-linha { width: 60%; max-width: 240px; margin: 0 auto 6px; border-bottom: 2px solid #4b5563; height: 28px; }
+      .assinatura-texto { font-size: 11px; color: #6b7280; }
+      @media print {
+        body { background: #ffffff; padding: 0; }
+        .doc { box-shadow: none; border-radius: 0; border: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="doc">
+      ${getEmpresaHeaderHtml()}
+      <div class="doc-title">
+        <h1>VENDA</h1>
+        <div class="sub">Nº ${numeroVenda || "-"} — ${dataFormatada}</div>
+      </div>
+
+      <div class="info">
+        <div><strong>Cliente:</strong> ${venda.clienteNome}</div>
+        ${clienteDoc ? `<div><strong>Doc:</strong> ${clienteDoc}</div>` : ""}
+        ${clienteTelefone ? `<div><strong>Telefone:</strong> ${clienteTelefone}</div>` : ""}
+        <div><strong>Lançado por:</strong> ${usuarioNome || "-"}</div>
+      </div>
+
+      <div class="tabela-itens">
+        <table>
+          <thead>
+            ${
+              isChefe
+                ? `<tr>
+                     <th style="width: 46%;">Produto</th>
+                     <th class="num" style="width: 18%;">Qtd</th>
+                     <th class="num" style="width: 18%;">Vlr unitário</th>
+                     <th class="num" style="width: 18%;">Total</th>
+                   </tr>`
+                : `<tr>
+                     <th style="width: 70%;">Produto</th>
+                     <th class="num" style="width: 30%;">Qtd</th>
+                   </tr>`
+            }
+          </thead>
+          <tbody>
+            ${itensRows}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="assinatura">
+        <div class="assinatura-linha"></div>
+        <div class="assinatura-texto">Assinatura do cliente</div>
+      </div>
+
+      <div class="muted">
+        <span>Impresso em ${new Date().toLocaleString("pt-BR")}</span>
+        <span>${empresa.nome || "Empresa"}</span>
+      </div>
+    </div>
+  </body>
+</html>`;
     const janela = window.open("", "_blank");
     if (!janela) {
       toast.error("Permita pop-ups para imprimir.");

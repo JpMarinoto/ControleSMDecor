@@ -227,24 +227,10 @@ export function FornecedorDetalhe() {
     const usarComprasSelecionadas = usarSelecao && comprasSelecionadas.length > 0;
     const comprasParaImprimir = usarComprasSelecionadas ? comprasSelecionadas : (limites ? comprasFiltradas : data.compras);
     const comprasRows = comprasParaImprimir
-      .map((c: any) => {
-        const qtd = c.quantidade ?? "";
-        const preco = c.preco_no_dia ?? "";
-        return `<tr>
-          <td>${formatDateOnly(c.data)}</td>
-          <td>${c.material}</td>
-          <td class="num">${qtd}</td>
-          <td class="num">${preco !== "" ? formatCurrency(preco) : "-"}</td>
-          <td class="num">${formatCurrency(c.total)}</td>
-        </tr>`;
-      })
+      .map((c) => `<tr><td>${formatDateOnly(c.data)}</td><td>${c.material}</td><td class="num">${formatCurrency(c.total)}</td></tr>`)
       .join("");
     const pagRows = (limites ? pagamentosFiltrados : data.pagamentos)
-      .map((p: any) => `<tr>
-        <td>${formatDateOnly(p.data)}</td>
-        <td class="num">${formatCurrency(p.valor)}</td>
-        <td>${(p.metodo || '').toString()}</td>
-      </tr>`)
+      .map((p) => `<tr><td>${formatDateOnly(p.data)}</td><td class="num">${formatCurrency(p.valor)}</td></tr>`)
       .join("");
     const totalComprasDoc = comprasParaImprimir.reduce((s, c) => s + c.total, 0);
     const periodoLabel = usarComprasSelecionadas
@@ -306,26 +292,12 @@ export function FornecedorDetalhe() {
           </div>
           <h3 style="font-size:14px;margin:16px 0 8px;">Compras</h3>
           <table>
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th>Material</th>
-                <th class="num">Qtd</th>
-                <th class="num">Vlr unitário</th>
-                <th class="num">Total</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Data</th><th>Material</th><th class="num">Total</th></tr></thead>
             <tbody>${comprasRows}</tbody>
           </table>
           <h3 style="font-size:14px;margin:20px 0 8px;">Pagamentos</h3>
           <table>
-            <thead>
-              <tr>
-                <th>Data</th>
-                <th class="num">Valor</th>
-                <th>Tipo</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Data</th><th class="num">Valor</th></tr></thead>
             <tbody>${pagRows}</tbody>
           </table>
           <p class="muted">Impresso em ${hojeStr}</p>

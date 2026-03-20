@@ -12,20 +12,63 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carrega .env na raiz do projeto (opcional; em produção use variáveis do sistema / systemd).
+_env_path = BASE_DIR / '.env'
+if _env_path.is_file():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_env_path)
+    except ImportError:
+        pass
+
+
+def _env_bool(key: str, default: bool = False) -> bool:
+    v = os.environ.get(key)
+    if v is None:
+        return default
+    return v.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _env_list(key: str) -> list[str]:
+    raw = os.environ.get(key, '')
+    if not raw.strip():
+        return []
+    return [x.strip() for x in raw.split(',') if x.strip()]
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-kg%wty1^bf7buth4ec#rfbo50#!fo=o8a(7^rkbqc2um76ld+b'
+# Produção: DJANGO_DEBUG=False (ou omita DJANGO_DEBUG e defina só no servidor com False)
+DEBUG = _env_bool('DJANGO_DEBUG', True)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+_DEV_SECRET_FALLBACK = 'django-insecure-kg%wty1^bf7buth4ec#rfbo50#!fo=o8a(7^rkbqc2um76ld+b'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', _DEV_SECRET_FALLBACK)
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.localhost']
+if not DEBUG:
+    if not SECRET_KEY or SECRET_KEY == _DEV_SECRET_FALLBACK or SECRET_KEY.startswith(
+        'django-insecure-'
+    ):
+        raise ImproperlyConfigured(
+            'Em produção defina DJANGO_SECRET_KEY no ambiente com um valor aleatório forte '
+            '(não use SECRET_KEY de desenvolvimento).'
+        )
+
+_default_allowed = ['localhost', '127.0.0.1', '.localhost']
+_env_hosts = _env_list('DJANGO_ALLOWED_HOSTS')
+ALLOWED_HOSTS = _env_hosts if _env_hosts else list(_default_allowed)
+
+if not DEBUG and set(ALLOWED_HOSTS) <= {'localhost', '127.0.0.1', '.localhost'}:
+    raise ImproperlyConfigured(
+        'Em produção defina DJANGO_ALLOWED_HOSTS com o domínio e/ou IP público do servidor '
+        '(lista separada por vírgulas).'
+    )
 
 
 # Application definition
@@ -120,23 +163,44 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-
-STATIC_URL = 'static/'
 
 # Garante que o Django procura a pasta static dentro dos teus apps
 STATICFILES_FINDERS = [
     'django.contrib.staticfiles.finders.AppDirectoriesFinder',
 ]
 
-# CORS: para login por sessão (cookie) é preciso credentials + origens explícitas
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
+# CORS / CSRF: origens locais + URLs públicas via ambiente (produção HTTPS)
+_DEV_ORIGINS = [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://localhost:8000',
     'http://127.0.0.1:8000',
 ]
+_extra_cors = _env_list('DJANGO_CORS_ALLOWED_ORIGINS')
+_extra_csrf = _env_list('DJANGO_CSRF_TRUSTED_ORIGINS')
+
+# Preserva ordem e remove duplicatas
+_seen: set[str] = set()
+CORS_ALLOWED_ORIGINS = []
+for o in _DEV_ORIGINS + _extra_cors:
+    if o not in _seen:
+        _seen.add(o)
+        CORS_ALLOWED_ORIGINS.append(o)
+
+_seen_csrf: set[str] = set()
+CSRF_TRUSTED_ORIGINS = []
+for o in _DEV_ORIGINS + _extra_csrf:
+    if o not in _seen_csrf:
+        _seen_csrf.add(o)
+        CSRF_TRUSTED_ORIGINS.append(o)
+
+# Em produção com frontend noutro domínio/porta, preencha DJANGO_CORS_ALLOWED_ORIGINS e
+# DJANGO_CSRF_TRUSTED_ORIGINS (HTTPS). Same-origin (app + API no mesmo host) pode omitir.
+
+# CORS: para login por sessão (cookie) é preciso credentials + origens explícitas
+CORS_ALLOW_CREDENTIALS = True
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_SAVE_EVERY_REQUEST = True
 SESSION_COOKIE_NAME = 'sessionid'
@@ -150,12 +214,10 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SECURE = not DEBUG
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-]
+
+# Atrás de Nginx (ou outro proxy) terminando TLS
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # API REST: autenticação por Token (header Authorization: Token <key>). Sem cookies/sessão.
 REST_FRAMEWORK = {
