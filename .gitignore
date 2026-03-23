@@ -22,6 +22,8 @@ Financial Control System/.eslintcache
 # Arquivos de build / estáticos gerados
 staticfiles/
 media/
+# Cópias de segurança locais (não enviar ao Git)
+backups/
 
 # Arquivos temporários / sistema operacional
 .DS_Store
