@@ -82,7 +82,7 @@ Depois, com o Django a correr (`python manage.py runserver`), abre **http://127.
 VPS
 ssh deploy@129.121.53.239
 
-cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>"
+cd "/home/deploy/ControleSMDecor"
 source .venv/bin/activate
 
 git pull
@@ -91,20 +91,9 @@ pip install -r requirements.txt
 python manage.py migrate
 python manage.py collectstatic --noinput
 
-cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/Financial Control System"
-npm install
-npm run build
-cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>"
-
-cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/Financial Control System" && npm run build && cd ..
-sudo systemctl restart financeiro
-
-
-
-
 Vps2
 
-cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>"   # ajuste para o teu path
+cd "/home/deploy/ControleSMDecor"  
 source .venv/bin/activate
 git pull
 pip install -r requirements.txt
