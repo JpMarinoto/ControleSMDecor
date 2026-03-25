@@ -41,6 +41,7 @@ urlpatterns = [
     path('outros-a-receber/<int:pk>/', views_api.OutrosAReceberDetail.as_view()),
     path('saidas/', views_api.SaidasListCreate.as_view()),
     path('estoque/', views_api.EstoqueList.as_view()),
+    path('estoque/ultima-atualizacao/', views_api.EstoqueUltimaAtualizacao.as_view()),
     path('estoque/ajuste/', views_api.EstoqueAjuste.as_view()),
     path('estoque/ajuste-produto/', views_api.EstoqueAjusteProduto.as_view()),
     path('caixa/pagamento/', views_api.CaixaPagamento.as_view()),

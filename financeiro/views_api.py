@@ -515,6 +515,53 @@ class VendaAddItem(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class VendaItemDetail(APIView):
+    def patch(self, request, pk, item_pk):
+        # Apenas chefe pode alterar itens de venda já feita
+        if not getattr(getattr(request, "user", None), "is_authenticated", False):
+            return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            from .views_auth import _is_chefe
+            is_chefe = _is_chefe(request)
+        except Exception:
+            is_chefe = False
+        if not is_chefe:
+            return Response({"error": "Apenas o chefe pode editar itens da venda."}, status=status.HTTP_403_FORBIDDEN)
+
+        item = ItemVenda.objects.filter(venda_id=pk, pk=item_pk).select_related("produto").first()
+        if not item:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data or {}
+        if "quantidade" in data:
+            try:
+                qty = int(data.get("quantidade"))
+                if qty <= 0:
+                    raise ValueError()
+            except Exception:
+                return Response({"quantidade": ["Quantidade inválida."]}, status=status.HTTP_400_BAD_REQUEST)
+            item.quantidade = qty
+
+        if "preco_unitario" in data:
+            try:
+                preco_raw = data.get("preco_unitario")
+                preco = Decimal(str(preco_raw).replace(",", "."))
+                if preco < 0:
+                    raise ValueError()
+            except Exception:
+                return Response({"preco_unitario": ["Preço inválido."]}, status=status.HTTP_400_BAD_REQUEST)
+            item.preco_unitario = preco
+
+        item.save()
+        _api_log(
+            request,
+            "Editar",
+            "Venda",
+            f"Venda #{pk} - item {item_pk} atualizado (qtd={item.quantidade}, preco={item.preco_unitario})",
+        )
+        venda = Venda.objects.select_related("cliente").prefetch_related("itens__produto").get(pk=pk)
+        serializer = VendaSerializer(venda)
+        return Response(serializer.data)
+
     def delete(self, request, pk, item_pk):
         item = ItemVenda.objects.filter(venda_id=pk, pk=item_pk).first()
         if not item:
@@ -1094,6 +1141,59 @@ class EstoqueList(APIView):
 
 
 @method_decorator(csrf_exempt, name='dispatch')
+class EstoqueUltimaAtualizacao(APIView):
+    """Retorna a última atualização de estoque (material ou produto)."""
+    def get(self, request):
+        last_mat = (
+            AjusteEstoque.objects.select_related('material')
+            .order_by('-data')
+            .values('id', 'data', 'tipo', 'quantidade', 'observacao', 'material__nome')
+            .first()
+        )
+        last_prod = (
+            AjusteEstoqueProduto.objects.select_related('produto')
+            .order_by('-data')
+            .values('id', 'data', 'quantidade', 'observacao', 'produto__nome')
+            .first()
+        )
+
+        if not last_mat and not last_prod:
+            return Response({'last_update': None})
+
+        def _dt(v):
+            return v.get('data') if v else None
+
+        pick = None
+        kind = None
+        if last_mat and last_prod:
+            pick = last_mat if _dt(last_mat) >= _dt(last_prod) else last_prod
+            kind = 'material' if pick is last_mat else 'produto'
+        elif last_mat:
+            pick = last_mat
+            kind = 'material'
+        else:
+            pick = last_prod
+            kind = 'produto'
+
+        if kind == 'material':
+            detalhe = f"{pick.get('tipo')} {pick.get('quantidade')}"
+            item_nome = pick.get('material__nome') or ''
+        else:
+            detalhe = f"quantidade → {pick.get('quantidade')}"
+            item_nome = pick.get('produto__nome') or ''
+
+        return Response({
+            'last_update': {
+                'kind': kind,
+                'data': pick.get('data').isoformat() if pick.get('data') else None,
+                'item_nome': item_nome,
+                'detalhe': detalhe,
+                'observacao': pick.get('observacao') or '',
+            }
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class EstoqueAjuste(APIView):
     def post(self, request):
         material_id = request.data.get('material_id')
@@ -1461,7 +1561,8 @@ class ClientePrecosProdutos(APIView):
         return Response(data)
 
     def post(self, request, pk):
-        """Definir ou atualizar preço: { "produto_id": 1, "preco": 10.50 }"""
+        """Um preço: { "produto_id": 1, "preco": 10.50 }
+        Vários de uma vez: { "updates": [ {"produto_id": 1, "preco": 10.5}, ... ] } (máx. 500 itens)"""
         try:
             cliente = Cliente.objects.get(pk=pk)
         except Cliente.DoesNotExist:
@@ -1469,10 +1570,80 @@ class ClientePrecosProdutos(APIView):
         data = getattr(request, 'data', None) or {}
         if not isinstance(data, dict) and hasattr(request, 'body'):
             try:
-                import json
                 data = json.loads(request.body.decode('utf-8')) if request.body else {}
             except Exception:
                 data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        updates_bulk = data.get('updates')
+        if isinstance(updates_bulk, list) and len(updates_bulk) > 0:
+            if len(updates_bulk) > 500:
+                return Response(
+                    {'error': 'No máximo 500 produtos por requisição'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            saved = []
+            errors = []
+            for idx, u in enumerate(updates_bulk):
+                if not isinstance(u, dict):
+                    errors.append({'index': idx, 'error': 'Item inválido'})
+                    continue
+                produto_id = u.get('produto_id')
+                preco = u.get('preco')
+                if produto_id is None or preco is None:
+                    errors.append({'index': idx, 'error': 'produto_id e preco obrigatórios'})
+                    continue
+                try:
+                    produto_id = int(produto_id)
+                except (ValueError, TypeError):
+                    errors.append({'index': idx, 'produto_id': produto_id, 'error': 'produto_id inválido'})
+                    continue
+                try:
+                    preco_val = Decimal(str(preco).replace(',', '.'))
+                    if preco_val < 0:
+                        errors.append({'index': idx, 'produto_id': produto_id, 'error': 'preço deve ser >= 0'})
+                        continue
+                except (ValueError, TypeError):
+                    errors.append({'index': idx, 'produto_id': produto_id, 'error': 'preço inválido'})
+                    continue
+                prod = Produto.objects.filter(pk=produto_id).first()
+                if not prod:
+                    errors.append({'index': idx, 'produto_id': produto_id, 'error': 'Produto não encontrado'})
+                    continue
+                try:
+                    obj, created = PrecoClienteProduto.objects.update_or_create(
+                        cliente=cliente,
+                        produto_id=produto_id,
+                        defaults={'preco': preco_val},
+                    )
+                    saved.append(
+                        {
+                            'id': obj.id,
+                            'produto_id': obj.produto_id,
+                            'produto_nome': obj.produto.nome,
+                            'preco': float(obj.preco),
+                            'created': created,
+                        }
+                    )
+                    _api_log(
+                        request,
+                        'Editar' if not created else 'Criar',
+                        'PreçoClienteProduto',
+                        f'Cliente {cliente.nome} — {prod.nome}: R$ {float(preco_val)} (lote)',
+                    )
+                except Exception as e:
+                    errors.append({'index': idx, 'produto_id': produto_id, 'error': str(e)})
+            return Response(
+                {
+                    'ok': len(saved),
+                    'failed': len(errors),
+                    'saved': saved,
+                    'errors': errors,
+                },
+                status=status.HTTP_200_OK,
+            )
+
         produto_id = data.get('produto_id')
         preco = data.get('preco')
         if produto_id is None or preco is None:

@@ -66,7 +66,7 @@ Clone e entre no projeto:
 
 ```bash
 git clone https://github.com/JpMarinoto/ControleSMDecor.git
-cd ControleSMDecor
+cd "<NOME_DA_PASTA_DO_PROJETO>"
 ```
 
 ## 4) Configurar backend (Django)
@@ -137,9 +137,9 @@ sudo setsebool -P httpd_can_network_connect 1
 Ajuste dono/permite leitura dos arquivos:
 
 ```bash
-sudo chown -R deploy:deploy /home/deploy/ControleSMDecor
-sudo chmod -R o+rX /home/deploy/ControleSMDecor/staticfiles
-sudo chmod -R o+rX "/home/deploy/ControleSMDecor/Financial Control System/dist"
+sudo chown -R deploy:deploy "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>"
+sudo chmod -R o+rX "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/staticfiles"
+sudo chmod -R o+rX "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/Financial Control System/dist"
 ```
 
 ## 7) Criar servico systemd do Gunicorn
@@ -160,9 +160,9 @@ After=network.target
 [Service]
 User=deploy
 Group=nginx
-WorkingDirectory=/home/deploy/ControleSMDecor
-EnvironmentFile=/home/deploy/ControleSMDecor/.env
-ExecStart=/home/deploy/ControleSMDecor/.venv/bin/gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 3 --timeout 120
+WorkingDirectory=/home/deploy/<NOME_DA_PASTA_DO_PROJETO>
+EnvironmentFile=/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/.env
+ExecStart=/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/.venv/bin/gunicorn core.wsgi:application --bind 127.0.0.1:8000 --workers 3 --timeout 120
 Restart=always
 
 [Install]
@@ -195,12 +195,12 @@ server {
     client_max_body_size 20M;
 
     location /static/ {
-        alias /home/deploy/ControleSMDecor/staticfiles/;
+        alias /home/deploy/<NOME_DA_PASTA_DO_PROJETO>/staticfiles/;
     }
 
-    # Symlink na VPS: ln -sfn ".../dist/assets" /home/deploy/ControleSMDecor/fcs-assets
+    # Symlink na VPS: ln -sfn ".../dist/assets" /home/deploy/<NOME_DA_PASTA_DO_PROJETO>/fcs-assets
     location /assets/ {
-        alias /home/deploy/ControleSMDecor/fcs-assets/;
+        alias /home/deploy/<NOME_DA_PASTA_DO_PROJETO>/fcs-assets/;
     }
 
     location /api/ {
@@ -266,7 +266,7 @@ git push
 Na VPS:
 
 ```bash
-cd /home/deploy/ControleSMDecor
+cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>"
 git pull
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -304,14 +304,14 @@ sudo dnf install -y sqlite
 ### Dar permissao de execucao (uma vez)
 
 ```bash
-chmod +x /home/deploy/ControleSMDecor/scripts/backup_db.sh
+chmod +x "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/scripts/backup_db.sh"
 ```
 
 ### Testar manualmente
 
 ```bash
-/home/deploy/ControleSMDecor/scripts/backup_db.sh
-ls -lt /home/deploy/ControleSMDecor/backups/db/
+"/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/scripts/backup_db.sh"
+ls -lt "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/backups/db/"
 ```
 
 As copias ficam em `backups/db/` com nome `db-AAAA-MM-DD_HHMMSS.sqlite3`. Por defeito remove ficheiros com mais de **14 dias** (altere com `export RETENTION_DAYS=30` antes do script ou edite `RETENTION_DAYS` no script).
@@ -325,7 +325,7 @@ crontab -e
 Adicione uma linha (ex.: todos os dias as 03:00):
 
 ```cron
-0 3 * * * /home/deploy/ControleSMDecor/scripts/backup_db.sh >> /home/deploy/ControleSMDecor/backups/backup-cron.log 2>&1
+0 3 * * * "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/scripts/backup_db.sh" >> "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/backups/backup-cron.log" 2>&1
 ```
 
 ### Restaurar o backup de ontem (ou outro dia)
@@ -339,7 +339,7 @@ sudo systemctl stop financeiro
 2. Copie o ficheiro desejado por cima do `db.sqlite3` (ajuste o nome do backup):
 
 ```bash
-cd /home/deploy/ControleSMDecor
+cd "/home/deploy/<NOME_DA_PASTA_DO_PROJETO>"
 cp -a backups/db/db-2026-03-23_030001.sqlite3 db.sqlite3
 sudo chown deploy:deploy db.sqlite3
 ```
