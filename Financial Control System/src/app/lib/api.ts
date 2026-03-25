@@ -318,6 +318,30 @@ export const api = {
     await fetch(`${API_BASE_URL}/vendas/${vendaId}/itens/${itemId}/`, { method: 'DELETE', headers: authHeaders() });
   },
 
+  updateItemVenda: async (vendaId: string, itemId: number, data: { quantidade?: number; preco_unitario?: number }) => {
+    const response = await fetch(`${API_BASE_URL}/vendas/${vendaId}/itens/${itemId}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(data),
+    });
+    const bodyText = await response.text();
+    let bodyJson: any = null;
+    try {
+      bodyJson = bodyText ? JSON.parse(bodyText) : null;
+    } catch {
+      bodyJson = null;
+    }
+    if (!response.ok) {
+      const msg =
+        (bodyJson && (bodyJson.error || bodyJson.detail)) ||
+        (bodyJson && bodyJson.quantidade && bodyJson.quantidade[0]) ||
+        (bodyJson && bodyJson.preco_unitario && bodyJson.preco_unitario[0]) ||
+        `HTTP ${response.status}`;
+      throw new Error(String(msg));
+    }
+    return bodyJson;
+  },
+
   copiarVenda: async (vendaId: string) => {
     const response = await fetch(`${API_BASE_URL}/vendas/${vendaId}/copiar/`, {
       method: 'POST',
@@ -667,6 +691,13 @@ export const api = {
     }
     return { materiais: Array.isArray(data) ? data : [], produtos: [] };
   },
+  getEstoqueUltimaAtualizacao: async (): Promise<{
+    last_update: null | { kind: 'material' | 'produto'; data: string | null; item_nome: string; detalhe: string; observacao?: string };
+  }> => {
+    const response = await fetch(`${API_BASE_URL}/estoque/ultima-atualizacao/`, { headers: authHeaders() });
+    const data = await response.json().catch(() => ({ last_update: null }));
+    return data && typeof data === 'object' && 'last_update' in data ? (data as any) : { last_update: null };
+  },
   ajusteEstoque: async (data: {
     material_id: number;
     tipo?: 'entrada' | 'saida';
@@ -788,6 +819,44 @@ export const api = {
       throw new Error(partes.join(" | "));
     }
     return (bodyJson ?? {}) as { id: number; produto_id: number; produto_nome: string; preco: number };
+  },
+  /** Vários preços específicos de uma vez (chefe). */
+  setClientePrecoProdutosBulk: async (
+    clienteId: string,
+    updates: { produto_id: number; preco: number }[]
+  ): Promise<{
+    ok: number;
+    failed: number;
+    saved: { id: number; produto_id: number; produto_nome: string; preco: number; created?: boolean }[];
+    errors: { index?: number; produto_id?: number; error: string }[];
+  }> => {
+    const url = `${API_BASE_URL}/clientes/${clienteId}/precos-produtos/`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ updates }),
+    });
+    const bodyText = await response.text();
+    let bodyJson: Record<string, unknown> | null = null;
+    try {
+      bodyJson = bodyText ? (JSON.parse(bodyText) as Record<string, unknown>) : null;
+    } catch {
+      bodyJson = null;
+    }
+    if (!response.ok) {
+      const msg =
+        (bodyJson && typeof bodyJson.error === "string" && bodyJson.error) ||
+        `HTTP ${response.status}`;
+      throw new Error(msg);
+    }
+    const saved = Array.isArray(bodyJson?.saved) ? bodyJson.saved : [];
+    const errors = Array.isArray(bodyJson?.errors) ? bodyJson.errors : [];
+    return {
+      ok: typeof bodyJson?.ok === "number" ? bodyJson.ok : saved.length,
+      failed: typeof bodyJson?.failed === "number" ? bodyJson.failed : errors.length,
+      saved: saved as { id: number; produto_id: number; produto_nome: string; preco: number; created?: boolean }[],
+      errors: errors as { index?: number; produto_id?: number; error: string }[],
+    };
   },
   deleteClientePrecoProduto: async (clienteId: string, produtoId: number) => {
     const response = await fetch(

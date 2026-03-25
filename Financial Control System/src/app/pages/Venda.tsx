@@ -69,6 +69,10 @@ export function Venda() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editQtd, setEditQtd] = useState("");
   const [editPreco, setEditPreco] = useState("");
+  const [editingVendaItemId, setEditingVendaItemId] = useState<number | null>(null);
+  const [editVendaQtd, setEditVendaQtd] = useState("");
+  const [editVendaPreco, setEditVendaPreco] = useState("");
+  const [savingVendaItem, setSavingVendaItem] = useState(false);
   const [searchCliente, setSearchCliente] = useState("");
   const [searchItem, setSearchItem] = useState("");
   const [searchData, setSearchData] = useState("");
@@ -206,6 +210,47 @@ export function Venda() {
     setEditPreco("");
   };
 
+  const iniciarEdicaoItemVenda = (item: any) => {
+    setEditingVendaItemId(item.id);
+    setEditVendaQtd(String(item.quantidade ?? ""));
+    setEditVendaPreco(String(item.preco_unitario ?? ""));
+  };
+
+  const cancelarEdicaoItemVenda = () => {
+    setEditingVendaItemId(null);
+    setEditVendaQtd("");
+    setEditVendaPreco("");
+  };
+
+  const salvarEdicaoItemVenda = async () => {
+    if (!detailVenda || !editingVendaItemId) return;
+    const qtd = parseInt(editVendaQtd, 10);
+    const preco = parseFloat(editVendaPreco.replace(",", "."));
+    if (isNaN(qtd) || qtd <= 0) {
+      toast.error("Quantidade inválida");
+      return;
+    }
+    if (isNaN(preco) || preco < 0) {
+      toast.error("Preço inválido");
+      return;
+    }
+    setSavingVendaItem(true);
+    try {
+      const updated = await api.updateItemVenda(String(detailVenda.id), editingVendaItemId, {
+        quantidade: qtd,
+        preco_unitario: preco,
+      });
+      setDetailVenda(updated);
+      await loadData();
+      toast.success("Item atualizado");
+      cancelarEdicaoItemVenda();
+    } catch (e: any) {
+      toast.error(e?.message || "Erro ao atualizar item");
+    } finally {
+      setSavingVendaItem(false);
+    }
+  };
+
   const imprimirVenda = (venda: Venda) => {
     const dataFormatada = formatDateOnly(venda.data);
     const usuarioNome =
@@ -213,18 +258,41 @@ export function Venda() {
       (user as any)?.username ||
       (user as any)?.email ||
       "";
+    const toNum = (v: unknown): number => {
+      if (typeof v === "number") return isNaN(v) ? 0 : v;
+      if (typeof v === "string") {
+        const n = Number(v.replace(",", "."));
+        return isNaN(n) ? 0 : n;
+      }
+      if (v == null) return 0;
+      const n = Number(v as any);
+      return isNaN(n) ? 0 : n;
+    };
     const clienteInfo = clientes.find((c: any) => c.id === venda.cliente);
     const clienteDoc = clienteInfo?.cpf || clienteInfo?.cnpj || "";
     const clienteTelefone = clienteInfo?.telefone || "";
-    const itensRows = (venda.itens || [])
+    const itens = Array.isArray(venda.itens) ? venda.itens : [];
+    const totalCalculadoVenda = itens.reduce((s, i) => {
+      const totalItem =
+        toNum((i as any).total_item) ||
+        toNum((i as any).total) ||
+        toNum((i as any).preco_unitario) * toNum((i as any).quantidade);
+      return s + totalItem;
+    }, 0);
+    const totalVenda = toNum((venda as any).total) > 0 ? toNum((venda as any).total) : totalCalculadoVenda;
+
+    const itensRows = itens
       .map((i) => {
-        const totalItem = (i as any).total_item ?? (i as any).total ?? 0;
-        const precoUnit = (i as any).preco_unitario ?? (totalItem && i.quantidade ? totalItem / i.quantidade : 0);
+        const precoUnit =
+          toNum((i as any).preco_unitario) || toNum((i as any).precoUnitario) || 0;
+        const qtd = toNum((i as any).quantidade);
+        const totalItem =
+          toNum((i as any).total_item) || toNum((i as any).total) || (precoUnit * qtd);
         if (isChefe) {
           // Chefe vê quantidade, valor unitário e total
           return `<tr>
             <td>${i.produto_nome || `Produto #${i.produto}`}</td>
-            <td class="num">${i.quantidade}</td>
+            <td class="num">${qtd}</td>
             <td class="num">${formatCurrency(precoUnit)}</td>
             <td class="num">${formatCurrency(totalItem)}</td>
           </tr>`;
@@ -232,102 +300,144 @@ export function Venda() {
         // Funcionário vê apenas produto e quantidade
         return `<tr>
           <td>${i.produto_nome || `Produto #${i.produto}`}</td>
-          <td class="num">${i.quantidade}</td>
+          <td class="num">${qtd}</td>
         </tr>`;
       })
       .join("");
     const numeroVenda = venda.id != null ? String(venda.id) : "";
+    const conteudoVia = (viaLabel: string) => `
+      <div class="doc">
+        <div class="via">${viaLabel}</div>
+        ${getEmpresaHeaderHtml()}
+        <div class="doc-title">
+          <h1>VENDA</h1>
+          <div class="sub">Nº ${numeroVenda || "-"} — ${dataFormatada}</div>
+        </div>
+
+        <div class="info">
+          <div><strong>Cliente:</strong> ${venda.clienteNome}</div>
+          ${clienteDoc ? `<div><strong>Doc:</strong> ${clienteDoc}</div>` : ""}
+          ${clienteTelefone ? `<div><strong>Telefone:</strong> ${clienteTelefone}</div>` : ""}
+          <div><strong>Lançado por:</strong> ${usuarioNome || "-"}</div>
+        </div>
+
+        <div class="tabela-itens">
+          <table>
+            <thead>
+              ${
+                isChefe
+                  ? `<tr>
+                       <th style="width: 46%;">Produto</th>
+                       <th class="num" style="width: 18%;">Qtd</th>
+                       <th class="num" style="width: 18%;">Vlr unitário</th>
+                       <th class="num" style="width: 18%;">Total</th>
+                     </tr>`
+                  : `<tr>
+                       <th style="width: 70%;">Produto</th>
+                       <th class="num" style="width: 30%;">Qtd</th>
+                     </tr>`
+              }
+            </thead>
+            <tbody>
+              ${itensRows}
+            </tbody>
+          </table>
+          ${isChefe ? `<div class="total-venda"><strong>Total da venda: ${formatCurrency(totalVenda)}</strong></div>` : ""}
+        </div>
+
+        <div class="assinatura">
+          <div class="assinatura-linha"></div>
+          <div class="assinatura-texto">Assinatura do cliente</div>
+        </div>
+      </div>
+    `;
+
     const html = `<!DOCTYPE html>
 <html>
-  <head><meta charset="utf-8"><title>Venda ${numeroVenda ? "nº " + numeroVenda : ""} – ${venda.clienteNome}</title>
+  <head><meta charset="utf-8"><title></title>
     <style>
-      @page { size: A4; margin: 15mm; }
-      body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 12px; color: #1a1a1a; line-height: 1.45; max-width: 210mm; margin: 0 auto; padding: 16px; background: #f3f4f6; }
-      .doc { background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 18px 20px 20px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }
+      @page { size: A4; margin: 0; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11.5px; color: #111827; line-height: 1.25; background: #ffffff; }
+      .folha { position: relative; width: 210mm; height: 297mm; margin: 0 auto; }
+      .folha::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        border-top: 2px dashed #cbd5e1;
+        transform: translateY(-1px);
+      }
+      .folha::before {
+        content: "corte aqui";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #ffffff;
+        padding: 0 8px;
+        font-size: 10px;
+        color: #94a3b8;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .grid { display: grid; grid-template-rows: 1fr 1fr; height: 100%; }
+      .via-bloco { height: 148.5mm; padding: 7mm; }
+      .doc { width: 100%; height: 100%; background: #ffffff; border-radius: 8px; border: 1px solid #e5e7eb; padding: 10px 10px 8px; display: flex; flex-direction: column; }
+      .via { font-size: 10.5px; color: #6b7280; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
       .os-header{display:flex;gap:8px;align-items:center;margin-bottom:6px}
-      .os-logo img{max-height:56px;max-width:56px;object-fit:contain}
-      .empresa-block { font-size: 0.7rem; }
-      .empresa-nome { font-size: 0.85rem; font-weight: 600; color: #111827; letter-spacing: 0.02em; line-height: 1.3; }
-      .empresa-fantasia { font-size: 0.7rem; color: #4b5563; margin-top: 2px; }
-      .empresa-docs { font-size: 0.65rem; color: #6b7280; margin-top: 4px; }
+      .os-logo img{max-height:38px;max-width:38px;object-fit:contain}
+      .empresa-block { font-size: 10px; }
+      .empresa-nome { font-size: 11px; font-weight: 700; color: #111827; letter-spacing: 0.01em; line-height: 1.15; }
+      .empresa-fantasia { font-size: 10px; color: #4b5563; margin-top: 1px; }
+      .empresa-docs { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
       .empresa-docs span + span::before { content: " | "; }
-      .empresa-endereco { font-size: 0.65rem; color: #6b7280; margin-top: 2px; }
-      .empresa-contato { font-size: 0.65rem; color: #6b7280; margin-top: 2px; }
-      .doc-title { text-align: right; margin-bottom: 10px; }
-      .doc-title h1 { margin: 0; font-size: 16px; letter-spacing: 0.16em; color: #111827; }
-      .doc-title .sub { font-size: 11px; color: #6b7280; margin-top: 4px; }
+      .empresa-endereco { font-size: 9.5px; color: #6b7280; margin-top: 1px; }
+      .empresa-contato { font-size: 9.5px; color: #6b7280; margin-top: 1px; }
+      .doc-title { text-align: right; margin-bottom: 6px; }
+      .doc-title h1 { margin: 0; font-size: 12px; letter-spacing: 0.14em; color: #111827; }
+      .doc-title .sub { font-size: 9.5px; color: #6b7280; margin-top: 2px; }
       .info {
-        background: #f9fafb;
-        border-radius: 10px;
-        padding: 12px 14px;
-        margin-bottom: 18px;
-        font-size: 12px;
+        background: #ffffff;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 10px;
+        font-size: 11px;
         border: 1px solid #e5e7eb;
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px 14px;
+        gap: 4px 10px;
       }
       .info strong { font-weight: 600; color: #374151; }
-      .tabela-itens table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; border-radius: 6px; overflow: hidden; }
-      .tabela-itens th, .tabela-itens td { border: 1px solid #e5e7eb; padding: 7px 8px; text-align: left; }
-      .tabela-itens th { background: #f3f4f6; font-weight: 600; color: #374151; }
+      .tabela-itens table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10px; border-radius: 6px; overflow: hidden; }
+      .tabela-itens th, .tabela-itens td { border: 1px solid #e5e7eb; padding: 5px 6px; text-align: left; }
+      .tabela-itens th { background: #f3f4f6; font-weight: 700; color: #374151; }
       .tabela-itens .num { text-align: right; white-space: nowrap; }
-      .muted { color: #6b7280; font-size: 11px; margin-top: 18px; display: flex; justify-content: space-between; gap: 8px; }
-      .assinatura { margin-top: 28px; text-align: center; }
-      .assinatura-linha { width: 60%; max-width: 240px; margin: 0 auto 6px; border-bottom: 2px solid #4b5563; height: 28px; }
-      .assinatura-texto { font-size: 11px; color: #6b7280; }
+      .total-venda { display:flex; justify-content:flex-end; margin-top:6px; font-size:11px; }
+      .assinatura { margin-top: auto; padding-top: 8px; text-align: center; }
+      .assinatura-linha { width: 55%; max-width: 220px; margin: 0 auto 4px; border-bottom: 2px solid #4b5563; height: 18px; }
+      .assinatura-texto { font-size: 9.5px; color: #6b7280; }
       @media print {
-        body { background: #ffffff; padding: 0; }
-        .doc { box-shadow: none; border-radius: 0; border: none; }
+        /* Força layout em P&B (sem fundos) */
+        * { -webkit-print-color-adjust: economy; print-color-adjust: economy; }
+        body { background: #ffffff !important; color: #000 !important; }
+        .doc { border-color: #000 !important; }
+        .info { border-color: #000 !important; }
+        .tabela-itens th, .tabela-itens td { border-color: #000 !important; }
+        .tabela-itens th { background: #fff !important; color: #000 !important; }
+        .empresa-fantasia, .empresa-docs, .empresa-endereco, .empresa-contato, .doc-title .sub, .via, .assinatura-texto { color: #000 !important; }
+        .folha::after { border-top-color: #000 !important; }
+        .folha::before { color: #000 !important; }
       }
     </style>
   </head>
   <body>
-    <div class="doc">
-      ${getEmpresaHeaderHtml()}
-      <div class="doc-title">
-        <h1>VENDA</h1>
-        <div class="sub">Nº ${numeroVenda || "-"} — ${dataFormatada}</div>
-      </div>
-
-      <div class="info">
-        <div><strong>Cliente:</strong> ${venda.clienteNome}</div>
-        ${clienteDoc ? `<div><strong>Doc:</strong> ${clienteDoc}</div>` : ""}
-        ${clienteTelefone ? `<div><strong>Telefone:</strong> ${clienteTelefone}</div>` : ""}
-        <div><strong>Lançado por:</strong> ${usuarioNome || "-"}</div>
-      </div>
-
-      <div class="tabela-itens">
-        <table>
-          <thead>
-            ${
-              isChefe
-                ? `<tr>
-                     <th style="width: 46%;">Produto</th>
-                     <th class="num" style="width: 18%;">Qtd</th>
-                     <th class="num" style="width: 18%;">Vlr unitário</th>
-                     <th class="num" style="width: 18%;">Total</th>
-                   </tr>`
-                : `<tr>
-                     <th style="width: 70%;">Produto</th>
-                     <th class="num" style="width: 30%;">Qtd</th>
-                   </tr>`
-            }
-          </thead>
-          <tbody>
-            ${itensRows}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="assinatura">
-        <div class="assinatura-linha"></div>
-        <div class="assinatura-texto">Assinatura do cliente</div>
-      </div>
-
-      <div class="muted">
-        <span>Impresso em ${new Date().toLocaleString("pt-BR")}</span>
-        <span>${empresa.nome || "Empresa"}</span>
+    <div class="folha">
+      <div class="grid">
+        <div class="via-bloco">${conteudoVia("Via do cliente")}</div>
+        <div class="via-bloco">${conteudoVia("Via da empresa")}</div>
       </div>
     </div>
   </body>
@@ -337,6 +447,9 @@ export function Venda() {
       toast.error("Permita pop-ups para imprimir.");
       return;
     }
+    try {
+      janela.document.title = "";
+    } catch {}
     janela.document.write(html);
     janela.document.close();
     janela.focus();
@@ -892,20 +1005,93 @@ export function Venda() {
                   {(detailVenda.itens || []).map((item) => (
                     <TableRow key={item.id}>
                       <TableCell>{item.produto_nome || `#${item.produto}`}</TableCell>
-                      <TableCell className="text-right">{item.quantidade}</TableCell>
-                      {isChefe && <TableCell className="text-right">{formatCurrency(item.preco_unitario)}</TableCell>}
+                      <TableCell className="text-right">
+                        {isChefe && editingVendaItemId === item.id ? (
+                          <Input
+                            type="number"
+                            min={1}
+                            className="h-8 w-20 ml-auto text-right"
+                            value={editVendaQtd}
+                            onChange={(e) => setEditVendaQtd(e.target.value)}
+                          />
+                        ) : (
+                          item.quantidade
+                        )}
+                      </TableCell>
+                      {isChefe && (
+                        <TableCell className="text-right">
+                          {editingVendaItemId === item.id ? (
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              className="h-8 w-24 ml-auto text-right"
+                              value={editVendaPreco}
+                              onChange={(e) => setEditVendaPreco(e.target.value)}
+                            />
+                          ) : (
+                            formatCurrency(item.preco_unitario)
+                          )}
+                        </TableCell>
+                      )}
                       {isChefe && (
                         <TableCell className="text-right">{formatCurrency(item.quantidade * item.preco_unitario)}</TableCell>
                       )}
                       <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRemoveItem(item.id)}
-                          className="text-destructive"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                        {isChefe ? (
+                          <div className="flex items-center justify-end gap-1">
+                            {editingVendaItemId === item.id ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={salvarEdicaoItemVenda}
+                                  disabled={savingVendaItem}
+                                  title="Salvar"
+                                >
+                                  <Check className="size-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={cancelarEdicaoItemVenda}
+                                  disabled={savingVendaItem}
+                                  title="Cancelar"
+                                >
+                                  <X className="size-4" />
+                                </Button>
+                              </>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => iniciarEdicaoItemVenda(item)}
+                                title="Editar item"
+                              >
+                                <Pencil className="size-4" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRemoveItem(item.id)}
+                              className="text-destructive"
+                              title="Remover item"
+                              disabled={savingVendaItem}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleRemoveItem(item.id)}
+                            className="text-destructive"
+                            title="Remover item"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

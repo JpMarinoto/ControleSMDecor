@@ -73,6 +73,9 @@ export function ClienteDetalhe() {
   const [editingPrecoProdutoId, setEditingPrecoProdutoId] = useState<number | null>(null);
   const [editingPrecoVal, setEditingPrecoVal] = useState("");
   const [savingPrecoProdutoId, setSavingPrecoProdutoId] = useState<number | null>(null);
+  const [selectedPrecoBulkIds, setSelectedPrecoBulkIds] = useState<Set<number>>(new Set());
+  const [bulkPrecoComum, setBulkPrecoComum] = useState("");
+  const [bulkPrecoLoading, setBulkPrecoLoading] = useState(false);
 
   const loadDetalhe = () => {
     if (!id) return;
@@ -174,6 +177,61 @@ export function ClienteDetalhe() {
     } finally {
       setSavingPrecoProdutoId(null);
       setEditingPrecoProdutoId(null);
+    }
+  };
+
+  const togglePrecoBulkSelect = (produtoId: number) => {
+    setSelectedPrecoBulkIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(produtoId)) next.delete(produtoId);
+      else next.add(produtoId);
+      return next;
+    });
+  };
+
+  const toggleSelecionarTodosProdutosPreco = () => {
+    if (produtos.length === 0) return;
+    const allSelected = produtos.every((p) => selectedPrecoBulkIds.has(p.id));
+    if (allSelected) {
+      setSelectedPrecoBulkIds(new Set());
+    } else {
+      setSelectedPrecoBulkIds(new Set(produtos.map((p) => p.id)));
+    }
+  };
+
+  const handleAplicarPrecoEmLote = async () => {
+    if (!id) return;
+    if (selectedPrecoBulkIds.size === 0) {
+      toast.error("Selecione pelo menos um produto na tabela abaixo.");
+      return;
+    }
+    const valor = parseFloat(bulkPrecoComum.replace(",", "."));
+    if (isNaN(valor) || valor < 0) {
+      toast.error("Informe um preço válido (≥ 0).");
+      return;
+    }
+    const updates = [...selectedPrecoBulkIds].map((produto_id) => ({ produto_id, preco: valor }));
+    setBulkPrecoLoading(true);
+    try {
+      const res = await api.setClientePrecoProdutosBulk(id, updates);
+      if (res.ok > 0) {
+        toast.success(`Preço aplicado a ${res.ok} produto(s).`);
+      }
+      if (res.errors.length > 0) {
+        toast.warning(
+          `${res.errors.length} item(ns) falhou(aram): ${res.errors
+            .slice(0, 3)
+            .map((e) => e.error)
+            .join("; ")}${res.errors.length > 3 ? "…" : ""}`
+        );
+      }
+      loadPrecosProdutos();
+      setSelectedPrecoBulkIds(new Set());
+      setBulkPrecoComum("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao aplicar preços em lote");
+    } finally {
+      setBulkPrecoLoading(false);
     }
   };
 
@@ -343,20 +401,34 @@ export function ClienteDetalhe() {
     const porData = [...vendasSelecionadas].sort((a, b) => parseData(a.data) - parseData(b.data));
     const notasHtml = porData
       .map((v, index) => {
+        const itens = Array.isArray(v.itens) ? v.itens : [];
         const itensRows =
-          v.itens && v.itens.length > 0
-            ? v.itens
-                .map(
-                  (i) =>
-                    `<tr>
+          itens.length > 0
+            ? itens
+                .map((i) => {
+                  const totalItem =
+                    (typeof (i as any).total_item === "number" ? (i as any).total_item : null) ??
+                    (typeof (i as any).total === "number" ? (i as any).total : null) ??
+                    (typeof i.preco_unitario === "number" && typeof i.quantidade === "number" ? i.preco_unitario * i.quantidade : 0);
+                  return `<tr>
                       <td>${i.produto}</td>
                       <td class="num">${i.quantidade}</td>
                       <td class="num">${formatCurrency(i.preco_unitario)}</td>
-                      <td class="num">${formatCurrency(i.total_item)}</td>
-                    </tr>`
-                )
+                      <td class="num">${formatCurrency(totalItem)}</td>
+                    </tr>`;
+                })
                 .join("")
             : `<tr><td colspan="4" style="text-align:center;">Nenhum item registrado</td></tr>`;
+
+        const totalCalculado = itens.reduce((s, i) => {
+          const t =
+            (typeof (i as any).total_item === "number" ? (i as any).total_item : null) ??
+            (typeof (i as any).total === "number" ? (i as any).total : null) ??
+            (typeof i.preco_unitario === "number" && typeof i.quantidade === "number" ? i.preco_unitario * i.quantidade : 0);
+          return s + (typeof t === "number" && !isNaN(t) ? t : 0);
+        }, 0);
+        const totalNota =
+          typeof (v as any).total === "number" && (v as any).total > 0 ? (v as any).total : totalCalculado;
 
         const dataVenda = formatDateOnly(v.data);
 
@@ -366,7 +438,7 @@ export function ClienteDetalhe() {
               <div><strong>Nota #${v.id}</strong></div>
               <div><strong>Data:</strong> ${dataVenda}</div>
               <div><strong>Cliente:</strong> ${data.cliente.nome}</div>
-              <div><strong>Total da nota:</strong> ${formatCurrency(v.total)}</div>
+              <div><strong>Total da nota:</strong> ${formatCurrency(totalNota)}</div>
             </div>
             <div class="nota-items">
               <table>
@@ -806,10 +878,67 @@ export function ClienteDetalhe() {
           )}
 
           <p className="text-sm font-medium text-muted-foreground pt-4">Lista de todos os produtos e preço para este cliente</p>
+          <p className="text-xs text-muted-foreground">
+            Marque os produtos na tabela e defina um preço único para aplicar a todos de uma vez.
+          </p>
+          {produtos.length > 0 ? (
+            <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <span className="text-sm text-muted-foreground">
+                  {selectedPrecoBulkIds.size} produto(s) selecionado(s)
+                </span>
+                <Button type="button" variant="outline" size="sm" onClick={toggleSelecionarTodosProdutosPreco}>
+                  {produtos.length > 0 && produtos.every((p) => selectedPrecoBulkIds.has(p.id))
+                    ? "Desmarcar todos"
+                    : "Marcar todos"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedPrecoBulkIds(new Set())}
+                  disabled={selectedPrecoBulkIds.size === 0}
+                >
+                  Limpar seleção
+                </Button>
+                <div className="flex flex-wrap items-end gap-2 sm:ml-auto">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Preço para os selecionados (R$)</Label>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      className="h-9 w-32"
+                      value={bulkPrecoComum}
+                      onChange={(e) => setBulkPrecoComum(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={bulkPrecoLoading || selectedPrecoBulkIds.size === 0}
+                    onClick={handleAplicarPrecoEmLote}
+                  >
+                    {bulkPrecoLoading ? "Aplicando…" : "Aplicar preço aos selecionados"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {produtos.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <span className="sr-only">Selecionar para preço em lote</span>
+                    <Checkbox
+                      checked={
+                        produtos.length > 0 && produtos.every((p) => selectedPrecoBulkIds.has(p.id))
+                      }
+                      onCheckedChange={() => toggleSelecionarTodosProdutosPreco()}
+                      aria-label="Marcar ou desmarcar todos os produtos"
+                    />
+                  </TableHead>
                   <TableHead>Produto</TableHead>
                   <TableHead className="text-right w-32">Preço</TableHead>
                   <TableHead className="w-28">Tipo</TableHead>
@@ -821,6 +950,13 @@ export function ClienteDetalhe() {
                   const preco = especifico ? especifico.preco : Number(p.preco_venda ?? p.precoInicial ?? 0);
                   return (
                     <TableRow key={p.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedPrecoBulkIds.has(p.id)}
+                          onCheckedChange={() => togglePrecoBulkSelect(p.id)}
+                          aria-label={`Selecionar ${p.nome}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">{p.nome}</TableCell>
                       <TableCell className="text-right">{formatCurrency(preco)}</TableCell>
                       <TableCell>

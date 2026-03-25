@@ -39,6 +39,13 @@ export function Estoque() {
   const [materiais, setMateriais] = useState<ItemEstoque[]>([]);
   const [produtos, setProdutos] = useState<ItemEstoque[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ultimaAtualizacao, setUltimaAtualizacao] = useState<null | {
+    kind: "material" | "produto";
+    data: string | null;
+    item_nome: string;
+    detalhe: string;
+    observacao?: string;
+  }>(null);
   const [open, setOpen] = useState(false);
   const [tipoAjusteItem, setTipoAjusteItem] = useState<"material" | "produto">("material");
   const [modoAjuste, setModoAjuste] = useState<"entrada_saida" | "valor_fixo">(
@@ -70,6 +77,9 @@ export function Estoque() {
         setProdutos([]);
       })
       .finally(() => setLoading(false));
+    api.getEstoqueUltimaAtualizacao()
+      .then((res) => setUltimaAtualizacao(res.last_update))
+      .catch(() => setUltimaAtualizacao(null));
   };
 
   useEffect(() => {
@@ -265,6 +275,25 @@ export function Estoque() {
           <h1 className="text-3xl font-semibold">Estoque</h1>
           <p className="text-muted-foreground">
             {isChefe ? "Materiais, valores e ajustes" : "Contagem e ajustes por categoria (sem valores)"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Última atualização:{" "}
+            {ultimaAtualizacao?.data ? (
+              <>
+                <span className="font-medium text-foreground">
+                  {new Date(ultimaAtualizacao.data).toLocaleString("pt-BR")}
+                </span>
+                {" — "}
+                <span className="font-medium text-foreground">{ultimaAtualizacao.item_nome}</span>
+                {" ("}
+                {ultimaAtualizacao.kind}
+                {") — "}
+                {ultimaAtualizacao.detalhe}
+                {ultimaAtualizacao.observacao ? ` — ${ultimaAtualizacao.observacao}` : ""}
+              </>
+            ) : (
+              "—"
+            )}
           </p>
         </div>
         {isChefe && (materiais.length > 0 || produtos.length > 0) && (
