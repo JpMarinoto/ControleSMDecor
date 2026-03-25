@@ -78,6 +78,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
+
 Instale dependencias:
 
 ```bash
@@ -98,6 +99,7 @@ Exemplo minimo para producao:
 DJANGO_DEBUG=False
 DJANGO_SECRET_KEY=COLE_AQUI_A_CHAVE_GERADA
 DJANGO_ALLOWED_HOSTS=santosmarinoto.com,www.santosmarinoto.com,129.121.53.239
+# Com domínio ainda só em HTTP, inclua também http:// nas duas linhas abaixo até o Certbot.
 DJANGO_CORS_ALLOWED_ORIGINS=https://santosmarinoto.com,https://www.santosmarinoto.com
 DJANGO_CSRF_TRUSTED_ORIGINS=https://santosmarinoto.com,https://www.santosmarinoto.com
 DJANGO_USE_X_FORWARDED_HOST=True
@@ -188,7 +190,7 @@ Conteudo:
 ```nginx
 server {
     listen 80;
-    server_name seudominio.com www.seudominio.com;
+    server_name santosmarinoto.com www.santosmarinoto.com;
 
     client_max_body_size 20M;
 
@@ -196,8 +198,9 @@ server {
         alias /home/deploy/ControleSMDecor/staticfiles/;
     }
 
+    # Symlink na VPS: ln -sfn ".../dist/assets" /home/deploy/ControleSMDecor/fcs-assets
     location /assets/ {
-        alias /home/deploy/ControleSMDecor/Financial\ Control\ System/dist/assets/;
+        alias /home/deploy/ControleSMDecor/fcs-assets/;
     }
 
     location /api/ {
@@ -241,7 +244,7 @@ sudo firewall-cmd --reload
 Com DNS do dominio apontando para a VPS:
 
 ```bash
-sudo certbot --nginx -d seudominio.com -d www.seudominio.com
+sudo certbot --nginx -d santosmarinoto.com -d www.santosmarinoto.com
 ```
 
 Teste renovacao:

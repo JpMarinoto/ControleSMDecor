@@ -62,26 +62,6 @@ export function Estoque() {
     setLoading(true);
     api.getEstoque()
       .then((data) => {
-        // #region agent log
-        fetch('http://127.0.0.1:7578/ingest/a195fd4d-1dad-4bf6-8a0d-eb32dd9b44e0', {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "46f6aa",
-          },
-          body: JSON.stringify({
-            sessionId: "46f6aa",
-            location: "Estoque.tsx:load",
-            message: "carregando estoque",
-            data: {
-              materiais: Array.isArray(data?.materiais) ? data.materiais.length : 0,
-              produtos: Array.isArray(data?.produtos) ? data.produtos.length : 0,
-            },
-            timestamp: Date.now(),
-            hypothesisId: "H2",
-          }),
-        }).catch(() => {});
-        // #endregion
         setMateriais(data.materiais ?? []);
         setProdutos(data.produtos ?? []);
       })
@@ -231,23 +211,6 @@ export function Estoque() {
         toast.error(res.error || "Erro no ajuste");
         return;
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7578/ingest/a195fd4d-1dad-4bf6-8a0d-eb32dd9b44e0', {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "46f6aa",
-        },
-        body: JSON.stringify({
-          sessionId: "46f6aa",
-          location: "Estoque.tsx:aplicarContagemProduto",
-          message: "contagem produto aplicada",
-          data: { id, nova },
-          timestamp: Date.now(),
-          hypothesisId: "H1",
-        }),
-      }).catch(() => {});
-      // #endregion
       toast.success("Contagem aplicada ao sistema");
       setProdutos((prev) =>
         prev.map((p) =>

@@ -77,3 +77,24 @@ Depois, com o Django a correr (`python manage.py runserver`), abre **http://127.
 - **Substituição do front:** O front dos templates foi substituído pelo **Financial Control System** na raiz (`/`).
 - **Ligações back–front:** O React usa a API em `/api/` (clientes, produtos, vendas, compras, transações, contas, materiais, categorias, fornecedores).
 - **Dados:** O Dashboard e as transações já carregam e gravam no Django; as outras páginas (Venda, Compra, Cadastro) podem continuar a usar localStorage em paralelo até serem totalmente ligadas à API.
+
+
+VPS
+ssh deploy@129.121.53.239
+
+cd /home/deploy/ControleSMDecor
+source .venv/bin/activate
+
+git pull
+
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py collectstatic --noinput
+
+cd "/home/deploy/ControleSMDecor/Financial Control System"
+npm install
+npm run build
+cd /home/deploy/ControleSMDecor
+
+cd "/home/deploy/ControleSMDecor/Financial Control System" && npm run build && cd ..
+sudo systemctl restart financeiro
