@@ -17,8 +17,11 @@ import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa
 
 interface ItemCompra {
   id: number;
-  material: number;
-  material_nome: string;
+  tipo?: "material" | "produto";
+  material?: number;
+  material_nome?: string;
+  produto?: number;
+  produto_nome?: string;
   quantidade: number;
   preco_no_dia: number;
   total: number;
@@ -43,13 +46,16 @@ interface NovoItemCompraForm {
 export function Compra() {
   const [ordens, setOrdens] = useState<OrdemCompra[]>([]);
   const [materiais, setMateriais] = useState<any[]>([]);
+  const [produtosRevenda, setProdutosRevenda] = useState<any[]>([]);
   const [fornecedores, setFornecedores] = useState<any[]>([]);
   
   const [materialId, setMaterialId] = useState('');
+  const [produtoId, setProdutoId] = useState('');
   const [fornecedorId, setFornecedorId] = useState('');
   const [quantidade, setQuantidade] = useState('');
   const [precoUnitario, setPrecoUnitario] = useState('');
   const [data, setData] = useState(new Date().toISOString().split('T')[0]);
+  const [tipoItem, setTipoItem] = useState<"material" | "produto">("material");
 
   const [itensForm, setItensForm] = useState<NovoItemCompraForm[]>([]);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -115,9 +121,10 @@ export function Compra() {
 
   const loadData = async () => {
     try {
-      const [ordensRes, materiaisRes, fornRes] = await Promise.all([
+      const [ordensRes, materiaisRes, produtosRes, fornRes] = await Promise.all([
         api.getCompras().catch(() => []),
         api.getMateriais().catch(() => []),
+        api.getProdutos().catch(() => []),
         api.getFornecedores().catch(() => []),
       ]);
       setOrdens(
@@ -129,8 +136,11 @@ export function Compra() {
               data: o.data || "",
               itens: (o.itens || []).map((i: any) => ({
                 id: i.id,
+                tipo: (i.tipo === "produto" ? "produto" : "material") as "material" | "produto",
                 material: i.material,
                 material_nome: i.material_nome || "",
+                produto: i.produto,
+                produto_nome: i.produto_nome || "",
                 quantidade: Number(i.quantidade) || 0,
                 preco_no_dia: Number(i.preco_no_dia) || 0,
                 total: Number(i.total) || 0,
@@ -140,6 +150,8 @@ export function Compra() {
           : []
       );
       setMateriais(Array.isArray(materiaisRes) ? materiaisRes : []);
+      const allProds = Array.isArray(produtosRes) ? produtosRes : [];
+      setProdutosRevenda(allProds.filter((p: any) => Boolean(p.revenda)));
       setFornecedores(Array.isArray(fornRes) ? fornRes : []);
     } catch {
       toast.error("Erro ao carregar dados");
@@ -433,7 +445,7 @@ export function Compra() {
           return item.materialId && !isNaN(qtd) && qtd > 0 && !isNaN(preco) && preco > 0;
         })
         .map((item) => ({
-          material: Number(item.materialId),
+          ...(item.materialId.startsWith("prod:") ? { tipo: "produto", produto: Number(item.materialId.replace("prod:", "")) } : { tipo: "material", material: Number(item.materialId.replace("mat:", "")) }),
           quantidade: parseInt(item.quantidade, 10),
           preco_no_dia: parseFloat(item.precoUnitario.replace(',', '.')),
         }));
@@ -455,6 +467,7 @@ export function Compra() {
 
   const resetForm = () => {
     setMaterialId('');
+    setProdutoId('');
     setFornecedorId('');
     setQuantidade('');
     setPrecoUnitario('');
@@ -548,23 +561,65 @@ export function Compra() {
                       const materiaisDoFornecedor = materiais.filter(
                         (m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === String(fornecedorId)
                       );
-                      return materiaisDoFornecedor.length > 0 ? (
-                        <Select value={materialId} onValueChange={setMaterialId}>
-                          <SelectTrigger id="materialId">
-                            <SelectValue placeholder="Selecione o material" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {materiaisDoFornecedor.map((m: any) => (
-                              <SelectItem key={m.id} value={String(m.id)}>
-                                {m.nome}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <p className="text-sm text-muted-foreground py-2">
-                          Nenhum material vinculado a este fornecedor. Vincule na aba Cadastro (materiais).
-                        </p>
+                      const produtosDoFornecedor = produtosRevenda.filter((p: any) => {
+                        const fid = p.fornecedor;
+                        return String(fid) === String(fornecedorId);
+                      });
+                      const listaProdutos = produtosDoFornecedor.length > 0 ? produtosDoFornecedor : produtosRevenda;
+
+                      return (
+                        <div className="space-y-2">
+                          <Label>Tipo de item</Label>
+                          <Select value={tipoItem} onValueChange={(v) => setTipoItem(v as "material" | "produto")}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="material">Material</SelectItem>
+                              <SelectItem value="produto">Produto (revenda)</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          {tipoItem === "material" ? (
+                            materiaisDoFornecedor.length > 0 ? (
+                              <Select value={materialId} onValueChange={setMaterialId}>
+                                <SelectTrigger id="materialId">
+                                  <SelectValue placeholder="Selecione o material" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {materiaisDoFornecedor.map((m: any) => (
+                                    <SelectItem key={m.id} value={String(m.id)}>
+                                      {m.nome}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="text-sm text-muted-foreground py-2">
+                                Nenhum material vinculado a este fornecedor. Vincule na aba Cadastro (materiais).
+                              </p>
+                            )
+                          ) : (
+                            listaProdutos.length > 0 ? (
+                              <Select value={produtoId} onValueChange={setProdutoId}>
+                                <SelectTrigger id="produtoId">
+                                  <SelectValue placeholder="Selecione o produto de revenda" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {listaProdutos.map((p: any) => (
+                                    <SelectItem key={p.id} value={String(p.id)}>
+                                      {p.nome}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <p className="text-sm text-muted-foreground py-2">
+                                Nenhum produto de revenda cadastrado. Marque "Produto de revenda" no Cadastro de Produtos.
+                              </p>
+                            )
+                          )}
+                        </div>
                       );
                     })()}
                   </div>
@@ -619,8 +674,9 @@ export function Compra() {
                         toast.error('Selecione o fornecedor primeiro');
                         return;
                       }
-                      if (!materialId || !quantidade) {
-                        toast.error('Selecione material e quantidade');
+                      const selectedId = tipoItem === "produto" ? produtoId : materialId;
+                      if (!selectedId || !quantidade) {
+                        toast.error(`Selecione ${tipoItem === "produto" ? "produto" : "material"} e quantidade`);
                         return;
                       }
                       const qtd = parseInt(quantidade, 10);
@@ -628,8 +684,12 @@ export function Compra() {
                         toast.error('Quantidade inválida');
                         return;
                       }
-                      const mat = materiais.find((m: any) => String(m.id) === materialId);
-                      const precoBase = mat ? (mat.precoUnitarioBase ?? mat.preco_unitario_base ?? 0) : 0;
+                      const precoBase =
+                        tipoItem === "produto"
+                          ? (produtosRevenda.find((p: any) => String(p.id) === selectedId)?.preco_custo ?? 0)
+                          : (materiais.find((m: any) => String(m.id) === selectedId)?.precoUnitarioBase ??
+                             materiais.find((m: any) => String(m.id) === selectedId)?.preco_unitario_base ??
+                             0);
                       const precoParaItem = isChefe
                         ? (parseFloat(String(precoUnitario).replace(',', '.')) || precoBase)
                         : Number(precoBase);
@@ -645,25 +705,26 @@ export function Compra() {
                         ...prev,
                         {
                           id: `${Date.now()}-${prev.length}`,
-                          materialId,
+                          materialId: tipoItem === "produto" ? `prod:${selectedId}` : `mat:${selectedId}`,
                           quantidade,
                           precoUnitario: String(precoParaItem),
                         },
                       ]);
                       setMaterialId('');
+                      setProdutoId('');
                       setQuantidade('');
                       setPrecoUnitario('');
                     }}
                   >
                     <Plus className="size-4 mr-2" />
-                    Adicionar material à lista
+                    Adicionar item à lista
                   </Button>
                 </div>
                 {itensForm.length > 0 ? (
                   <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[min(200px,40%)]">Material</TableHead>
+                        <TableHead className="w-[min(200px,40%)]">Item</TableHead>
                         <TableHead className="w-20 text-right">Qtd</TableHead>
                         {isChefe && <TableHead className="w-28 text-right">Preço un.</TableHead>}
                         {isChefe && <TableHead className="w-28 text-right">Total</TableHead>}
@@ -672,13 +733,17 @@ export function Compra() {
                     </TableHeader>
                     <TableBody>
                       {itensForm.map((item) => {
-                        const material = materiais.find((m: any) => String(m.id) === item.materialId);
+                        const isProd = item.materialId.startsWith("prod:");
+                        const refId = item.materialId.replace("prod:", "").replace("mat:", "");
+                        const label = isProd
+                          ? (produtosRevenda.find((p: any) => String(p.id) === refId)?.nome ?? `Produto #${refId}`)
+                          : (materiais.find((m: any) => String(m.id) === refId)?.nome ?? `Material #${refId}`);
                         const qtdItem = parseFloat(item.quantidade.replace(',', '.') || '0');
                         const precoItem = parseFloat(item.precoUnitario.replace(',', '.') || '0');
                         const isEditing = editingItemId === item.id;
                         return (
                           <TableRow key={item.id} className={isEditing ? "bg-primary/5 border-l-2 border-l-primary" : ""}>
-                            <TableCell className="align-middle truncate">{material ? material.nome : `#${item.materialId}`}</TableCell>
+                            <TableCell className="align-middle truncate">{label}</TableCell>
                             {isEditing ? (
                               <>
                                 <TableCell className="text-right align-middle py-2">

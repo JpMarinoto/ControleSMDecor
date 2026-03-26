@@ -74,6 +74,16 @@ class Produto(models.Model):
         blank=True,
         related_name='produtos'
     )
+    revenda = models.BooleanField(default=False, verbose_name="Revenda")
+    fornecedor = models.ForeignKey(
+        Fornecedor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='produtos',
+    )
+    preco_custo = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    margem_lucro_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
     preco_venda = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     descricao = models.TextField(blank=True, null=True)
     estoque_atual = models.PositiveIntegerField(default=0)
@@ -179,6 +189,26 @@ class CompraMaterial(models.Model):
         null=True,
         blank=True,
         related_name='itens',
+    )
+
+    @property
+    def total_compra(self):
+        return self.quantidade * self.preco_no_dia
+
+
+class CompraProduto(models.Model):
+    """Compra de produto de revenda (produto pronto) vinculada a fornecedor."""
+    produto = models.ForeignKey(Produto, on_delete=models.CASCADE)
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras_produtos')
+    quantidade = models.PositiveIntegerField()
+    preco_no_dia = models.DecimalField(max_digits=10, decimal_places=2)
+    data_compra = models.DateTimeField(auto_now_add=True)
+    ordem = models.ForeignKey(
+        OrdemCompra,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='itens_produtos',
     )
 
     @property

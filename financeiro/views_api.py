@@ -26,6 +26,7 @@ from .models import (
     Pagamento,
     PrecoClienteProduto,
     CompraMaterial,
+    CompraProduto,
     OrdemCompra,
     PagamentoFornecedor,
     MovimentoCaixa,
@@ -48,9 +49,10 @@ from .serializers import (
     CategoriaSerializer,
     ContaBancoSerializer,
     VendaSerializer,
-    CompraSerializer,
     OrdemCompraSerializer,
-    ItemCompraSerializer,
+    ItemCompraMaterialSerializer,
+    ItemCompraProdutoSerializer,
+    CompraSerializer,
 )
 
 
@@ -620,19 +622,34 @@ class CompraListCreate(APIView):
     def get(self, request):
         try:
             # Retorna lista de ordens (cada ordem com itens); itens sem ordem como ordem de 1 item
-            ordens = list(OrdemCompra.objects.prefetch_related('itens__material').select_related('fornecedor').order_by('-data_compra'))
-            itens_sem_ordem = CompraMaterial.objects.filter(ordem__isnull=True).select_related('fornecedor', 'material').order_by('-data_compra')
+            ordens = list(
+                OrdemCompra.objects
+                .prefetch_related('itens__material', 'itens_produtos__produto')
+                .select_related('fornecedor')
+                .order_by('-data_compra')
+            )
+            itens_sem_ordem_mat = CompraMaterial.objects.filter(ordem__isnull=True).select_related('fornecedor', 'material').order_by('-data_compra')
+            itens_sem_ordem_prod = CompraProduto.objects.filter(ordem__isnull=True).select_related('fornecedor', 'produto').order_by('-data_compra')
             out = []
             for o in ordens:
                 out.append(OrdemCompraSerializer(o).data)
-            for c in itens_sem_ordem:
+            for c in itens_sem_ordem_mat:
                 # Ordem sintética de 1 item (legado)
                 out.append({
-                    'id': f'item-{c.id}',
+                    'id': f'item-mat-{c.id}',
                     'fornecedor': c.fornecedor.nome,
                     'fornecedor_id': c.fornecedor_id,
                     'data': c.data_compra.date().isoformat() if c.data_compra else None,
-                    'itens': [ItemCompraSerializer(c).data],
+                    'itens': [ItemCompraMaterialSerializer(c).data],
+                    'total': float(c.total_compra),
+                })
+            for c in itens_sem_ordem_prod:
+                out.append({
+                    'id': f'item-prod-{c.id}',
+                    'fornecedor': c.fornecedor.nome,
+                    'fornecedor_id': c.fornecedor_id,
+                    'data': c.data_compra.date().isoformat() if c.data_compra else None,
+                    'itens': [ItemCompraProdutoSerializer(c).data],
                     'total': float(c.total_compra),
                 })
             return Response(out)
@@ -657,14 +674,12 @@ class CompraListCreate(APIView):
         ordem = OrdemCompra.objects.create(fornecedor=fornecedor)
         created = []
         for item in itens:
+            item_tipo = (item.get('tipo') or '').strip().lower()
             material_id = item.get('material')
+            produto_id = item.get('produto')
             qtd = item.get('quantidade')
             preco = item.get('preco_no_dia')
-            if not material_id or qtd is None or preco is None:
-                continue
-            try:
-                material = Material.objects.get(pk=material_id)
-            except Material.DoesNotExist:
+            if qtd is None or preco is None:
                 continue
             try:
                 from decimal import Decimal
@@ -674,14 +689,40 @@ class CompraListCreate(APIView):
                 continue
             if q <= 0 or p < 0:
                 continue
-            c = CompraMaterial.objects.create(
-                ordem=ordem,
-                fornecedor=fornecedor,
-                material=material,
-                quantidade=q,
-                preco_no_dia=p,
-            )
-            created.append(c)
+            # Se não veio tipo explícito, tenta inferir por presença do campo
+            if not item_tipo:
+                item_tipo = 'produto' if produto_id else 'material'
+
+            if item_tipo == 'produto' or produto_id:
+                if not produto_id:
+                    continue
+                try:
+                    prod = Produto.objects.get(pk=produto_id, revenda=True)
+                except Produto.DoesNotExist:
+                    continue
+                c = CompraProduto.objects.create(
+                    ordem=ordem,
+                    fornecedor=fornecedor,
+                    produto=prod,
+                    quantidade=q,
+                    preco_no_dia=p,
+                )
+                created.append(c)
+            else:
+                if not material_id:
+                    continue
+                try:
+                    material = Material.objects.get(pk=material_id)
+                except Material.DoesNotExist:
+                    continue
+                c = CompraMaterial.objects.create(
+                    ordem=ordem,
+                    fornecedor=fornecedor,
+                    material=material,
+                    quantidade=q,
+                    preco_no_dia=p,
+                )
+                created.append(c)
         if not created:
             ordem.delete()
             return Response({'itens': ['Nenhum item válido.']}, status=status.HTTP_400_BAD_REQUEST)
@@ -695,11 +736,12 @@ class CompraDetail(APIView):
         try:
             if isinstance(pk, str) and pk.startswith('item-'):
                 pk = pk.replace('item-', '')
+                pk = pk.replace('mat-', '').replace('prod-', '')
             pk_int = int(pk)
         except (ValueError, TypeError):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         try:
-            ordem = OrdemCompra.objects.prefetch_related('itens__material').select_related('fornecedor').filter(pk=pk_int).first()
+            ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
             if ordem:
                 return Response(OrdemCompraSerializer(ordem).data)
             item = CompraMaterial.objects.select_related('fornecedor', 'material').filter(pk=pk_int).first()
@@ -707,12 +749,24 @@ class CompraDetail(APIView):
                 if item.ordem_id:
                     return Response(OrdemCompraSerializer(item.ordem).data)
                 return Response({
-                    'id': f'item-{item.id}',
+                    'id': f'item-mat-{item.id}',
                     'fornecedor': item.fornecedor.nome,
                     'fornecedor_id': item.fornecedor_id,
                     'data': item.data_compra.date().isoformat() if item.data_compra else None,
-                    'itens': [ItemCompraSerializer(item).data],
+                    'itens': [ItemCompraMaterialSerializer(item).data],
                     'total': float(item.total_compra),
+                })
+            itemp = CompraProduto.objects.select_related('fornecedor', 'produto').filter(pk=pk_int).first()
+            if itemp:
+                if itemp.ordem_id:
+                    return Response(OrdemCompraSerializer(itemp.ordem).data)
+                return Response({
+                    'id': f'item-prod-{itemp.id}',
+                    'fornecedor': itemp.fornecedor.nome,
+                    'fornecedor_id': itemp.fornecedor_id,
+                    'data': itemp.data_compra.date().isoformat() if itemp.data_compra else None,
+                    'itens': [ItemCompraProdutoSerializer(itemp).data],
+                    'total': float(itemp.total_compra),
                 })
         except Exception as e:
             from django.db.utils import OperationalError
@@ -724,10 +778,20 @@ class CompraDetail(APIView):
     def put(self, request, pk):
         if isinstance(pk, str) and pk.startswith('item-'):
             pk = pk.replace('item-', '')
+            pk = pk.replace('mat-', '').replace('prod-', '')
+        obj = None
+        kind = None
         try:
             obj = CompraMaterial.objects.select_related('fornecedor', 'material').get(pk=pk)
+            kind = 'material'
         except (CompraMaterial.DoesNotExist, ValueError):
-            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            obj = None
+        if obj is None:
+            try:
+                obj = CompraProduto.objects.select_related('fornecedor', 'produto').get(pk=pk)
+                kind = 'produto'
+            except (CompraProduto.DoesNotExist, ValueError):
+                return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if request.data.get('quantidade') is not None:
             try:
                 obj.quantidade = int(request.data.get('quantidade'))
@@ -739,9 +803,14 @@ class CompraDetail(APIView):
                 obj.preco_no_dia = Decimal(str(request.data.get('preco_no_dia')).replace(',', '.'))
             except (ValueError, TypeError):
                 pass
-        if request.data.get('material') is not None:
+        if kind == 'material' and request.data.get('material') is not None:
             try:
                 obj.material_id = int(request.data.get('material'))
+            except (ValueError, TypeError):
+                pass
+        if kind == 'produto' and request.data.get('produto') is not None:
+            try:
+                obj.produto_id = int(request.data.get('produto'))
             except (ValueError, TypeError):
                 pass
         if request.data.get('fornecedor') is not None:
@@ -751,12 +820,14 @@ class CompraDetail(APIView):
                 pass
         obj.save()
         _api_log(request, "Editar", "Compra", f"Compra #{pk} atualizada")
-        serializer = CompraSerializer(obj)
-        return Response(serializer.data)
+        if kind == 'material':
+            return Response(CompraSerializer(obj).data)
+        return Response(ItemCompraProdutoSerializer(obj).data)
 
     def delete(self, request, pk):
         if isinstance(pk, str) and pk.startswith('item-'):
             pk = pk.replace('item-', '')
+            pk = pk.replace('mat-', '').replace('prod-', '')
         try:
             pk_int = int(pk)
         except (ValueError, TypeError):
@@ -769,10 +840,21 @@ class CompraDetail(APIView):
         try:
             obj = CompraMaterial.objects.get(pk=pk_int)
         except CompraMaterial.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            obj = None
+        if obj is None:
+            try:
+                objp = CompraProduto.objects.get(pk=pk_int)
+            except CompraProduto.DoesNotExist:
+                return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            ordem = objp.ordem
+            objp.delete()
+            if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
+                ordem.delete()
+            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída")
+            return Response(status=status.HTTP_204_NO_CONTENT)
         ordem = obj.ordem
         obj.delete()
-        if ordem and not ordem.itens.exists():
+        if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
             ordem.delete()
         _api_log(request, "Excluir", "Compra", f"Compra #{pk} excluída")
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -783,11 +865,12 @@ class CompraCopiar(APIView):
     def post(self, request, pk):
         if isinstance(pk, str) and pk.startswith('item-'):
             pk = pk.replace('item-', '')
+            pk = pk.replace('mat-', '').replace('prod-', '')
         try:
             pk_int = int(pk)
         except (ValueError, TypeError):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-        ordem = OrdemCompra.objects.prefetch_related('itens__material').select_related('fornecedor').filter(pk=pk_int).first()
+        ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
         if ordem:
             nova_ordem = OrdemCompra.objects.create(fornecedor=ordem.fornecedor)
             for item in ordem.itens.all():
@@ -795,6 +878,14 @@ class CompraCopiar(APIView):
                     ordem=nova_ordem,
                     fornecedor=ordem.fornecedor,
                     material=item.material,
+                    quantidade=item.quantidade,
+                    preco_no_dia=item.preco_no_dia,
+                )
+            for item in ordem.itens_produtos.all():
+                CompraProduto.objects.create(
+                    ordem=nova_ordem,
+                    fornecedor=ordem.fornecedor,
+                    produto=item.produto,
                     quantidade=item.quantidade,
                     preco_no_dia=item.preco_no_dia,
                 )
@@ -810,6 +901,16 @@ class CompraCopiar(APIView):
             )
             _api_log(request, "Criar", "Compra", f"Compra #{nova.id} copiada da compra #{pk}")
             return Response(CompraSerializer(nova).data, status=status.HTTP_201_CREATED)
+        itemp = CompraProduto.objects.select_related('fornecedor', 'produto').filter(pk=pk_int).first()
+        if itemp:
+            nova = CompraProduto.objects.create(
+                fornecedor=itemp.fornecedor,
+                produto=itemp.produto,
+                quantidade=itemp.quantidade,
+                preco_no_dia=itemp.preco_no_dia,
+            )
+            _api_log(request, "Criar", "Compra", f"Compra produto #{nova.id} copiada da compra #{pk}")
+            return Response(ItemCompraProdutoSerializer(nova).data, status=status.HTTP_201_CREATED)
         return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
 

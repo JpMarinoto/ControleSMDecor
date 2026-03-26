@@ -21,7 +21,6 @@ O Django fica em **http://127.0.0.1:8000**. A API usa autenticação por **Token
 Para popular o banco com clientes, fornecedores, produtos, materiais, vendas, compras, etc. (fins de teste):
 
 ```bash
-# Na raiz do projeto, com o ambiente virtual ativado
 python manage.py seed_test_data
 ```
 
@@ -34,7 +33,7 @@ O sistema exige login. Para criar o **primeiro usuário (Chefe)**, que pode cria
 ```bash
 # Na raiz do projeto, com o ambiente virtual ativado
 python manage.py migrate
-python manage.py criar_mestao --username mestao --password sua_senha
+python manage.py criar_mestao --username chefe --password 123456
 ```
 
 Depois acesse a aplicação, vá em **/login** e entre com esse usuário. O Chefe verá o menu **Usuários**, onde pode criar funcionários e outros chefes e definir permissões.
@@ -104,8 +103,3 @@ npm install
 npm run build
 cd ..
 sudo systemctl restart financeiro
-
-
-
-Tranferir banco da vps para local
-scp deploy@129.121.53.239:/home/deploy/<NOME_DA_PASTA_DO_PROJETO>/db.sqlite3 "C:\CAMINHO\PARA\SALVAR\db.sqlite3"

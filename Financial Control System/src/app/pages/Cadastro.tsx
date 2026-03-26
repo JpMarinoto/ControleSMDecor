@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
+import { Checkbox } from "../components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -54,7 +55,11 @@ interface Produto {
   id: string;
   categoria: string;
   nome: string;
-  precoInicial: number;
+  precoInicial: number; // preco_venda
+  revenda?: boolean;
+  fornecedor?: string; // id
+  precoCusto?: number;
+  margemLucroPercent?: number;
   createdAt: string;
 }
 
@@ -155,6 +160,13 @@ export function Cadastro() {
   const [categoriaProduto, setCategoriaProduto] = useState('');
   const [nomeProduto, setNomeProduto] = useState('');
   const [precoInicial, setPrecoInicial] = useState('');
+  const [produtoRevenda, setProdutoRevenda] = useState(false);
+  const [fornecedorProduto, setFornecedorProduto] = useState('');
+  const [precoCustoProduto, setPrecoCustoProduto] = useState('');
+  const [margemLucroProduto, setMargemLucroProduto] = useState('');
+  const [calcProdutoSource, setCalcProdutoSource] = useState<'preco_venda' | 'preco_custo' | 'margem' | null>(null);
+
+  const FORNECEDOR_NENHUM = "__none__";
 
   // Form states - Materiais
   const [nomeMaterial, setNomeMaterial] = useState('');
@@ -208,6 +220,10 @@ export function Cadastro() {
         categoria: sid(p.categoria),
         nome: p.nome || "",
         precoInicial: Number(p.preco_venda) || 0,
+        revenda: Boolean(p.revenda),
+        fornecedor: sid(p.fornecedor),
+        precoCusto: Number(p.preco_custo) || 0,
+        margemLucroPercent: Number(p.margem_lucro_percent) || 0,
         createdAt: "",
       })));
       setFornecedores((Array.isArray(fornecedoresRes) ? fornecedoresRes : []).map((f: any) => ({
@@ -318,11 +334,17 @@ export function Cadastro() {
       toast.error('Preço inválido');
       return;
     }
+    const custo = parseFloat(String(precoCustoProduto || '').replace(',', '.'));
+    const margem = parseFloat(String(margemLucroProduto || '').replace(',', '.'));
     const payload = {
       nome: nomeProduto.trim(),
       categoria: Number(categoriaProduto) || undefined,
       preco_venda: preco,
       descricao: "",
+      revenda: produtoRevenda,
+      fornecedor: produtoRevenda && fornecedorProduto ? Number(fornecedorProduto) : null,
+      preco_custo: produtoRevenda && !isNaN(custo) && custo >= 0 ? custo : 0,
+      margem_lucro_percent: produtoRevenda && !isNaN(margem) ? margem : 0,
     };
     try {
       if (editingProduto) {
@@ -475,6 +497,11 @@ export function Cadastro() {
     setCategoriaProduto('');
     setNomeProduto('');
     setPrecoInicial('');
+    setProdutoRevenda(false);
+    setFornecedorProduto('');
+    setPrecoCustoProduto('');
+    setMargemLucroProduto('');
+    setCalcProdutoSource(null);
   };
 
   const resetFornecedorForm = () => {
@@ -533,7 +560,26 @@ export function Cadastro() {
     setCategoriaProduto(produto.categoria);
     setNomeProduto(produto.nome);
     setPrecoInicial(Number(produto.precoInicial).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    setProdutoRevenda(Boolean(produto.revenda));
+    setFornecedorProduto(produto.fornecedor || '');
+    setPrecoCustoProduto(
+      Number(produto.precoCusto ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    );
+    setMargemLucroProduto(
+      Number(produto.margemLucroPercent ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    );
+    setCalcProdutoSource(null);
   };
+
+  const parseDecimal = (raw: string): number | null => {
+    const t = String(raw ?? "").trim();
+    if (!t) return null;
+    const v = parseFloat(t.replace(",", "."));
+    return isNaN(v) ? null : v;
+  };
+
+  const fmt2 = (n: number) =>
+    Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const handleEditFornecedor = (fornecedor: Fornecedor) => {
     setEditingFornecedor(fornecedor);
@@ -1013,17 +1059,130 @@ export function Cadastro() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="precoInicial">Preço Inicial *</Label>
+                    <Label htmlFor="precoInicial">Preço de Venda *</Label>
                     <Input
                       id="precoInicial"
                       type="text"
                       inputMode="decimal"
                       value={precoInicial}
-                      onChange={(e) => setPrecoInicial(e.target.value)}
+                      onChange={(e) => {
+                        setCalcProdutoSource('preco_venda');
+                        setPrecoInicial(e.target.value);
+                        if (produtoRevenda) {
+                          const venda = parseDecimal(e.target.value);
+                          const custo = parseDecimal(precoCustoProduto);
+                          if (venda != null && custo != null && custo > 0) {
+                            const m = ((venda / custo) - 1) * 100;
+                            setMargemLucroProduto(fmt2(m));
+                          }
+                        }
+                      }}
                       placeholder="0,00"
                     />
                   </div>
                 </div>
+
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    id="produtoRevenda"
+                    checked={produtoRevenda}
+                    onCheckedChange={(v) => {
+                      const checked = v === true;
+                      setProdutoRevenda(checked);
+                      if (!checked) {
+                        setFornecedorProduto('');
+                        setPrecoCustoProduto('');
+                        setMargemLucroProduto('');
+                        setCalcProdutoSource(null);
+                      }
+                    }}
+                  />
+                  <Label htmlFor="produtoRevenda" className="cursor-pointer">
+                    Produto de revenda (comprado pronto)
+                  </Label>
+                </div>
+
+                {produtoRevenda && (
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="fornecedorProduto">Fornecedor (opcional)</Label>
+                      <Select
+                        value={fornecedorProduto || undefined}
+                        onValueChange={(v) => setFornecedorProduto(v === FORNECEDOR_NENHUM ? "" : v)}
+                      >
+                        <SelectTrigger id="fornecedorProduto">
+                          <SelectValue placeholder="Selecione" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FORNECEDOR_NENHUM}>Nenhum</SelectItem>
+                          {fornecedores.length > 0 ? (
+                            fornecedores.map((f) => (
+                              <SelectItem key={f.id} value={String(f.id)}>
+                                {f.nomeRazaoSocial || "(Sem nome)"}
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="none" disabled>
+                              Cadastre um fornecedor primeiro
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="precoCustoProduto">Preço de Custo (R$)</Label>
+                      <Input
+                        id="precoCustoProduto"
+                        type="text"
+                        inputMode="decimal"
+                        value={precoCustoProduto}
+                        onChange={(e) => {
+                          setCalcProdutoSource('preco_custo');
+                          setPrecoCustoProduto(e.target.value);
+                          const custo = parseDecimal(e.target.value);
+                          const margem = parseDecimal(margemLucroProduto);
+                          const venda = parseDecimal(precoInicial);
+                          if (custo != null && custo > 0) {
+                            if (margem != null && (calcProdutoSource === 'margem' || calcProdutoSource === 'preco_custo')) {
+                              const pv = custo * (1 + margem / 100);
+                              setPrecoInicial(fmt2(pv));
+                            } else if (venda != null && (calcProdutoSource === 'preco_venda' || calcProdutoSource === 'preco_custo')) {
+                              const m = ((venda / custo) - 1) * 100;
+                              setMargemLucroProduto(fmt2(m));
+                            }
+                          }
+                        }}
+                        placeholder="0,00"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="margemLucroProduto">% de Lucro</Label>
+                      <Input
+                        id="margemLucroProduto"
+                        type="text"
+                        inputMode="decimal"
+                        value={margemLucroProduto}
+                        onChange={(e) => {
+                          setCalcProdutoSource('margem');
+                          setMargemLucroProduto(e.target.value);
+                          const custo = parseDecimal(precoCustoProduto);
+                          const margem = parseDecimal(e.target.value);
+                          if (custo != null && custo > 0 && margem != null) {
+                            const pv = custo * (1 + margem / 100);
+                            setPrecoInicial(fmt2(pv));
+                          }
+                        }}
+                        placeholder="0,00"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Dica: você pode editar o preço de venda, ou editar o custo + % (o sistema recalcula).
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <Button type="submit">
                     {editingProduto ? 'Atualizar' : 'Cadastrar'}
@@ -1056,8 +1215,14 @@ export function Cadastro() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
                             <Badge variant="outline">{categorias.find(c => sid(c.id) === produto.categoria || c.nome === produto.categoria)?.nome ?? produto.categoria}</Badge>
+                            {produto.revenda && <Badge variant="secondary">Revenda</Badge>}
                             <h3 className="font-medium">{produto.nome}</h3>
                           </div>
+                          {produto.revenda && produto.fornecedor && (
+                            <p className="text-sm text-muted-foreground">
+                              Fornecedor: {fornecedores.find((f) => String(f.id) === String(produto.fornecedor))?.nomeRazaoSocial ?? "—"}
+                            </p>
+                          )}
                           {isChefe && (
                             <p className="text-lg font-semibold text-primary">
                               {formatCurrency(produto.precoInicial)}

@@ -12,6 +12,7 @@ from .models import (
     Venda,
     ItemVenda,
     CompraMaterial,
+    CompraProduto,
     OrdemCompra,
     Pagamento,
     PagamentoFornecedor,
@@ -47,7 +48,18 @@ class CategoriaSerializer(serializers.ModelSerializer):
 class ProdutoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Produto
-        fields = ['id', 'ativo', 'nome', 'categoria', 'preco_venda', 'descricao']
+        fields = [
+            'id',
+            'ativo',
+            'nome',
+            'categoria',
+            'revenda',
+            'fornecedor',
+            'preco_custo',
+            'margem_lucro_percent',
+            'preco_venda',
+            'descricao',
+        ]
 
 
 class MaterialSerializer(serializers.ModelSerializer):
@@ -119,13 +131,33 @@ class VendaCreateSerializer(serializers.Serializer):
 
 
 # --- Compras (ordem com itens, como Venda) ---
-class ItemCompraSerializer(serializers.ModelSerializer):
+class ItemCompraMaterialSerializer(serializers.ModelSerializer):
+    tipo = serializers.SerializerMethodField()
     material_nome = serializers.CharField(source='material.nome', read_only=True)
     total = serializers.SerializerMethodField()
 
     class Meta:
         model = CompraMaterial
-        fields = ['id', 'material', 'material_nome', 'quantidade', 'preco_no_dia', 'total']
+        fields = ['id', 'tipo', 'material', 'material_nome', 'quantidade', 'preco_no_dia', 'total']
+
+    def get_tipo(self, obj):
+        return 'material'
+
+    def get_total(self, obj):
+        return float(obj.total_compra)
+
+
+class ItemCompraProdutoSerializer(serializers.ModelSerializer):
+    tipo = serializers.SerializerMethodField()
+    produto_nome = serializers.CharField(source='produto.nome', read_only=True)
+    total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CompraProduto
+        fields = ['id', 'tipo', 'produto', 'produto_nome', 'quantidade', 'preco_no_dia', 'total']
+
+    def get_tipo(self, obj):
+        return 'produto'
 
     def get_total(self, obj):
         return float(obj.total_compra)
@@ -135,7 +167,7 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
     fornecedor = serializers.CharField(source='fornecedor.nome', read_only=True)
     fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
     data = serializers.SerializerMethodField()
-    itens = ItemCompraSerializer(many=True, read_only=True)
+    itens = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
 
     class Meta:
@@ -145,8 +177,24 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
     def get_data(self, obj):
         return obj.data_compra.date().isoformat() if obj.data_compra else None
 
+    def get_itens(self, obj):
+        # Junta itens de material + itens de produto (revenda)
+        itens_mat = list(getattr(obj, 'itens', []).all()) if hasattr(obj, 'itens') else []
+        itens_prod = list(getattr(obj, 'itens_produtos', []).all()) if hasattr(obj, 'itens_produtos') else []
+        out = [ItemCompraMaterialSerializer(i).data for i in itens_mat] + [ItemCompraProdutoSerializer(i).data for i in itens_prod]
+        return out
+
     def get_total(self, obj):
-        return float(obj.total_ordem)
+        try:
+            total = float(obj.total_ordem)
+        except Exception:
+            total = 0.0
+        # Inclui produtos de revenda quando existirem
+        try:
+            total += sum(float(i.total_compra) for i in obj.itens_produtos.all())
+        except Exception:
+            pass
+        return float(total)
 
 
 # Serializer para um item avulso (edição/exclusão/copiar)
