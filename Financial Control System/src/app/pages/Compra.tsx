@@ -286,14 +286,14 @@ export function Compra() {
       .map((i) => {
         if (mostrarValores) {
           return `<tr>
-            <td>${i.material_nome || `#${i.material}`}</td>
+            <td>${getItemNome(i)}</td>
             <td class="num">${i.quantidade}</td>
             <td class="num">${formatCurrency(i.preco_no_dia)}</td>
             <td class="num">${formatCurrency(i.total)}</td>
           </tr>`;
         }
         return `<tr>
-          <td>${i.material_nome || `#${i.material}`}</td>
+          <td>${getItemNome(i)}</td>
           <td class="num">${i.quantidade}</td>
           <td class="num">-</td>
           <td class="num">-</td>
@@ -482,6 +482,9 @@ export function Compra() {
     }).format(value);
   };
 
+  const getItemNome = (i: ItemCompra) =>
+    i.produto_nome || i.material_nome || (i.produto ? `#${i.produto}` : `#${i.material}`);
+
   const totalCompras = ordens.reduce((sum, o) => sum + o.total, 0);
 
   const ordensFiltradas = ordens.filter((o) => {
@@ -493,9 +496,7 @@ export function Compra() {
     }
     if (searchProduto.trim()) {
       const termo = searchProduto.trim().toLowerCase();
-      const temMatch = (o.itens || []).some(
-        (i) => (i.material_nome || "").toLowerCase().includes(termo) || String(i.material).includes(termo)
-      );
+      const temMatch = (o.itens || []).some((i) => getItemNome(i).toLowerCase().includes(termo));
       if (!temMatch) return false;
     }
     return true;
@@ -865,7 +866,7 @@ export function Compra() {
                   <Label htmlFor="searchProduto">Produto / Material</Label>
                   <Input
                     id="searchProduto"
-                    placeholder="Nome do material"
+                    placeholder="Nome do item"
                     value={searchProduto}
                     onChange={(e) => setSearchProduto(e.target.value)}
                   />
@@ -906,7 +907,7 @@ export function Compra() {
                           </TableCell>
                           <TableCell className="truncate">
                             {ordem.itens?.length === 1
-                              ? ordem.itens[0].material_nome ?? `#${ordem.itens[0].material}`
+                              ? getItemNome(ordem.itens[0])
                               : `${ordem.itens?.length ?? 0} itens`}
                           </TableCell>
                           {isChefe && (
@@ -954,7 +955,7 @@ export function Compra() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Material</TableHead>
+                      <TableHead>Item</TableHead>
                       <TableHead className="text-right w-20">Qtd</TableHead>
                       {isChefe && <TableHead className="text-right w-28">Preço un.</TableHead>}
                       {isChefe && <TableHead className="text-right w-28">Total</TableHead>}
@@ -964,7 +965,7 @@ export function Compra() {
                   <TableBody>
                     {(detailCompra.itens || []).map((item) => (
                       <TableRow key={item.id}>
-                        <TableCell className="font-medium">{item.material_nome ?? `#${item.material}`}</TableCell>
+                        <TableCell className="font-medium">{getItemNome(item)}</TableCell>
                         <TableCell className="text-right">{item.quantidade}</TableCell>
                         {isChefe && <TableCell className="text-right">{formatCurrency(item.preco_no_dia)}</TableCell>}
                         {isChefe && (
@@ -985,7 +986,7 @@ export function Compra() {
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Excluir item</AlertDialogTitle>
                                   <AlertDialogDescription>
-                                    Excluir {item.material_nome ?? `item #${item.material}`} desta ordem?
+                                    Excluir {getItemNome(item)} desta ordem?
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
@@ -1038,7 +1039,7 @@ export function Compra() {
           {editingItem && (
             <>
               <p className="text-sm text-muted-foreground">
-                {editingItem.material_nome ?? `#${editingItem.material}`}
+                {getItemNome(editingItem)}
               </p>
               <div className="grid gap-4 py-2">
                 <div className="space-y-2">

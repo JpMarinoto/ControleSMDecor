@@ -1,4 +1,4 @@
-Na VPS digitar
+DA VPS AO PC
 
 cd "/home/deploy/ControleSMDecor"
 ./scripts/backup_db.sh
@@ -16,5 +16,8 @@ cd "/home/deploy/ControleSMDecor"
 ls -1t backups/db/db-*.sqlite3 | head -1
 
 
-Depois dar esse comando
-scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/db-2026-03-25_144542.sqlite3 "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-03-25_144542.sqlite3"
+Depois dar esse comando(MUDAR O NOME DO ARQUIVO)
+scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/db-2026-03-26_130908.sqlite3"C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-03-26_130908.sqlite3"
+
+
+DO PC A VPS

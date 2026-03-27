@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.parsers import JSONParser
 
 import math
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from .models import (
     Cliente,
     Fornecedor,
@@ -27,6 +27,7 @@ from .models import (
     PrecoClienteProduto,
     CompraMaterial,
     CompraProduto,
+    ProdutoInsumo,
     OrdemCompra,
     PagamentoFornecedor,
     MovimentoCaixa,
@@ -230,18 +231,47 @@ class FornecedorDetail(APIView):
 # --- Produtos ---
 @method_decorator(csrf_exempt, name='dispatch')
 class ProdutoListCreate(APIView):
+    @staticmethod
+    def _sync_insumos(produto, insumos):
+        if not isinstance(insumos, list):
+            return
+        # Limpa e recria para manter simples e consistente
+        ProdutoInsumo.objects.filter(produto=produto).delete()
+        novos = []
+        for item in insumos:
+            if not isinstance(item, dict):
+                continue
+            material_id = item.get('material')
+            qtd = item.get('quantidade')
+            if not material_id or qtd is None:
+                continue
+            try:
+                material = Material.objects.get(pk=int(material_id))
+                q = Decimal(str(qtd).replace(',', '.'))
+            except (Material.DoesNotExist, ValueError, TypeError, InvalidOperation):
+                continue
+            if q <= 0:
+                continue
+            novos.append(ProdutoInsumo(produto=produto, material=material, quantidade=q))
+        if novos:
+            ProdutoInsumo.objects.bulk_create(novos)
+
     def get(self, request):
         incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
-        qs = Produto.objects.all().order_by('nome')
+        qs = Produto.objects.prefetch_related('insumos__material').all().order_by('nome')
         if not incluir_inativos:
             qs = qs.filter(ativo=True)
         serializer = ProdutoSerializer(qs, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = ProdutoSerializer(data=request.data)
+        data = request.data.copy()
+        insumos = data.pop('insumos', None)
+        serializer = ProdutoSerializer(data=data)
         if serializer.is_valid():
-            serializer.save()
+            obj = serializer.save()
+            self._sync_insumos(obj, insumos)
+            serializer = ProdutoSerializer(obj)
             _api_log(request, "Criar", "Produto", f"Produto criado: {serializer.data.get('nome', '')}")
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -258,9 +288,14 @@ class ProdutoDetail(APIView):
 
     def put(self, request, pk):
         obj = self.get_object(pk)
-        serializer = ProdutoSerializer(obj, data=request.data, partial=True)
+        data = request.data.copy()
+        insumos = data.pop('insumos', None)
+        serializer = ProdutoSerializer(obj, data=data, partial=True)
         if serializer.is_valid():
-            serializer.save()
+            obj = serializer.save()
+            if insumos is not None:
+                ProdutoListCreate._sync_insumos(obj, insumos)
+            serializer = ProdutoSerializer(obj)
             _api_log(request, "Editar", "Produto", f"Produto ID {pk} atualizado: {obj.nome}")
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

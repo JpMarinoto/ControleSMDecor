@@ -90,14 +90,6 @@ pip install -r requirements.txt
 python manage.py migrate
 python manage.py collectstatic --noinput
 
-Vps2
-
-cd "/home/deploy/ControleSMDecor"  
-source .venv/bin/activate
-git pull
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py collectstatic --noinput
 cd "Financial Control System"
 npm install
 npm run build

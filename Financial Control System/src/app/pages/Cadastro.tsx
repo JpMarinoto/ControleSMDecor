@@ -56,10 +56,12 @@ interface Produto {
   categoria: string;
   nome: string;
   precoInicial: number; // preco_venda
-  revenda?: boolean;
+  fabricado?: boolean;
   fornecedor?: string; // id
   precoCusto?: number;
+  maoObraUnitaria?: number;
   margemLucroPercent?: number;
+  insumos?: { material: number; material_nome: string; quantidade: number; preco_unitario_base: number; total_insumo: number }[];
   createdAt: string;
 }
 
@@ -160,13 +162,15 @@ export function Cadastro() {
   const [categoriaProduto, setCategoriaProduto] = useState('');
   const [nomeProduto, setNomeProduto] = useState('');
   const [precoInicial, setPrecoInicial] = useState('');
-  const [produtoRevenda, setProdutoRevenda] = useState(false);
+  const [produtoFabricado, setProdutoFabricado] = useState(false);
   const [fornecedorProduto, setFornecedorProduto] = useState('');
   const [precoCustoProduto, setPrecoCustoProduto] = useState('');
+  const [maoObraProduto, setMaoObraProduto] = useState('');
   const [margemLucroProduto, setMargemLucroProduto] = useState('');
   const [calcProdutoSource, setCalcProdutoSource] = useState<'preco_venda' | 'preco_custo' | 'margem' | null>(null);
-
-  const FORNECEDOR_NENHUM = "__none__";
+  const [materialInsumoProduto, setMaterialInsumoProduto] = useState('');
+  const [quantidadeInsumoProduto, setQuantidadeInsumoProduto] = useState('');
+  const [insumosProduto, setInsumosProduto] = useState<{ material: number; material_nome: string; quantidade: number; preco_unitario_base: number; total_insumo: number }[]>([]);
 
   // Form states - Materiais
   const [nomeMaterial, setNomeMaterial] = useState('');
@@ -220,10 +224,12 @@ export function Cadastro() {
         categoria: sid(p.categoria),
         nome: p.nome || "",
         precoInicial: Number(p.preco_venda) || 0,
-        revenda: Boolean(p.revenda),
+        fabricado: Boolean(p.fabricado),
         fornecedor: sid(p.fornecedor),
         precoCusto: Number(p.preco_custo) || 0,
+        maoObraUnitaria: Number(p.mao_obra_unitaria) || 0,
         margemLucroPercent: Number(p.margem_lucro_percent) || 0,
+        insumos: Array.isArray(p.insumos) ? p.insumos : [],
         createdAt: "",
       })));
       setFornecedores((Array.isArray(fornecedoresRes) ? fornecedoresRes : []).map((f: any) => ({
@@ -335,16 +341,22 @@ export function Cadastro() {
       return;
     }
     const custo = parseFloat(String(precoCustoProduto || '').replace(',', '.'));
+    const maoObra = parseFloat(String(maoObraProduto || '').replace(',', '.'));
     const margem = parseFloat(String(margemLucroProduto || '').replace(',', '.'));
     const payload = {
       nome: nomeProduto.trim(),
       categoria: Number(categoriaProduto) || undefined,
       preco_venda: preco,
       descricao: "",
-      revenda: produtoRevenda,
-      fornecedor: produtoRevenda && fornecedorProduto ? Number(fornecedorProduto) : null,
-      preco_custo: produtoRevenda && !isNaN(custo) && custo >= 0 ? custo : 0,
-      margem_lucro_percent: produtoRevenda && !isNaN(margem) ? margem : 0,
+      revenda: false,
+      fabricado: produtoFabricado,
+      fornecedor: fornecedorProduto ? Number(fornecedorProduto) : null,
+      preco_custo: !isNaN(custo) && custo >= 0 ? custo : 0,
+      mao_obra_unitaria: !isNaN(maoObra) && maoObra >= 0 ? maoObra : 0,
+      margem_lucro_percent: !isNaN(margem) ? margem : 0,
+      insumos: produtoFabricado
+        ? insumosProduto.map((i) => ({ material: i.material, quantidade: i.quantidade }))
+        : [],
     };
     try {
       if (editingProduto) {
@@ -497,11 +509,15 @@ export function Cadastro() {
     setCategoriaProduto('');
     setNomeProduto('');
     setPrecoInicial('');
-    setProdutoRevenda(false);
+    setProdutoFabricado(false);
     setFornecedorProduto('');
     setPrecoCustoProduto('');
+    setMaoObraProduto('');
     setMargemLucroProduto('');
     setCalcProdutoSource(null);
+    setMaterialInsumoProduto('');
+    setQuantidadeInsumoProduto('');
+    setInsumosProduto([]);
   };
 
   const resetFornecedorForm = () => {
@@ -560,13 +576,27 @@ export function Cadastro() {
     setCategoriaProduto(produto.categoria);
     setNomeProduto(produto.nome);
     setPrecoInicial(Number(produto.precoInicial).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-    setProdutoRevenda(Boolean(produto.revenda));
+    setProdutoFabricado(Boolean(produto.fabricado));
     setFornecedorProduto(produto.fornecedor || '');
     setPrecoCustoProduto(
       Number(produto.precoCusto ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     );
+    setMaoObraProduto(
+      Number(produto.maoObraUnitaria ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    );
     setMargemLucroProduto(
       Number(produto.margemLucroPercent ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    );
+    setInsumosProduto(
+      Array.isArray(produto.insumos)
+        ? produto.insumos.map((i) => ({
+            material: Number(i.material),
+            material_nome: i.material_nome,
+            quantidade: Number(i.quantidade) || 0,
+            preco_unitario_base: Number(i.preco_unitario_base) || 0,
+            total_insumo: Number(i.total_insumo) || 0,
+          }))
+        : []
     );
     setCalcProdutoSource(null);
   };
@@ -580,6 +610,20 @@ export function Cadastro() {
 
   const fmt2 = (n: number) =>
     Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const custoMateriaisProduto = insumosProduto.reduce((acc, i) => acc + (Number(i.total_insumo) || 0), 0);
+  const maoObraNum = parseDecimal(maoObraProduto) ?? 0;
+  const custoTotalFabricacao = custoMateriaisProduto + maoObraNum;
+
+  useEffect(() => {
+    if (!produtoFabricado) return;
+    setCalcProdutoSource('preco_custo');
+    setPrecoCustoProduto(fmt2(custoTotalFabricacao));
+    const margem = parseDecimal(margemLucroProduto);
+    if (margem != null) {
+      setPrecoInicial(fmt2(custoTotalFabricacao * (1 + margem / 100)));
+    }
+  }, [produtoFabricado, custoTotalFabricacao, margemLucroProduto]);
 
   const handleEditFornecedor = (fornecedor: Fornecedor) => {
     setEditingFornecedor(fornecedor);
@@ -1068,13 +1112,11 @@ export function Cadastro() {
                       onChange={(e) => {
                         setCalcProdutoSource('preco_venda');
                         setPrecoInicial(e.target.value);
-                        if (produtoRevenda) {
-                          const venda = parseDecimal(e.target.value);
-                          const custo = parseDecimal(precoCustoProduto);
-                          if (venda != null && custo != null && custo > 0) {
-                            const m = ((venda / custo) - 1) * 100;
-                            setMargemLucroProduto(fmt2(m));
-                          }
+                        const venda = parseDecimal(e.target.value);
+                        const custo = parseDecimal(precoCustoProduto);
+                        if (venda != null && custo != null && custo > 0) {
+                          const m = ((venda / custo) - 1) * 100;
+                          setMargemLucroProduto(fmt2(m));
                         }
                       }}
                       placeholder="0,00"
@@ -1084,101 +1126,195 @@ export function Cadastro() {
 
                 <div className="flex items-center gap-3">
                   <Checkbox
-                    id="produtoRevenda"
-                    checked={produtoRevenda}
+                    id="produtoFabricado"
+                    checked={produtoFabricado}
                     onCheckedChange={(v) => {
                       const checked = v === true;
-                      setProdutoRevenda(checked);
-                      if (!checked) {
-                        setFornecedorProduto('');
-                        setPrecoCustoProduto('');
-                        setMargemLucroProduto('');
-                        setCalcProdutoSource(null);
-                      }
+                      setProdutoFabricado(checked);
                     }}
                   />
-                  <Label htmlFor="produtoRevenda" className="cursor-pointer">
-                    Produto de revenda (comprado pronto)
+                  <Label htmlFor="produtoFabricado" className="cursor-pointer">
+                    Produto fabricado (composição por materiais)
                   </Label>
                 </div>
-
-                {produtoRevenda && (
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="fornecedorProduto">Fornecedor (opcional)</Label>
-                      <Select
-                        value={fornecedorProduto || undefined}
-                        onValueChange={(v) => setFornecedorProduto(v === FORNECEDOR_NENHUM ? "" : v)}
-                      >
-                        <SelectTrigger id="fornecedorProduto">
-                          <SelectValue placeholder="Selecione" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FORNECEDOR_NENHUM}>Nenhum</SelectItem>
-                          {fornecedores.length > 0 ? (
-                            fornecedores.map((f) => (
-                              <SelectItem key={f.id} value={String(f.id)}>
-                                {f.nomeRazaoSocial || "(Sem nome)"}
-                              </SelectItem>
-                            ))
-                          ) : (
-                            <SelectItem value="none" disabled>
-                              Cadastre um fornecedor primeiro
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="fornecedorProduto">Fornecedor</Label>
+                    <Select value={fornecedorProduto || undefined} onValueChange={setFornecedorProduto}>
+                      <SelectTrigger id="fornecedorProduto">
+                        <SelectValue placeholder="Selecione (opcional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {fornecedores.length > 0 ? (
+                          fornecedores.map((f) => (
+                            <SelectItem key={f.id} value={String(f.id)}>
+                              {f.nomeRazaoSocial || "(Sem nome)"}
                             </SelectItem>
-                          )}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                          ))
+                        ) : (
+                          <SelectItem value="none" disabled>
+                            Cadastre um fornecedor primeiro
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {fornecedorProduto && (
+                      <Button type="button" size="sm" variant="ghost" className="px-0 h-auto" onClick={() => setFornecedorProduto('')}>
+                        Limpar fornecedor
+                      </Button>
+                    )}
+                  </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="precoCustoProduto">Preço de Custo (R$)</Label>
-                      <Input
-                        id="precoCustoProduto"
-                        type="text"
-                        inputMode="decimal"
-                        value={precoCustoProduto}
-                        onChange={(e) => {
-                          setCalcProdutoSource('preco_custo');
-                          setPrecoCustoProduto(e.target.value);
-                          const custo = parseDecimal(e.target.value);
-                          const margem = parseDecimal(margemLucroProduto);
-                          const venda = parseDecimal(precoInicial);
-                          if (custo != null && custo > 0) {
-                            if (margem != null && (calcProdutoSource === 'margem' || calcProdutoSource === 'preco_custo')) {
-                              const pv = custo * (1 + margem / 100);
-                              setPrecoInicial(fmt2(pv));
-                            } else if (venda != null && (calcProdutoSource === 'preco_venda' || calcProdutoSource === 'preco_custo')) {
-                              const m = ((venda / custo) - 1) * 100;
-                              setMargemLucroProduto(fmt2(m));
-                            }
-                          }
-                        }}
-                        placeholder="0,00"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="margemLucroProduto">% de Lucro</Label>
-                      <Input
-                        id="margemLucroProduto"
-                        type="text"
-                        inputMode="decimal"
-                        value={margemLucroProduto}
-                        onChange={(e) => {
-                          setCalcProdutoSource('margem');
-                          setMargemLucroProduto(e.target.value);
-                          const custo = parseDecimal(precoCustoProduto);
-                          const margem = parseDecimal(e.target.value);
-                          if (custo != null && custo > 0 && margem != null) {
+                  <div className="space-y-2">
+                    <Label htmlFor="precoCustoProduto">Preço de Custo (R$)</Label>
+                    <Input
+                      id="precoCustoProduto"
+                      type="text"
+                      inputMode="decimal"
+                      value={precoCustoProduto}
+                      disabled={produtoFabricado}
+                      onChange={(e) => {
+                        if (produtoFabricado) return;
+                        setCalcProdutoSource('preco_custo');
+                        setPrecoCustoProduto(e.target.value);
+                        const custo = parseDecimal(e.target.value);
+                        const margem = parseDecimal(margemLucroProduto);
+                        const venda = parseDecimal(precoInicial);
+                        if (custo != null && custo > 0) {
+                          if (margem != null && (calcProdutoSource === 'margem' || calcProdutoSource === 'preco_custo')) {
                             const pv = custo * (1 + margem / 100);
                             setPrecoInicial(fmt2(pv));
+                          } else if (venda != null && (calcProdutoSource === 'preco_venda' || calcProdutoSource === 'preco_custo')) {
+                            const m = ((venda / custo) - 1) * 100;
+                            setMargemLucroProduto(fmt2(m));
                           }
-                        }}
-                        placeholder="0,00"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Dica: você pode editar o preço de venda, ou editar o custo + % (o sistema recalcula).
-                      </p>
+                        }
+                      }}
+                      placeholder="0,00"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="margemLucroProduto">% de Lucro</Label>
+                    <Input
+                      id="margemLucroProduto"
+                      type="text"
+                      inputMode="decimal"
+                      value={margemLucroProduto}
+                      onChange={(e) => {
+                        setCalcProdutoSource('margem');
+                        setMargemLucroProduto(e.target.value);
+                        const custo = parseDecimal(precoCustoProduto);
+                        const margem = parseDecimal(e.target.value);
+                        if (custo != null && custo > 0 && margem != null) {
+                          const pv = custo * (1 + margem / 100);
+                          setPrecoInicial(fmt2(pv));
+                        }
+                      }}
+                      placeholder="0,00"
+                    />
+                  </div>
+                </div>
+
+                {produtoFabricado && (
+                  <div className="space-y-3 border rounded-md p-3">
+                    <h4 className="text-sm font-medium">Insumos do produto</h4>
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="materialInsumoProduto">Material</Label>
+                        <Select value={materialInsumoProduto} onValueChange={setMaterialInsumoProduto}>
+                          <SelectTrigger id="materialInsumoProduto">
+                            <SelectValue placeholder="Selecione o material" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {materiais.map((m) => (
+                              <SelectItem key={m.id} value={String(m.id)}>
+                                {m.nome}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="quantidadeInsumoProduto">Quantidade</Label>
+                        <Input
+                          id="quantidadeInsumoProduto"
+                          type="text"
+                          inputMode="decimal"
+                          value={quantidadeInsumoProduto}
+                          onChange={(e) => setQuantidadeInsumoProduto(e.target.value)}
+                          placeholder="0,000"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            const mat = materiais.find((m) => String(m.id) === String(materialInsumoProduto));
+                            const qtd = parseDecimal(quantidadeInsumoProduto);
+                            if (!mat || qtd == null || qtd <= 0) {
+                              toast.error("Selecione material e quantidade válida");
+                              return;
+                            }
+                            const precoBase = Number(mat.precoUnitarioBase ?? mat.preco_unitario_base) || 0;
+                            const total = precoBase * qtd;
+                            setInsumosProduto((prev) => {
+                              const idx = prev.findIndex((i) => i.material === Number(mat.id));
+                              if (idx >= 0) {
+                                const clone = [...prev];
+                                clone[idx] = {
+                                  ...clone[idx],
+                                  quantidade: clone[idx].quantidade + qtd,
+                                  total_insumo: (clone[idx].quantidade + qtd) * clone[idx].preco_unitario_base,
+                                };
+                                return clone;
+                              }
+                              return [...prev, { material: Number(mat.id), material_nome: mat.nome, quantidade: qtd, preco_unitario_base: precoBase, total_insumo: total }];
+                            });
+                            setMaterialInsumoProduto('');
+                            setQuantidadeInsumoProduto('');
+                          }}
+                        >
+                          Adicionar
+                        </Button>
+                      </div>
+                    </div>
+
+                    {insumosProduto.length > 0 && (
+                      <div className="space-y-2">
+                        {insumosProduto.map((i) => (
+                          <div key={i.material} className="flex items-center justify-between text-sm border-b pb-1">
+                            <span>{i.material_nome} ({i.quantidade.toLocaleString('pt-BR')} x {formatCurrency(i.preco_unitario_base)})</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{formatCurrency(i.total_insumo)}</span>
+                              <Button type="button" size="sm" variant="ghost" onClick={() => setInsumosProduto((prev) => prev.filter((x) => x.material !== i.material))}>Remover</Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="maoObraProduto">Mão de obra por peça</Label>
+                        <Input
+                          id="maoObraProduto"
+                          type="text"
+                          inputMode="decimal"
+                          value={maoObraProduto}
+                          onChange={(e) => setMaoObraProduto(e.target.value)}
+                          placeholder="0,00"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Custo materiais</Label>
+                        <Input value={fmt2(custoMateriaisProduto)} disabled />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Custo total (insumos + mão de obra)</Label>
+                        <Input value={fmt2(custoTotalFabricacao)} disabled />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1215,19 +1351,17 @@ export function Cadastro() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
                             <Badge variant="outline">{categorias.find(c => sid(c.id) === produto.categoria || c.nome === produto.categoria)?.nome ?? produto.categoria}</Badge>
-                            {produto.revenda && <Badge variant="secondary">Revenda</Badge>}
+                            {produto.fabricado && <Badge variant="secondary">Fabricado</Badge>}
                             <h3 className="font-medium">{produto.nome}</h3>
                           </div>
-                          {produto.revenda && produto.fornecedor && (
+                          {produto.fornecedor && (
                             <p className="text-sm text-muted-foreground">
                               Fornecedor: {fornecedores.find((f) => String(f.id) === String(produto.fornecedor))?.nomeRazaoSocial ?? "—"}
                             </p>
                           )}
-                          {isChefe && (
-                            <p className="text-lg font-semibold text-primary">
-                              {formatCurrency(produto.precoInicial)}
-                            </p>
-                          )}
+                          <p className="text-lg font-semibold text-primary">
+                            {formatCurrency(produto.precoInicial)}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <Button variant="ghost" size="icon" onClick={() => handleEditProduto(produto)}>

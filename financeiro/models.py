@@ -75,6 +75,7 @@ class Produto(models.Model):
         related_name='produtos'
     )
     revenda = models.BooleanField(default=False, verbose_name="Revenda")
+    fabricado = models.BooleanField(default=False, verbose_name="Fabricado")
     fornecedor = models.ForeignKey(
         Fornecedor,
         on_delete=models.SET_NULL,
@@ -83,6 +84,7 @@ class Produto(models.Model):
         related_name='produtos',
     )
     preco_custo = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    mao_obra_unitaria = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     margem_lucro_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
     preco_venda = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     descricao = models.TextField(blank=True, null=True)
@@ -107,6 +109,19 @@ class Material(models.Model):
 
     def __str__(self):
         return self.nome
+
+
+class ProdutoInsumo(models.Model):
+    """Materiais necessários para fabricar um produto e sua quantidade por unidade."""
+    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='insumos')
+    material = models.ForeignKey(Material, on_delete=models.CASCADE)
+    quantidade = models.DecimalField(max_digits=10, decimal_places=3, default=1)
+
+    class Meta:
+        unique_together = [('produto', 'material')]
+
+    def __str__(self):
+        return f"{self.produto.nome} - {self.material.nome} ({self.quantidade})"
 
 # ==========================================
 # 3. TRANSAÇÕES DE VENDA (CLIENTES)

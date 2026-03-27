@@ -7,6 +7,7 @@ from .models import (
     Cliente,
     Fornecedor,
     Produto,
+    ProdutoInsumo,
     Material,
     CategoriaProduto,
     Venda,
@@ -46,6 +47,10 @@ class CategoriaSerializer(serializers.ModelSerializer):
 
 
 class ProdutoSerializer(serializers.ModelSerializer):
+    insumos = serializers.SerializerMethodField(read_only=True)
+    custo_materiais = serializers.SerializerMethodField(read_only=True)
+    custo_total_fabricacao = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Produto
         fields = [
@@ -54,12 +59,45 @@ class ProdutoSerializer(serializers.ModelSerializer):
             'nome',
             'categoria',
             'revenda',
+            'fabricado',
             'fornecedor',
             'preco_custo',
+            'mao_obra_unitaria',
             'margem_lucro_percent',
             'preco_venda',
             'descricao',
+            'insumos',
+            'custo_materiais',
+            'custo_total_fabricacao',
         ]
+
+    def get_insumos(self, obj):
+        itens = []
+        for i in obj.insumos.select_related('material').all():
+            preco_base = Decimal(str(i.material.preco_unitario_base or 0))
+            qtd = Decimal(str(i.quantidade or 0))
+            itens.append(
+                {
+                    'id': i.id,
+                    'material': i.material_id,
+                    'material_nome': i.material.nome,
+                    'quantidade': float(qtd),
+                    'preco_unitario_base': float(preco_base),
+                    'total_insumo': float(qtd * preco_base),
+                }
+            )
+        return itens
+
+    def get_custo_materiais(self, obj):
+        total = Decimal('0')
+        for i in obj.insumos.select_related('material').all():
+            total += Decimal(str(i.quantidade or 0)) * Decimal(str(i.material.preco_unitario_base or 0))
+        return float(total)
+
+    def get_custo_total_fabricacao(self, obj):
+        custo_mat = Decimal(str(self.get_custo_materiais(obj)))
+        mao_obra = Decimal(str(obj.mao_obra_unitaria or 0))
+        return float(custo_mat + mao_obra)
 
 
 class MaterialSerializer(serializers.ModelSerializer):
