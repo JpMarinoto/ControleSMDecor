@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime } from "../lib/format";
@@ -25,12 +25,41 @@ import {
   DialogTrigger,
 } from "../components/ui/dialog";
 
+type CompraLinhaFornecedor = {
+  id: string;
+  data: string;
+  material: string;
+  total: number;
+  ordem_id?: number | null;
+};
+
+function agruparComprasPorOrdem(
+  exibirCompras: CompraLinhaFornecedor[],
+  parseDataFn: (s: string) => number
+): { key: string; ordemId: number | null; lines: CompraLinhaFornecedor[]; totalGrupo: number; dataRef: string }[] {
+  const map = new Map<string, CompraLinhaFornecedor[]>();
+  for (const c of exibirCompras) {
+    const k = c.ordem_id != null && c.ordem_id !== undefined ? `ordem-${c.ordem_id}` : `solo-${c.id}`;
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(c);
+  }
+  const groups = Array.from(map.entries()).map(([key, lines]) => {
+    const sorted = [...lines].sort((a, b) => parseDataFn(b.data) - parseDataFn(a.data));
+    const ordemId = sorted[0]?.ordem_id ?? null;
+    const totalGrupo = sorted.reduce((s, x) => s + x.total, 0);
+    const dataRef = sorted[0]?.data ?? "";
+    return { key, ordemId, lines: sorted, totalGrupo, dataRef };
+  });
+  groups.sort((a, b) => parseDataFn(b.dataRef) - parseDataFn(a.dataRef));
+  return groups;
+}
+
 interface FornecedorDetalheData {
   fornecedor: { id: number; nome: string; telefone: string };
   total_compras: number;
   total_pago: number;
   saldo_devedor: number;
-  compras: { id: number; data: string; material: string; total: number }[];
+  compras: CompraLinhaFornecedor[];
   pagamentos: { id: number; data: string; valor: number; metodo?: string; conta_nome?: string }[];
 }
 
@@ -55,7 +84,7 @@ export function FornecedorDetalhe() {
   const [editingMaterialId, setEditingMaterialId] = useState<number | null>(null);
   const [editingMaterialPreco, setEditingMaterialPreco] = useState("");
   const [savingMaterialId, setSavingMaterialId] = useState<number | null>(null);
-  const [selectedCompraIds, setSelectedCompraIds] = useState<Set<number>>(new Set());
+  const [selectedCompraIds, setSelectedCompraIds] = useState<Set<string>>(new Set());
 
   const getEmpresaHeaderHtml = () => {
     const doc = empresaDocumento();
@@ -234,7 +263,7 @@ export function FornecedorDetalhe() {
       .join("");
     const totalComprasDoc = comprasParaImprimir.reduce((s, c) => s + c.total, 0);
     const periodoLabel = usarComprasSelecionadas
-      ? `Fechamento selecionado (${comprasSelecionadas.length} compra(s))`
+      ? `Fechamento selecionado (${comprasSelecionadas.length} item(ns))`
       : periodo === "semana"
         ? "Última semana"
         : periodo === "mes"
@@ -316,16 +345,24 @@ export function FornecedorDetalhe() {
   const exibirCompras = limites ? comprasFiltradas : compras;
   const exibirPagamentos = limites ? pagamentosFiltrados : pagamentos;
 
-  const toggleCompraSelection = (id: number) => {
+  const gruposCompras = agruparComprasPorOrdem(exibirCompras, parseData);
+
+  const toggleOrdemGrupo = (lineIds: string[]) => {
     setSelectedCompraIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const allIn = lineIds.length > 0 && lineIds.every((id) => next.has(id));
+      if (allIn) lineIds.forEach((id) => next.delete(id));
+      else lineIds.forEach((id) => next.add(id));
       return next;
     });
   };
+
   const comprasSelecionadas = exibirCompras.filter((c) => selectedCompraIds.has(c.id));
   const totalSelecionadoCompras = comprasSelecionadas.reduce((s, c) => s + c.total, 0);
+  const ordensTotalmenteSelecionadas = gruposCompras.filter((g) => {
+    const ids = g.lines.map((l) => l.id);
+    return ids.length > 0 && ids.every((id) => selectedCompraIds.has(id));
+  }).length;
 
   return (
     <div className="space-y-6">
@@ -499,7 +536,8 @@ export function FornecedorDetalhe() {
               Fechamento selecionado
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              {comprasSelecionadas.length} compra(s) selecionada(s). Total: {formatCurrency(totalSelecionadoCompras)}. Use &quot;Imprimir fechamento selecionado&quot; para gerar o comprovante.
+              {ordensTotalmenteSelecionadas} ordem(ns) de compra · {comprasSelecionadas.length} item(ns). Total:{" "}
+              {formatCurrency(totalSelecionadoCompras)}. Use &quot;Imprimir fechamento selecionado&quot; para o comprovante.
             </p>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
@@ -584,15 +622,17 @@ export function FornecedorDetalhe() {
         <Card>
           <CardHeader>
             <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
-            <p className="text-sm text-muted-foreground">Marque as compras para incluir no fechamento e use &quot;Imprimir fechamento selecionado&quot; quando aparecer o card acima.</p>
+            <p className="text-sm text-muted-foreground">
+              Marque por <strong>ordem de compra</strong> (um único checkbox agrupa todos os itens da mesma compra). Registos antigos sem ordem aparecem como uma linha isolada.
+            </p>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  {isChefe && <TableHead className="w-10">Selecionar</TableHead>}
+                  {isChefe && <TableHead className="w-10">Ordem</TableHead>}
                   <TableHead>Data</TableHead>
-                  <TableHead>Material</TableHead>
+                  <TableHead>Detalhe</TableHead>
                   {isChefe && <TableHead className="text-right">Total</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -604,23 +644,59 @@ export function FornecedorDetalhe() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  exibirCompras.map((c) => (
-                    <TableRow key={c.id}>
-                      {isChefe && (
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedCompraIds.has(c.id)}
-                            onCheckedChange={() => toggleCompraSelection(c.id)}
-                          />
-                        </TableCell>
-                      )}
-                      <TableCell className="text-muted-foreground">
-                        {formatDateOnly(c.data)}
-                      </TableCell>
-                      <TableCell>{c.material}</TableCell>
-                      {isChefe && <TableCell className="text-right">{formatCurrency(c.total)}</TableCell>}
-                    </TableRow>
-                  ))
+                  gruposCompras.map((g) => {
+                    const ids = g.lines.map((l) => l.id);
+                    const allSel = ids.length > 0 && ids.every((id) => selectedCompraIds.has(id));
+                    const someSel = ids.some((id) => selectedCompraIds.has(id)) && !allSel;
+                    const checkState = allSel ? true : someSel ? ("indeterminate" as const) : false;
+                    if (g.ordemId != null) {
+                      return (
+                        <Fragment key={g.key}>
+                          <TableRow>
+                            {isChefe && (
+                              <TableCell className="align-top">
+                                <Checkbox checked={checkState} onCheckedChange={() => toggleOrdemGrupo(ids)} />
+                              </TableCell>
+                            )}
+                            <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
+                            <TableCell>
+                              <span className="font-medium">Ordem #{g.ordemId}</span>
+                              <span className="text-muted-foreground text-sm block">
+                                {g.lines.length} item(ns) nesta compra
+                              </span>
+                            </TableCell>
+                            {isChefe && (
+                              <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
+                            )}
+                          </TableRow>
+                          {g.lines.map((linha) => (
+                            <TableRow key={linha.id} className="bg-muted/25">
+                              {isChefe && <TableCell />}
+                              <TableCell />
+                              <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
+                              {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
+                            </TableRow>
+                          ))}
+                        </Fragment>
+                      );
+                    }
+                    const linha = g.lines[0];
+                    return (
+                      <TableRow key={g.key}>
+                        {isChefe && (
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedCompraIds.has(linha.id)}
+                              onCheckedChange={() => toggleOrdemGrupo(ids)}
+                            />
+                          </TableCell>
+                        )}
+                        <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
+                        <TableCell>{linha.material}</TableCell>
+                        {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

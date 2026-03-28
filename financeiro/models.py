@@ -55,10 +55,13 @@ class Fornecedor(models.Model):
 
     @property
     def saldo_devedor(self):
-        # Soma das compras de materiais menos pagamentos feitos a ele
-        total_compras = sum(c.total_compra for c in self.compras.all())
-        total_pagos = sum(p.valor for p in self.pagamentos_feitos.all())
-        return Decimal(total_compras) - Decimal(total_pagos)
+        # Materiais (related_name compras) + produtos de revenda (compras_produtos)
+        z = Decimal("0")
+        total_m = sum((c.total_compra for c in self.compras.all()), z)
+        total_p = sum((c.total_compra for c in self.compras_produtos.all()), z)
+        total_compras = total_m + total_p
+        total_pagos = sum((p.valor for p in self.pagamentos_feitos.all()), z)
+        return total_compras - total_pagos
 
 # ==========================================
 # 2. PRODUTOS (PARA VENDA) E MATERIAIS (COMPRA)

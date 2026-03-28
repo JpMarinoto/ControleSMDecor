@@ -1859,8 +1859,12 @@ class FornecedorDetalhe(APIView):
         from django.db import connection
         try:
             fornecedor = Fornecedor.objects.get(pk=pk)
-            compras = CompraMaterial.objects.filter(fornecedor=fornecedor).select_related('material').order_by('-data_compra')
-            total_compras = _safe_float(sum(_safe_float(c.total_compra) for c in compras))
+            compras_mat = CompraMaterial.objects.filter(fornecedor=fornecedor).select_related('material')
+            compras_prod = CompraProduto.objects.filter(fornecedor=fornecedor).select_related('produto')
+            total_compras = _safe_float(
+                sum(_safe_float(c.total_compra) for c in compras_mat)
+                + sum(_safe_float(c.total_compra) for c in compras_prod)
+            )
             # Pagamentos: usar raw SQL para evitar decimal.InvalidOperation ao ler valor fora do range do Decimal
             table = PagamentoFornecedor._meta.db_table
             conta_table = ContaBanco._meta.db_table
@@ -1883,15 +1887,34 @@ class FornecedorDetalhe(APIView):
                 data_str = _data_historico_iso(data_pag)
                 pagamentos_data.append({'id': id_, 'data': data_str, 'valor': _safe_float(val), 'metodo': metodo, 'conta_nome': conta_nome})
             saldo = _safe_float(total_compras - total_pago)
-            compras_data = [
-                {
-                    'id': c.id,
-                    'data': c.data_compra.date().isoformat() if c.data_compra else '',
-                    'material': c.material.nome,
-                    'total': _safe_float(c.total_compra),
-                }
-                for c in compras[:50]
-            ]
+            linhas = []
+            for c in compras_mat:
+                linhas.append(
+                    {
+                        'sort_dt': c.data_compra,
+                        'id': f'mat-{c.id}',
+                        'ordem_id': c.ordem_id,
+                        'data': c.data_compra.date().isoformat() if c.data_compra else '',
+                        'material': c.material.nome,
+                        'total': _safe_float(c.total_compra),
+                    }
+                )
+            for c in compras_prod:
+                linhas.append(
+                    {
+                        'sort_dt': c.data_compra,
+                        'id': f'prod-{c.id}',
+                        'ordem_id': c.ordem_id,
+                        'data': c.data_compra.date().isoformat() if c.data_compra else '',
+                        'material': c.produto.nome,
+                        'total': _safe_float(c.total_compra),
+                    }
+                )
+            linhas.sort(
+                key=lambda x: x["sort_dt"].timestamp() if x["sort_dt"] is not None else 0.0,
+                reverse=True,
+            )
+            compras_data = [{k: v for k, v in row.items() if k != 'sort_dt'} for row in linhas[:50]]
             return Response({
                 'fornecedor': {'id': fornecedor.id, 'nome': fornecedor.nome, 'telefone': fornecedor.telefone or ''},
                 'total_compras': total_compras, 'total_pago': total_pago, 'saldo_devedor': saldo,
