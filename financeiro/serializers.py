@@ -102,7 +102,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
 
 class MaterialSerializer(serializers.ModelSerializer):
     nome = serializers.CharField()
-    precoUnitarioBase = serializers.DecimalField(source='preco_unitario_base', max_digits=10, decimal_places=2)
+    precoUnitarioBase = serializers.DecimalField(source='preco_unitario_base', max_digits=12, decimal_places=4)
 
     class Meta:
         model = Material

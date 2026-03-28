@@ -74,6 +74,15 @@ def _api_log(request, acao, tabela, detalhes=""):
     LogSistema.objects.create(usuario=user, acao=acao, tabela=tabela, detalhes=detalhes or "")
 
 
+def _produto_elegivel_compra_pronta(produto):
+    """Linha de ordem de compra como produto pronto: não fabricado e (revenda ou fornecedor cadastrado)."""
+    if produto.fabricado:
+        return False
+    if produto.revenda:
+        return True
+    return bool(produto.fornecedor_id)
+
+
 # --- Clientes ---
 @method_decorator(csrf_exempt, name='dispatch')
 class ClienteListCreate(APIView):
@@ -732,8 +741,10 @@ class CompraListCreate(APIView):
                 if not produto_id:
                     continue
                 try:
-                    prod = Produto.objects.get(pk=produto_id, revenda=True)
+                    prod = Produto.objects.get(pk=produto_id)
                 except Produto.DoesNotExist:
+                    continue
+                if not _produto_elegivel_compra_pronta(prod):
                     continue
                 c = CompraProduto.objects.create(
                     ordem=ordem,

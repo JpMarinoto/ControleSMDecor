@@ -43,6 +43,21 @@ interface NovoItemCompraForm {
   precoUnitario: string;
 }
 
+/** Inclui na compra se o fornecedor do produto coincide com o da ordem ou ainda não foi definido (não mistura produto de outro fornecedor). */
+function produtoDisponivelParaFornecedor(p: any, fid: string) {
+  const pf = p.fornecedor;
+  if (pf == null || pf === "" || String(pf) === "null" || String(pf) === "undefined") return true;
+  return String(pf) === String(fid);
+}
+
+/** Mesma regra da API: compra como item pronto se não é fabricado e (revenda ou tem fornecedor no cadastro). */
+function produtoElegivelCompraPronta(p: any) {
+  if (p.fabricado) return false;
+  if (p.revenda) return true;
+  const fid = p.fornecedor;
+  return fid != null && fid !== "" && String(fid) !== "null" && String(fid) !== "undefined";
+}
+
 export function Compra() {
   const [ordens, setOrdens] = useState<OrdemCompra[]>([]);
   const [materiais, setMateriais] = useState<any[]>([]);
@@ -106,7 +121,7 @@ export function Compra() {
     }
   }, [fornecedorId, materialId, materiais]);
 
-  // Ao trocar o fornecedor, limpar material selecionado para exibir apenas os vinculados
+  // Ao trocar o fornecedor, limpar material selecionado se não estiver vinculado a ele
   useEffect(() => {
     if (!fornecedorId) {
       setMaterialId("");
@@ -118,6 +133,12 @@ export function Compra() {
     const pertence = vinculados.some((m: any) => String(m.id) === materialId);
     if (materialId && !pertence) setMaterialId("");
   }, [fornecedorId, materiais]);
+
+  useEffect(() => {
+    if (!fornecedorId || !produtoId) return;
+    const p = produtosRevenda.find((x: any) => String(x.id) === produtoId);
+    if (p && !produtoDisponivelParaFornecedor(p, fornecedorId)) setProdutoId("");
+  }, [fornecedorId, produtoId, produtosRevenda]);
 
   const loadData = async () => {
     try {
@@ -151,7 +172,7 @@ export function Compra() {
       );
       setMateriais(Array.isArray(materiaisRes) ? materiaisRes : []);
       const allProds = Array.isArray(produtosRes) ? produtosRes : [];
-      setProdutosRevenda(allProds.filter((p: any) => Boolean(p.revenda)));
+      setProdutosRevenda(allProds.filter((p: any) => produtoElegivelCompraPronta(p)));
       setFornecedores(Array.isArray(fornRes) ? fornRes : []);
     } catch {
       toast.error("Erro ao carregar dados");
@@ -530,7 +551,9 @@ export function Compra() {
                 <ShoppingCart className="size-5" />
                 Nova Compra
               </CardTitle>
-              <p className="text-sm text-muted-foreground">Selecione o fornecedor, adicione os materiais (o preço do cadastro é preenchido quando o material está vinculado a este fornecedor), depois registre.</p>
+              <p className="text-sm text-muted-foreground">
+                Selecione o fornecedor e adicione os itens. Materiais só aparecem se estiverem vinculados a esse fornecedor no cadastro. Em produtos, aparecem itens de revenda ou produtos não fabricados com fornecedor cadastrado (mesmo fornecedor da compra, ou fornecedor do produto em branco).
+              </p>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
@@ -562,11 +585,11 @@ export function Compra() {
                       const materiaisDoFornecedor = materiais.filter(
                         (m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === String(fornecedorId)
                       );
-                      const produtosDoFornecedor = produtosRevenda.filter((p: any) => {
-                        const fid = p.fornecedor;
-                        return String(fid) === String(fornecedorId);
-                      });
-                      const listaProdutos = produtosDoFornecedor.length > 0 ? produtosDoFornecedor : produtosRevenda;
+                      const produtosLista = produtosRevenda
+                        .filter((p: any) => produtoDisponivelParaFornecedor(p, fornecedorId))
+                        .sort((a: any, b: any) =>
+                          String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR")
+                        );
 
                       return (
                         <div className="space-y-2">
@@ -600,25 +623,24 @@ export function Compra() {
                                 Nenhum material vinculado a este fornecedor. Vincule na aba Cadastro (materiais).
                               </p>
                             )
+                          ) : produtosLista.length > 0 ? (
+                            <Select value={produtoId} onValueChange={setProdutoId}>
+                              <SelectTrigger id="produtoId">
+                                <SelectValue placeholder="Selecione o produto de revenda" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {produtosLista.map((p: any) => (
+                                  <SelectItem key={p.id} value={String(p.id)}>
+                                    {p.nome}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           ) : (
-                            listaProdutos.length > 0 ? (
-                              <Select value={produtoId} onValueChange={setProdutoId}>
-                                <SelectTrigger id="produtoId">
-                                  <SelectValue placeholder="Selecione o produto de revenda" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {listaProdutos.map((p: any) => (
-                                    <SelectItem key={p.id} value={String(p.id)}>
-                                      {p.nome}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <p className="text-sm text-muted-foreground py-2">
-                                Nenhum produto de revenda cadastrado. Marque "Produto de revenda" no Cadastro de Produtos.
-                              </p>
-                            )
+                            <p className="text-sm text-muted-foreground py-2">
+                              Nenhum produto disponível para este fornecedor. No cadastro, marque revenda ou defina o
+                              fornecedor do produto (e não marque como fabricado).
+                            </p>
                           )}
                         </div>
                       );

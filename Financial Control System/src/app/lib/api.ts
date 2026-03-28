@@ -21,6 +21,39 @@ function authHeaders(): Record<string, string> {
   return t ? { Authorization: `Token ${t}` } : {};
 }
 
+function messageFromApiError(data: unknown): string {
+  if (data == null) return '';
+  if (typeof data === 'string') return data;
+  if (typeof data !== 'object') return String(data);
+  const o = data as Record<string, unknown>;
+  if (typeof o.detail === 'string') return o.detail;
+  if (typeof o.error === 'string') return o.error;
+  const parts: string[] = [];
+  for (const [, val] of Object.entries(o)) {
+    if (Array.isArray(val) && val.length > 0) {
+      const first = val[0];
+      if (typeof first === 'string') parts.push(first);
+    } else if (typeof val === 'string') parts.push(val);
+  }
+  return parts.join(' ') || '';
+}
+
+async function readJsonOrThrow(response: Response): Promise<unknown> {
+  const text = await response.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text) as unknown;
+    } catch {
+      body = text;
+    }
+  }
+  if (!response.ok) {
+    throw new Error(messageFromApiError(body) || `Erro HTTP ${response.status}`);
+  }
+  return body;
+}
+
 export interface EstoqueItem {
   id: number;
   nome: string;
@@ -259,7 +292,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(data),
     });
-    return response.json();
+    return readJsonOrThrow(response);
   },
   
   updateProduto: async (id: string, data: any) => {
@@ -268,7 +301,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(data),
     });
-    return response.json();
+    return readJsonOrThrow(response);
   },
   
   deleteProduto: async (id: string) => {
@@ -487,7 +520,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(data),
     });
-    return response.json();
+    return readJsonOrThrow(response);
   },
 
   updateMaterial: async (id: string, data: any) => {
@@ -496,7 +529,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(data),
     });
-    return response.json();
+    return readJsonOrThrow(response);
   },
 
   deleteMaterial: async (id: string) => {

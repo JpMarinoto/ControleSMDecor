@@ -83,10 +83,10 @@ class Produto(models.Model):
         blank=True,
         related_name='produtos',
     )
-    preco_custo = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    mao_obra_unitaria = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    margem_lucro_percent = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
-    preco_venda = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    preco_custo = models.DecimalField(max_digits=14, decimal_places=4, default=0.00)
+    mao_obra_unitaria = models.DecimalField(max_digits=14, decimal_places=4, default=0.00)
+    margem_lucro_percent = models.DecimalField(max_digits=10, decimal_places=4, default=0.00)
+    preco_venda = models.DecimalField(max_digits=14, decimal_places=4, default=0.00)
     descricao = models.TextField(blank=True, null=True)
     estoque_atual = models.PositiveIntegerField(default=0)
 
@@ -104,7 +104,7 @@ class Material(models.Model):
         limit_choices_to={'tipo': 'material'},
     )
     fornecedor_padrao = models.ForeignKey(Fornecedor, on_delete=models.SET_NULL, null=True, blank=True)
-    preco_unitario_base = models.DecimalField(max_digits=10, decimal_places=2)
+    preco_unitario_base = models.DecimalField(max_digits=12, decimal_places=4)
     estoque_atual = models.PositiveIntegerField(default=0)
 
     def __str__(self):
@@ -115,7 +115,7 @@ class ProdutoInsumo(models.Model):
     """Materiais necessários para fabricar um produto e sua quantidade por unidade."""
     produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='insumos')
     material = models.ForeignKey(Material, on_delete=models.CASCADE)
-    quantidade = models.DecimalField(max_digits=10, decimal_places=3, default=1)
+    quantidade = models.DecimalField(max_digits=12, decimal_places=4, default=1)
 
     class Meta:
         unique_together = [('produto', 'material')]

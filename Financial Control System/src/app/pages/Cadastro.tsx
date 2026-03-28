@@ -102,6 +102,14 @@ interface ContaBancaria {
 // Normalizar id para string (API devolve número)
 const sid = (x: number | string) => (x != null ? String(x) : "");
 
+const fmtDecimalPt = (n: number) =>
+  Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+
+const roundDecimalPlaces = (n: number, places: number) => {
+  const f = 10 ** places;
+  return Math.round((n + Number.EPSILON) * f) / f;
+};
+
 export function Cadastro() {
   // States
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -343,19 +351,20 @@ export function Cadastro() {
     const custo = parseFloat(String(precoCustoProduto || '').replace(',', '.'));
     const maoObra = parseFloat(String(maoObraProduto || '').replace(',', '.'));
     const margem = parseFloat(String(margemLucroProduto || '').replace(',', '.'));
+    const q4 = (x: number) => roundDecimalPlaces(x, 4);
     const payload = {
       nome: nomeProduto.trim(),
       categoria: Number(categoriaProduto) || undefined,
-      preco_venda: preco,
+      preco_venda: q4(preco),
       descricao: "",
       revenda: false,
       fabricado: produtoFabricado,
       fornecedor: fornecedorProduto ? Number(fornecedorProduto) : null,
-      preco_custo: !isNaN(custo) && custo >= 0 ? custo : 0,
-      mao_obra_unitaria: !isNaN(maoObra) && maoObra >= 0 ? maoObra : 0,
-      margem_lucro_percent: !isNaN(margem) ? margem : 0,
+      preco_custo: q4(!isNaN(custo) && custo >= 0 ? custo : 0),
+      mao_obra_unitaria: q4(!isNaN(maoObra) && maoObra >= 0 ? maoObra : 0),
+      margem_lucro_percent: q4(!isNaN(margem) ? margem : 0),
       insumos: produtoFabricado
-        ? insumosProduto.map((i) => ({ material: i.material, quantidade: i.quantidade }))
+        ? insumosProduto.map((i) => ({ material: i.material, quantidade: q4(Number(i.quantidade)) }))
         : [],
     };
     try {
@@ -370,7 +379,7 @@ export function Cadastro() {
       await loadData();
       resetProdutoForm();
     } catch (err) {
-      toast.error('Erro ao salvar produto');
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar produto');
     }
   };
 
@@ -424,7 +433,7 @@ export function Cadastro() {
         toast.error('Preço é obrigatório');
         return;
       }
-      preco = parseFloat(String(precoMaterial).replace(',', '.'));
+      preco = roundDecimalPlaces(parseFloat(String(precoMaterial).replace(',', '.')), 4);
       if (isNaN(preco) || preco < 0) {
         toast.error('Preço inválido');
         return;
@@ -451,7 +460,7 @@ export function Cadastro() {
       await loadData();
       resetMaterialForm();
     } catch (err) {
-      toast.error('Erro ao salvar material');
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar material');
     }
   };
 
@@ -575,18 +584,12 @@ export function Cadastro() {
     setEditingProduto(produto);
     setCategoriaProduto(produto.categoria);
     setNomeProduto(produto.nome);
-    setPrecoInicial(Number(produto.precoInicial).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    setPrecoInicial(fmtDecimalPt(Number(produto.precoInicial)));
     setProdutoFabricado(Boolean(produto.fabricado));
     setFornecedorProduto(produto.fornecedor || '');
-    setPrecoCustoProduto(
-      Number(produto.precoCusto ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    );
-    setMaoObraProduto(
-      Number(produto.maoObraUnitaria ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    );
-    setMargemLucroProduto(
-      Number(produto.margemLucroPercent ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    );
+    setPrecoCustoProduto(fmtDecimalPt(Number(produto.precoCusto ?? 0)));
+    setMaoObraProduto(fmtDecimalPt(Number(produto.maoObraUnitaria ?? 0)));
+    setMargemLucroProduto(fmtDecimalPt(Number(produto.margemLucroPercent ?? 0)));
     setInsumosProduto(
       Array.isArray(produto.insumos)
         ? produto.insumos.map((i) => ({
@@ -608,9 +611,6 @@ export function Cadastro() {
     return isNaN(v) ? null : v;
   };
 
-  const fmt2 = (n: number) =>
-    Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
   const custoMateriaisProduto = insumosProduto.reduce((acc, i) => acc + (Number(i.total_insumo) || 0), 0);
   const maoObraNum = parseDecimal(maoObraProduto) ?? 0;
   const custoTotalFabricacao = custoMateriaisProduto + maoObraNum;
@@ -618,10 +618,10 @@ export function Cadastro() {
   useEffect(() => {
     if (!produtoFabricado) return;
     setCalcProdutoSource('preco_custo');
-    setPrecoCustoProduto(fmt2(custoTotalFabricacao));
+    setPrecoCustoProduto(fmtDecimalPt(custoTotalFabricacao));
     const margem = parseDecimal(margemLucroProduto);
     if (margem != null) {
-      setPrecoInicial(fmt2(custoTotalFabricacao * (1 + margem / 100)));
+      setPrecoInicial(fmtDecimalPt(custoTotalFabricacao * (1 + margem / 100)));
     }
   }, [produtoFabricado, custoTotalFabricacao, margemLucroProduto]);
 
@@ -646,7 +646,7 @@ export function Cadastro() {
     setNomeMaterial(material.nome);
     setCategoriaMaterial(material.categoria);
     setFornecedorMaterial(material.fornecedor);
-    setPrecoMaterial(Number(material.precoUnitarioBase).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    setPrecoMaterial(fmtDecimalPt(Number(material.precoUnitarioBase)));
   };
 
   const handleEditConta = (conta: ContaBancaria) => {
@@ -804,7 +804,7 @@ export function Cadastro() {
       style: 'currency',
       currency: 'BRL',
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      maximumFractionDigits: 4,
     }).format(Number(value));
   };
 
@@ -1116,7 +1116,7 @@ export function Cadastro() {
                         const custo = parseDecimal(precoCustoProduto);
                         if (venda != null && custo != null && custo > 0) {
                           const m = ((venda / custo) - 1) * 100;
-                          setMargemLucroProduto(fmt2(m));
+                          setMargemLucroProduto(fmtDecimalPt(m));
                         }
                       }}
                       placeholder="0,00"
@@ -1183,10 +1183,10 @@ export function Cadastro() {
                         if (custo != null && custo > 0) {
                           if (margem != null && (calcProdutoSource === 'margem' || calcProdutoSource === 'preco_custo')) {
                             const pv = custo * (1 + margem / 100);
-                            setPrecoInicial(fmt2(pv));
+                            setPrecoInicial(fmtDecimalPt(pv));
                           } else if (venda != null && (calcProdutoSource === 'preco_venda' || calcProdutoSource === 'preco_custo')) {
                             const m = ((venda / custo) - 1) * 100;
-                            setMargemLucroProduto(fmt2(m));
+                            setMargemLucroProduto(fmtDecimalPt(m));
                           }
                         }
                       }}
@@ -1208,7 +1208,7 @@ export function Cadastro() {
                         const margem = parseDecimal(e.target.value);
                         if (custo != null && custo > 0 && margem != null) {
                           const pv = custo * (1 + margem / 100);
-                          setPrecoInicial(fmt2(pv));
+                          setPrecoInicial(fmtDecimalPt(pv));
                         }
                       }}
                       placeholder="0,00"
@@ -1285,7 +1285,7 @@ export function Cadastro() {
                       <div className="space-y-2">
                         {insumosProduto.map((i) => (
                           <div key={i.material} className="flex items-center justify-between text-sm border-b pb-1">
-                            <span>{i.material_nome} ({i.quantidade.toLocaleString('pt-BR')} x {formatCurrency(i.preco_unitario_base)})</span>
+                            <span>{i.material_nome} ({i.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 })} x {formatCurrency(i.preco_unitario_base)})</span>
                             <div className="flex items-center gap-2">
                               <span className="font-medium">{formatCurrency(i.total_insumo)}</span>
                               <Button type="button" size="sm" variant="ghost" onClick={() => setInsumosProduto((prev) => prev.filter((x) => x.material !== i.material))}>Remover</Button>
@@ -1309,11 +1309,11 @@ export function Cadastro() {
                       </div>
                       <div className="space-y-2">
                         <Label>Custo materiais</Label>
-                        <Input value={fmt2(custoMateriaisProduto)} disabled />
+                        <Input value={fmtDecimalPt(custoMateriaisProduto)} disabled />
                       </div>
                       <div className="space-y-2">
                         <Label>Custo total (insumos + mão de obra)</Label>
-                        <Input value={fmt2(custoTotalFabricacao)} disabled />
+                        <Input value={fmtDecimalPt(custoTotalFabricacao)} disabled />
                       </div>
                     </div>
                   </div>
@@ -1775,7 +1775,7 @@ export function Cadastro() {
                                             disabled={!((precoRapidoMaterial[m.id] ?? "").trim()) || savingPrecoMaterialId === m.id}
                                             onClick={async () => {
                                               const valorEdit = precoRapidoMaterial[m.id] ?? "";
-                                              const v = parseFloat(valorEdit.replace(",", "."));
+                                              const v = roundDecimalPlaces(parseFloat(valorEdit.replace(",", ".")), 4);
                                               if (isNaN(v) || v < 0) {
                                                 toast.error("Preço inválido");
                                                 return;
@@ -1786,8 +1786,8 @@ export function Cadastro() {
                                                 toast.success("Preço atualizado");
                                                 setPrecoRapidoMaterial((prev) => ({ ...prev, [m.id]: "" }));
                                                 await loadData();
-                                              } catch {
-                                                toast.error("Erro ao atualizar preço");
+                                              } catch (err) {
+                                                toast.error(err instanceof Error ? err.message : "Erro ao atualizar preço");
                                               } finally {
                                                 setSavingPrecoMaterialId(null);
                                               }
@@ -1916,7 +1916,7 @@ export function Cadastro() {
                         inputMode="decimal"
                         value={precoMaterial}
                         onChange={(e) => setPrecoMaterial(e.target.value)}
-                        placeholder="0,00"
+                        placeholder="0,0000"
                       />
                     </div>
                   )}
