@@ -501,7 +501,16 @@ class VendaListCreate(APIView):
             cliente = Cliente.objects.get(pk=cliente_id)
         except Cliente.DoesNotExist:
             return Response({'cliente': ['Não encontrado']}, status=status.HTTP_400_BAD_REQUEST)
-        venda = Venda.objects.create(cliente=cliente)
+        data_raw = data.get('data') or data.get('data_venda')
+        data_enviada = _parse_data_request(data_raw)
+        if data_enviada:
+            tz_br = ZoneInfo('America/Sao_Paulo')
+            data_hora_venda = datetime.combine(
+                data_enviada, datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0), tzinfo=tz_br
+            )
+        else:
+            _, data_hora_venda = _data_hora_negocio()
+        venda = Venda.objects.create(cliente=cliente, data_venda=data_hora_venda)
         for item in itens:
             prod_id = item.get('produto') or item.get('produto_id')
             qty = item.get('quantidade', 1)
@@ -527,12 +536,35 @@ class VendaDetail(APIView):
 
     def patch(self, request, pk):
         venda = self.get_object(pk)
-        if request.data.get('cancelada') is True:
+        data = request.data or {}
+        if data.get('cancelada') is True:
             venda.cancelada = True
-            venda.save()
+            venda.save(update_fields=['cancelada'])
             _api_log(request, "Cancelar", "Venda", f"Venda #{pk} cancelada (permanece no banco para histórico)")
-        serializer = VendaSerializer(venda)
-        return Response(serializer.data)
+            return Response(VendaSerializer(venda).data)
+
+        data_raw = data.get('data') or data.get('data_venda')
+        if data_raw:
+            data_enviada = _parse_data_request(str(data_raw).strip())
+            if not data_enviada:
+                return Response(
+                    {'data': ['Data inválida. Use YYYY-MM-DD.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            tz_br = ZoneInfo('America/Sao_Paulo')
+            venda.data_venda = datetime.combine(
+                data_enviada,
+                datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0),
+                tzinfo=tz_br,
+            )
+            venda.save(update_fields=['data_venda'])
+            _api_log(
+                request,
+                "Editar",
+                "Venda",
+                f"Venda #{pk} - data da venda alterada para {data_enviada.isoformat()}",
+            )
+        return Response(VendaSerializer(venda).data)
 
     def delete(self, request, pk):
         """Soft delete: marca a venda como cancelada em vez de apagar."""
@@ -621,7 +653,7 @@ class VendaItemDetail(APIView):
 class VendaCopiar(APIView):
     def post(self, request, pk):
         origem = Venda.objects.select_related('cliente').prefetch_related('itens').get(pk=pk)
-        nova = Venda.objects.create(cliente=origem.cliente)
+        nova = Venda.objects.create(cliente=origem.cliente, data_venda=origem.data_venda)
         for item in origem.itens.all():
             ItemVenda.objects.create(venda=nova, produto=item.produto, quantidade=item.quantidade, preco_unitario=item.preco_unitario)
         _api_log(request, "Criar", "Venda", f"Venda #{nova.id} copiada da venda #{pk}")
@@ -679,20 +711,26 @@ class CompraListCreate(APIView):
                 out.append(OrdemCompraSerializer(o).data)
             for c in itens_sem_ordem_mat:
                 # Ordem sintética de 1 item (legado)
+                d_iso = _data_historico_iso(c.data_compra)
+                dl_iso = _data_historico_iso(getattr(c, 'data_lancamento', None) or c.data_compra)
                 out.append({
                     'id': f'item-mat-{c.id}',
                     'fornecedor': c.fornecedor.nome,
                     'fornecedor_id': c.fornecedor_id,
-                    'data': c.data_compra.date().isoformat() if c.data_compra else None,
+                    'data': d_iso if d_iso else None,
+                    'data_lancamento': dl_iso if dl_iso else None,
                     'itens': [ItemCompraMaterialSerializer(c).data],
                     'total': float(c.total_compra),
                 })
             for c in itens_sem_ordem_prod:
+                d_iso = _data_historico_iso(c.data_compra)
+                dl_iso = _data_historico_iso(getattr(c, 'data_lancamento', None) or c.data_compra)
                 out.append({
                     'id': f'item-prod-{c.id}',
                     'fornecedor': c.fornecedor.nome,
                     'fornecedor_id': c.fornecedor_id,
-                    'data': c.data_compra.date().isoformat() if c.data_compra else None,
+                    'data': d_iso if d_iso else None,
+                    'data_lancamento': dl_iso if dl_iso else None,
                     'itens': [ItemCompraProdutoSerializer(c).data],
                     'total': float(c.total_compra),
                 })
@@ -715,7 +753,16 @@ class CompraListCreate(APIView):
             fornecedor = Fornecedor.objects.get(pk=fornecedor_id)
         except Fornecedor.DoesNotExist:
             return Response({'fornecedor_id': ['Fornecedor inválido.']}, status=status.HTTP_400_BAD_REQUEST)
-        ordem = OrdemCompra.objects.create(fornecedor=fornecedor)
+        data_raw = request.data.get('data') or request.data.get('data_compra')
+        data_enviada = _parse_data_request(data_raw)
+        if data_enviada:
+            tz_br = ZoneInfo('America/Sao_Paulo')
+            data_hora_compra = datetime.combine(
+                data_enviada, datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0), tzinfo=tz_br
+            )
+        else:
+            _, data_hora_compra = _data_hora_negocio()
+        ordem = OrdemCompra.objects.create(fornecedor=fornecedor, data_compra=data_hora_compra)
         created = []
         for item in itens:
             item_tipo = (item.get('tipo') or '').strip().lower()
@@ -752,6 +799,7 @@ class CompraListCreate(APIView):
                     produto=prod,
                     quantidade=q,
                     preco_no_dia=p,
+                    data_compra=data_hora_compra,
                 )
                 created.append(c)
             else:
@@ -767,6 +815,7 @@ class CompraListCreate(APIView):
                     material=material,
                     quantidade=q,
                     preco_no_dia=p,
+                    data_compra=data_hora_compra,
                 )
                 created.append(c)
         if not created:
@@ -794,11 +843,14 @@ class CompraDetail(APIView):
             if item:
                 if item.ordem_id:
                     return Response(OrdemCompraSerializer(item.ordem).data)
+                d_iso = _data_historico_iso(item.data_compra)
+                dl_iso = _data_historico_iso(getattr(item, 'data_lancamento', None) or item.data_compra)
                 return Response({
                     'id': f'item-mat-{item.id}',
                     'fornecedor': item.fornecedor.nome,
                     'fornecedor_id': item.fornecedor_id,
-                    'data': item.data_compra.date().isoformat() if item.data_compra else None,
+                    'data': d_iso if d_iso else None,
+                    'data_lancamento': dl_iso if dl_iso else None,
                     'itens': [ItemCompraMaterialSerializer(item).data],
                     'total': float(item.total_compra),
                 })
@@ -806,11 +858,14 @@ class CompraDetail(APIView):
             if itemp:
                 if itemp.ordem_id:
                     return Response(OrdemCompraSerializer(itemp.ordem).data)
+                d_iso = _data_historico_iso(itemp.data_compra)
+                dl_iso = _data_historico_iso(getattr(itemp, 'data_lancamento', None) or itemp.data_compra)
                 return Response({
                     'id': f'item-prod-{itemp.id}',
                     'fornecedor': itemp.fornecedor.nome,
                     'fornecedor_id': itemp.fornecedor_id,
-                    'data': itemp.data_compra.date().isoformat() if itemp.data_compra else None,
+                    'data': d_iso if d_iso else None,
+                    'data_lancamento': dl_iso if dl_iso else None,
                     'itens': [ItemCompraProdutoSerializer(itemp).data],
                     'total': float(itemp.total_compra),
                 })
@@ -821,6 +876,54 @@ class CompraDetail(APIView):
             raise
         return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
+    def patch(self, request, pk):
+        """Altera a data da compra da ordem (e dos itens); não altera data_lancamento."""
+        try:
+            pk_int = int(pk)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        ordem = OrdemCompra.objects.filter(pk=pk_int).first()
+        if not ordem:
+            return Response(
+                {'detail': 'Só é possível alterar a data em conjunto para uma ordem (id numérico).'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if ordem.cancelada:
+            return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+        data = request.data or {}
+        data_raw = data.get('data') or data.get('data_compra')
+        if not data_raw:
+            return Response(
+                {'data': ['Informe data ou data_compra (YYYY-MM-DD).']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        data_enviada = _parse_data_request(str(data_raw).strip())
+        if not data_enviada:
+            return Response(
+                {'data': ['Data inválida. Use YYYY-MM-DD.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        tz_br = ZoneInfo('America/Sao_Paulo')
+        data_hora = datetime.combine(
+            data_enviada,
+            datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0),
+            tzinfo=tz_br,
+        )
+        ordem.data_compra = data_hora
+        ordem.save(update_fields=['data_compra'])
+        ordem.itens.update(data_compra=data_hora)
+        ordem.itens_produtos.update(data_compra=data_hora)
+        _api_log(
+            request,
+            "Editar",
+            "Compra",
+            f"Ordem #{pk_int} - data da compra alterada para {data_enviada.isoformat()}",
+        )
+        ordem = OrdemCompra.objects.prefetch_related(
+            'itens__material', 'itens_produtos__produto'
+        ).select_related('fornecedor').get(pk=pk_int)
+        return Response(OrdemCompraSerializer(ordem).data)
+
     def put(self, request, pk):
         if isinstance(pk, str) and pk.startswith('item-'):
             pk = pk.replace('item-', '')
@@ -828,16 +931,18 @@ class CompraDetail(APIView):
         obj = None
         kind = None
         try:
-            obj = CompraMaterial.objects.select_related('fornecedor', 'material').get(pk=pk)
+            obj = CompraMaterial.objects.select_related('fornecedor', 'material', 'ordem').get(pk=pk)
             kind = 'material'
         except (CompraMaterial.DoesNotExist, ValueError):
             obj = None
         if obj is None:
             try:
-                obj = CompraProduto.objects.select_related('fornecedor', 'produto').get(pk=pk)
+                obj = CompraProduto.objects.select_related('fornecedor', 'produto', 'ordem').get(pk=pk)
                 kind = 'produto'
             except (CompraProduto.DoesNotExist, ValueError):
                 return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if obj.ordem_id and obj.ordem.cancelada:
+            return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         if request.data.get('quantidade') is not None:
             try:
                 obj.quantidade = int(request.data.get('quantidade'))
@@ -880,24 +985,31 @@ class CompraDetail(APIView):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         ordem = OrdemCompra.objects.filter(pk=pk_int).first()
         if ordem:
-            ordem.delete()
-            _api_log(request, "Excluir", "Compra", f"Ordem #{pk} excluída")
+            if ordem.cancelada:
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            ordem.cancelada = True
+            ordem.save(update_fields=['cancelada'])
+            _api_log(request, "Cancelar", "Compra", f"Ordem #{pk} cancelada (permanece no histórico)")
             return Response(status=status.HTTP_204_NO_CONTENT)
         try:
-            obj = CompraMaterial.objects.get(pk=pk_int)
+            obj = CompraMaterial.objects.select_related('ordem').get(pk=pk_int)
         except CompraMaterial.DoesNotExist:
             obj = None
         if obj is None:
             try:
-                objp = CompraProduto.objects.get(pk=pk_int)
+                objp = CompraProduto.objects.select_related('ordem').get(pk=pk_int)
             except CompraProduto.DoesNotExist:
                 return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            if objp.ordem_id and objp.ordem.cancelada:
+                return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
             ordem = objp.ordem
             objp.delete()
             if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
                 ordem.delete()
             _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída")
             return Response(status=status.HTTP_204_NO_CONTENT)
+        if obj.ordem_id and obj.ordem.cancelada:
+            return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         ordem = obj.ordem
         obj.delete()
         if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
@@ -918,7 +1030,12 @@ class CompraCopiar(APIView):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
         if ordem:
-            nova_ordem = OrdemCompra.objects.create(fornecedor=ordem.fornecedor)
+            if ordem.cancelada:
+                return Response({'detail': 'Não é possível copiar uma ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+            nova_ordem = OrdemCompra.objects.create(
+                fornecedor=ordem.fornecedor,
+                data_compra=ordem.data_compra,
+            )
             for item in ordem.itens.all():
                 CompraMaterial.objects.create(
                     ordem=nova_ordem,
@@ -926,6 +1043,7 @@ class CompraCopiar(APIView):
                     material=item.material,
                     quantidade=item.quantidade,
                     preco_no_dia=item.preco_no_dia,
+                    data_compra=ordem.data_compra,
                 )
             for item in ordem.itens_produtos.all():
                 CompraProduto.objects.create(
@@ -934,6 +1052,7 @@ class CompraCopiar(APIView):
                     produto=item.produto,
                     quantidade=item.quantidade,
                     preco_no_dia=item.preco_no_dia,
+                    data_compra=ordem.data_compra,
                 )
             _api_log(request, "Criar", "Compra", f"Ordem #{nova_ordem.id} copiada da ordem #{pk}")
             return Response(OrdemCompraSerializer(nova_ordem).data, status=status.HTTP_201_CREATED)
@@ -1859,11 +1978,15 @@ class FornecedorDetalhe(APIView):
         from django.db import connection
         try:
             fornecedor = Fornecedor.objects.get(pk=pk)
-            compras_mat = CompraMaterial.objects.filter(fornecedor=fornecedor).select_related('material')
-            compras_prod = CompraProduto.objects.filter(fornecedor=fornecedor).select_related('produto')
+            compras_mat = CompraMaterial.objects.filter(fornecedor=fornecedor).select_related('material', 'ordem')
+            compras_prod = CompraProduto.objects.filter(fornecedor=fornecedor).select_related('produto', 'ordem')
+
+            def _compra_linha_conta_saldo(c):
+                return c.ordem_id is None or not c.ordem.cancelada
+
             total_compras = _safe_float(
-                sum(_safe_float(c.total_compra) for c in compras_mat)
-                + sum(_safe_float(c.total_compra) for c in compras_prod)
+                sum(_safe_float(c.total_compra) for c in compras_mat if _compra_linha_conta_saldo(c))
+                + sum(_safe_float(c.total_compra) for c in compras_prod if _compra_linha_conta_saldo(c))
             )
             # Pagamentos: usar raw SQL para evitar decimal.InvalidOperation ao ler valor fora do range do Decimal
             table = PagamentoFornecedor._meta.db_table
@@ -1894,8 +2017,10 @@ class FornecedorDetalhe(APIView):
                         'sort_dt': c.data_compra,
                         'id': f'mat-{c.id}',
                         'ordem_id': c.ordem_id,
+                        'ordem_cancelada': bool(c.ordem_id and c.ordem.cancelada),
                         'data': c.data_compra.date().isoformat() if c.data_compra else '',
                         'material': c.material.nome,
+                        'quantidade': int(c.quantidade),
                         'total': _safe_float(c.total_compra),
                     }
                 )
@@ -1905,8 +2030,10 @@ class FornecedorDetalhe(APIView):
                         'sort_dt': c.data_compra,
                         'id': f'prod-{c.id}',
                         'ordem_id': c.ordem_id,
+                        'ordem_cancelada': bool(c.ordem_id and c.ordem.cancelada),
                         'data': c.data_compra.date().isoformat() if c.data_compra else '',
                         'material': c.produto.nome,
+                        'quantidade': int(c.quantidade),
                         'total': _safe_float(c.total_compra),
                     }
                 )

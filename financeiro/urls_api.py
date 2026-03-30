@@ -9,6 +9,7 @@ from . import views_auth
 urlpatterns = [
     path('auth/login/', csrf_exempt(views_auth.AuthLogin.as_view())),
     path('auth/logout/', csrf_exempt(views_auth.AuthLogout.as_view())),
+    path('auth/verify-password/', csrf_exempt(views_auth.AuthVerifyPassword.as_view())),
     path('auth/me/', views_auth.AuthMe.as_view()),
     path('usuarios/', views_auth.UsuarioListCreate.as_view()),
     path('usuarios/<int:pk>/', views_auth.UsuarioDetail.as_view()),

@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog";
-import { ShoppingCart, Plus, Trash2, Eye, Copy, Pencil, Check, X, Printer } from "lucide-react";
+import { ShoppingCart, Plus, Trash2, Eye, Copy, Pencil, Check, X, Printer, Calendar, Hash, Package, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatDateOnly, parseDateOnlyToTime } from "../lib/format";
+import { formatDateOnly, parseDateOnlyToTime, getTodayLocalISO } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
+import { SimpleConfirmDialog, ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
 
 interface ItemCompra {
   id: number;
@@ -32,6 +34,8 @@ interface OrdemCompra {
   fornecedor: string;
   fornecedor_id?: number;
   data: string;
+  data_lancamento?: string;
+  cancelada?: boolean;
   itens: ItemCompra[];
   total: number;
 }
@@ -69,7 +73,7 @@ export function Compra() {
   const [fornecedorId, setFornecedorId] = useState('');
   const [quantidade, setQuantidade] = useState('');
   const [precoUnitario, setPrecoUnitario] = useState('');
-  const [data, setData] = useState(new Date().toISOString().split('T')[0]);
+  const [data, setData] = useState(getTodayLocalISO());
   const [tipoItem, setTipoItem] = useState<"material" | "produto">("material");
 
   const [itensForm, setItensForm] = useState<NovoItemCompraForm[]>([]);
@@ -83,8 +87,20 @@ export function Compra() {
   const [editCompraQtd, setEditCompraQtd] = useState("");
   const [editCompraPreco, setEditCompraPreco] = useState("");
   const [detailCompra, setDetailCompra] = useState<OrdemCompra | null>(null);
+  const [simpleConfirm, setSimpleConfirm] = useState<{
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [excluirCompraOpen, setExcluirCompraOpen] = useState(false);
+  const [editDetailDataCompra, setEditDetailDataCompra] = useState("");
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
+
+  useEffect(() => {
+    if (detailCompra?.data) setEditDetailDataCompra(String(detailCompra.data).slice(0, 10));
+  }, [detailCompra?.id, detailCompra?.data]);
 
   const getEmpresaHeaderHtml = () => {
     const doc = empresaDocumento();
@@ -155,6 +171,8 @@ export function Compra() {
               fornecedor: o.fornecedor || "",
               fornecedor_id: o.fornecedor_id,
               data: o.data || "",
+              data_lancamento: o.data_lancamento || "",
+              cancelada: o.cancelada === true,
               itens: (o.itens || []).map((i: any) => ({
                 id: i.id,
                 tipo: (i.tipo === "produto" ? "produto" : "material") as "material" | "produto",
@@ -193,22 +211,95 @@ export function Compra() {
     }
   };
 
-  const handleCopiarOrdem = async () => {
-    if (!detailCompra) return;
-    try {
-      await api.copiarCompra(String(detailCompra.id));
-      toast.success("Ordem copiada com sucesso");
-      await loadData();
-      setDetailCompra(null);
-    } catch {
-      toast.error("Erro ao copiar ordem");
+  const salvarDataCompraNoDetalhe = () => {
+    if (!detailCompra || !/^\d+$/.test(String(detailCompra.id))) return;
+    if (detailCompra.cancelada) {
+      toast.error("Esta ordem está cancelada.");
+      return;
     }
+    const trimmed = (editDetailDataCompra || "").trim().slice(0, 10);
+    if (trimmed.length < 10) {
+      toast.error("Informe a data da compra");
+      return;
+    }
+    if (trimmed === String(detailCompra.data || "").slice(0, 10)) {
+      toast.info("Data já é esta.");
+      return;
+    }
+    setSimpleConfirm({
+      title: "Alterar data da compra",
+      description:
+        "A data da operação será atualizada nesta ordem e em todos os itens. A data de lançamento não muda.",
+      confirmLabel: "Confirmar",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            const idStr = String(detailCompra.id);
+            const raw = await api.patchCompraOrdemData(idStr, { data: trimmed });
+            const r = raw as Record<string, unknown>;
+            const next: OrdemCompra =
+              raw && typeof raw === "object"
+                ? {
+                    id: r.id as string | number,
+                    fornecedor: (r.fornecedor as string) || detailCompra.fornecedor,
+                    fornecedor_id: (r.fornecedor_id as number) ?? detailCompra.fornecedor_id,
+                    data: (r.data as string) || trimmed,
+                    data_lancamento: (r.data_lancamento as string) || detailCompra.data_lancamento,
+                    cancelada: (r.cancelada as boolean) === true,
+                    itens: (r.itens as ItemCompra[]) || detailCompra.itens,
+                    total: Number(r.total) || detailCompra.total,
+                  }
+                : detailCompra;
+            setDetailCompra(next);
+            setOrdens((prev) =>
+              prev.map((x) =>
+                String(x.id) === idStr
+                  ? { ...x, data: next.data || trimmed, data_lancamento: next.data_lancamento, cancelada: next.cancelada }
+                  : x
+              )
+            );
+            toast.success("Data da compra atualizada");
+            setSimpleConfirm(null);
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : "Erro ao atualizar data";
+            toast.error(msg);
+            setSimpleConfirm(null);
+          }
+        })();
+      },
+    });
+  };
+
+  const handleCopiarOrdem = () => {
+    if (!detailCompra) return;
+    if (detailCompra.cancelada) {
+      toast.error("Não é possível copiar uma ordem cancelada.");
+      return;
+    }
+    const idCopia = String(detailCompra.id);
+    setSimpleConfirm({
+      title: "Copiar ordem de compra",
+      description: "Será criada uma nova ordem com os mesmos itens e fornecedor. Confirma?",
+      confirmLabel: "Copiar",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await api.copiarCompra(idCopia);
+            toast.success("Ordem copiada com sucesso");
+            await loadData();
+            setDetailCompra(null);
+          } catch {
+            toast.error("Erro ao copiar ordem");
+          }
+        })();
+      },
+    });
   };
 
   const handleDeleteCompra = async (id: string | number) => {
     try {
       await api.deleteCompra(String(id));
-      toast.success(id.toString().startsWith("item-") ? "Item excluído" : "Ordem excluída");
+      toast.success("Item excluído");
       await loadData();
       setDetailCompra(null);
     } catch {
@@ -268,7 +359,7 @@ export function Compra() {
     setEditCompraPreco(String(item.preco_no_dia));
   };
 
-  const salvarEdicaoItemCompra = async () => {
+  const salvarEdicaoItemCompra = () => {
     if (!editingItem) return;
     const qtd = parseInt(editCompraQtd, 10);
     if (isNaN(qtd) || qtd <= 0) {
@@ -280,18 +371,30 @@ export function Compra() {
       toast.error("Preço deve ser válido");
       return;
     }
-    try {
-      await api.updateCompra(String(editingItem.id), { quantidade: qtd, preco_no_dia: preco });
-      toast.success("Item atualizado");
-      await loadData();
-      setEditingItem(null);
-      if (detailCompra && String(detailCompra.id) === String(editingItem.ordemId)) {
-        const d = await api.getCompraDetalhe(String(editingItem.ordemId));
-        setDetailCompra(d);
-      }
-    } catch {
-      toast.error("Erro ao atualizar item");
-    }
+    const itemId = String(editingItem.id);
+    const ordemIdRef = editingItem.ordemId;
+    const detId = detailCompra ? String(detailCompra.id) : null;
+    setSimpleConfirm({
+      title: "Salvar alterações na compra",
+      description: "Confirma atualizar quantidade e preço deste item?",
+      confirmLabel: "Salvar",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await api.updateCompra(itemId, { quantidade: qtd, preco_no_dia: preco });
+            toast.success("Item atualizado");
+            await loadData();
+            setEditingItem(null);
+            if (detId && detId === String(ordemIdRef)) {
+              const d = await api.getCompraDetalhe(String(ordemIdRef));
+              setDetailCompra(d);
+            }
+          } catch {
+            toast.error("Erro ao atualizar item");
+          }
+        })();
+      },
+    });
   };
 
   const imprimirCompra = (ordem: OrdemCompra) => {
@@ -445,7 +548,7 @@ export function Compra() {
     setTimeout(() => janela.print(), 300);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!fornecedorId) {
@@ -458,32 +561,50 @@ export function Compra() {
       return;
     }
 
-    try {
-      const itensPayload = itensForm
-        .filter((item) => {
-          const qtd = parseInt(item.quantidade, 10);
-          const preco = parseFloat(item.precoUnitario.replace(',', '.'));
-          return item.materialId && !isNaN(qtd) && qtd > 0 && !isNaN(preco) && preco > 0;
-        })
-        .map((item) => ({
-          ...(item.materialId.startsWith("prod:") ? { tipo: "produto", produto: Number(item.materialId.replace("prod:", "")) } : { tipo: "material", material: Number(item.materialId.replace("mat:", "")) }),
-          quantidade: parseInt(item.quantidade, 10),
-          preco_no_dia: parseFloat(item.precoUnitario.replace(',', '.')),
-        }));
-      if (itensPayload.length === 0) {
-        toast.error("Adicione itens válidos (material, quantidade e preço)");
-        return;
-      }
-      await api.createCompra({
-        fornecedor_id: Number(fornecedorId),
-        itens: itensPayload,
-      });
-      toast.success("Compra registrada com sucesso");
-      await loadData();
-      resetForm();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Erro ao registrar compra");
+    const dataCompra = (data || "").trim().slice(0, 10);
+    if (dataCompra.length < 10) {
+      toast.error("Informe a data da compra");
+      return;
     }
+
+    const itensPayload = itensForm
+      .filter((item) => {
+        const qtd = parseInt(item.quantidade, 10);
+        const preco = parseFloat(item.precoUnitario.replace(',', '.'));
+        return item.materialId && !isNaN(qtd) && qtd > 0 && !isNaN(preco) && preco > 0;
+      })
+      .map((item) => ({
+        ...(item.materialId.startsWith("prod:") ? { tipo: "produto", produto: Number(item.materialId.replace("prod:", "")) } : { tipo: "material", material: Number(item.materialId.replace("mat:", "")) }),
+        quantidade: parseInt(item.quantidade, 10),
+        preco_no_dia: parseFloat(item.precoUnitario.replace(',', '.')),
+      }));
+    if (itensPayload.length === 0) {
+      toast.error("Adicione itens válidos (material, quantidade e preço)");
+      return;
+    }
+    const fornId = Number(fornecedorId);
+    setSimpleConfirm({
+      title: "Registrar compra",
+      description: "Confirma registrar esta ordem de compra com os itens indicados?",
+      confirmLabel: "Registrar",
+      onConfirm: () => {
+        void (async () => {
+          try {
+            await api.createCompra({
+              fornecedor_id: fornId,
+              itens: itensPayload,
+              data: dataCompra,
+              data_compra: dataCompra,
+            });
+            toast.success("Compra registrada com sucesso");
+            await loadData();
+            resetForm();
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Erro ao registrar compra");
+          }
+        })();
+      },
+    });
   };
 
   const resetForm = () => {
@@ -492,7 +613,7 @@ export function Compra() {
     setFornecedorId('');
     setQuantidade('');
     setPrecoUnitario('');
-    setData(new Date().toISOString().split('T')[0]);
+    setData(getTodayLocalISO());
     setItensForm([]);
   };
 
@@ -923,7 +1044,14 @@ export function Compra() {
                           className="cursor-pointer hover:bg-muted/50"
                           onClick={() => openDetail(ordem)}
                         >
-                          <TableCell className="font-medium truncate">{ordem.fornecedor}</TableCell>
+                          <TableCell className="font-medium truncate">
+                            <span className="inline-flex items-center gap-1.5">
+                              {ordem.cancelada && /^\d+$/.test(String(ordem.id)) ? (
+                                <Ban className="size-3.5 shrink-0 text-destructive" title="Ordem cancelada" aria-hidden />
+                              ) : null}
+                              <span className={ordem.cancelada ? "text-muted-foreground" : undefined}>{ordem.fornecedor}</span>
+                            </span>
+                          </TableCell>
                           <TableCell className="text-muted-foreground whitespace-nowrap">
                             {formatDateOnly(ordem.data)}
                           </TableCell>
@@ -939,9 +1067,18 @@ export function Compra() {
                           )}
                           <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-0.5">
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(ordem)} title="Ver detalhes">
-                                <Eye className="size-4" />
-                              </Button>
+                              <span className="relative inline-flex">
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(ordem)} title="Ver detalhes">
+                                  <Eye className="size-4" />
+                                </Button>
+                                {ordem.cancelada && /^\d+$/.test(String(ordem.id)) ? (
+                                  <span
+                                    className="pointer-events-none absolute -right-0.5 -top-0.5 size-2 rounded-full bg-destructive ring-2 ring-background"
+                                    title="Cancelada"
+                                    aria-hidden
+                                  />
+                                ) : null}
+                              </span>
                               {isChefe && (
                                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => imprimirCompra(ordem)} title="Imprimir">
                                   <Printer className="size-4" />
@@ -964,43 +1101,115 @@ export function Compra() {
       </Tabs>
 
       <Dialog open={!!detailCompra} onOpenChange={(open) => !open && setDetailCompra(null)}>
-        <DialogContent className="max-h-[90vh] flex flex-col overflow-hidden p-0 gap-0 sm:max-w-2xl">
+        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden gap-0 p-0 sm:max-w-2xl">
           {detailCompra && (
             <>
-              <DialogHeader className="shrink-0 px-6 pt-6 pb-2 pr-12">
-                <DialogTitle>
-                  Ordem de compra – {detailCompra.fornecedor} – {formatDateOnly(detailCompra.data)}
-                </DialogTitle>
-                <p className="text-sm text-muted-foreground">Todos os itens desta ordem</p>
+              <DialogHeader className="shrink-0 space-y-4 border-b bg-gradient-to-br from-muted/80 to-muted/30 px-6 pb-5 pt-6 text-left sm:pr-12">
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Detalhe da ordem de compra
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <DialogTitle className="flex items-center gap-2 text-xl font-semibold leading-tight sm:text-2xl">
+                      {detailCompra.cancelada ? (
+                        <Ban className="size-5 shrink-0 text-destructive" title="Ordem cancelada" aria-hidden />
+                      ) : null}
+                      {detailCompra.fornecedor}
+                    </DialogTitle>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
+                      <span className="inline-flex items-center gap-1.5" title="Data da operação de compra">
+                        <Calendar className="size-3.5 shrink-0" />
+                        {formatDateOnly(detailCompra.data)}
+                      </span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Hash className="size-3.5 shrink-0" />
+                        {/^\d+$/.test(String(detailCompra.id)) ? `Nº ${detailCompra.id}` : `Rascunho (${detailCompra.id})`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {detailCompra.cancelada ? (
+                      <Badge variant="destructive">Cancelada</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="font-normal bg-sky-100 text-sky-950 dark:bg-sky-950/50 dark:text-sky-100">
+                        Ativa
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="font-normal">
+                      <Package className="size-3" />
+                      {(detailCompra.itens || []).length} item(ns)
+                    </Badge>
+                  </div>
+                </div>
               </DialogHeader>
-              <div className="flex-1 min-h-0 overflow-y-auto px-6">
-                <Table>
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+                <div className="mb-4 space-y-3 rounded-xl border bg-muted/20 p-4">
+                  <div className="grid gap-0.5 text-sm">
+                    <span className="text-muted-foreground">Data de lançamento (registro no sistema)</span>
+                    <span className="font-medium tabular-nums">
+                      {detailCompra.data_lancamento ? formatDateOnly(detailCompra.data_lancamento) : "—"}
+                    </span>
+                  </div>
+                  {/^\d+$/.test(String(detailCompra.id)) && !detailCompra.cancelada && (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                      <div className="space-y-1.5 min-w-[180px]">
+                        <Label htmlFor="detalhe-data-compra">Data da compra (operação)</Label>
+                        <Input
+                          id="detalhe-data-compra"
+                          name="compra-operacao-data-uid"
+                          type="date"
+                          autoComplete="off"
+                          value={editDetailDataCompra}
+                          onChange={(e) => setEditDetailDataCompra(e.target.value.slice(0, 10))}
+                        />
+                      </div>
+                      <Button type="button" variant="secondary" onClick={() => salvarDataCompraNoDetalhe()}>
+                        Guardar data
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+                  <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead className="text-right w-20">Qtd</TableHead>
-                      {isChefe && <TableHead className="text-right w-28">Preço un.</TableHead>}
-                      {isChefe && <TableHead className="text-right w-28">Total</TableHead>}
-                      <TableHead className="w-[100px] text-right">Ações</TableHead>
+                    <TableRow className="border-b bg-muted/50 hover:bg-muted/50">
+                      <TableHead className="font-semibold">Item</TableHead>
+                      <TableHead className="w-20 text-right font-semibold">Qtd</TableHead>
+                      {isChefe && <TableHead className="w-28 text-right font-semibold">Preço un.</TableHead>}
+                      {isChefe && <TableHead className="w-28 text-right font-semibold">Total</TableHead>}
+                      <TableHead className="w-[100px] text-right font-semibold">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(detailCompra.itens || []).map((item) => (
-                      <TableRow key={item.id}>
+                      <TableRow key={item.id} className="border-border/60">
                         <TableCell className="font-medium">{getItemNome(item)}</TableCell>
-                        <TableCell className="text-right">{item.quantidade}</TableCell>
+                        <TableCell className="text-right tabular-nums">{item.quantidade}</TableCell>
                         {isChefe && <TableCell className="text-right">{formatCurrency(item.preco_no_dia)}</TableCell>}
                         {isChefe && (
                           <TableCell className="text-right text-red-600">{formatCurrency(item.total)}</TableCell>
                         )}
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-0.5">
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => abrirEditarItem(item, detailCompra.id)} title="Editar">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              disabled={!!detailCompra.cancelada}
+                              onClick={() => abrirEditarItem(item, detailCompra.id)}
+                              title={detailCompra.cancelada ? "Ordem cancelada" : "Editar"}
+                            >
                               <Pencil className="size-4" />
                             </Button>
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" title="Excluir">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive"
+                                  title="Excluir"
+                                  disabled={!!detailCompra.cancelada}
+                                >
                                   <Trash2 className="size-4" />
                                 </Button>
                               </AlertDialogTrigger>
@@ -1008,7 +1217,7 @@ export function Compra() {
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Excluir item</AlertDialogTitle>
                                   <AlertDialogDescription>
-                                    Excluir {getItemNome(item)} desta ordem?
+                                    Confirma excluir {getItemNome(item)} desta ordem? O valor deixará de contar nas compras do fornecedor.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
@@ -1025,26 +1234,41 @@ export function Compra() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
                 {isChefe && (detailCompra.itens?.length ?? 0) > 0 && (
-                  <p className="text-right font-semibold text-sm mt-2 py-2 border-t">
-                    Total da ordem: {formatCurrency(detailCompra.total)}
-                  </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/15 bg-primary/5 px-4 py-3.5">
+                    <span className="text-sm font-medium text-muted-foreground">Total da ordem</span>
+                    <span className="text-xl font-bold tabular-nums tracking-tight text-foreground">
+                      {formatCurrency(detailCompra.total)}
+                    </span>
+                  </div>
                 )}
               </div>
-              <DialogFooter className="shrink-0 flex-wrap gap-2 px-6 py-4 border-t bg-muted/30">
+              <DialogFooter className="shrink-0 flex-wrap gap-2 border-t bg-muted/30 px-6 py-4 sm:justify-end">
                 {isChefe && (
                   <>
                     <Button variant="outline" onClick={() => detailCompra && imprimirCompra(detailCompra)}>
                       <Printer className="size-4 mr-2" />
                       Imprimir
                     </Button>
-                    <Button variant="outline" onClick={handleCopiarOrdem}>
+                    <Button variant="outline" onClick={handleCopiarOrdem} disabled={!!detailCompra.cancelada} title={detailCompra.cancelada ? "Ordem cancelada" : undefined}>
                       <Copy className="size-4 mr-2" />
                       Copiar ordem
                     </Button>
                   </>
                 )}
-                <Button variant="outline" onClick={() => setDetailCompra(null)}>
+                {detailCompra && /^\d+$/.test(String(detailCompra.id)) && !detailCompra.cancelada && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setExcluirCompraOpen(true)}
+                    title="Cancelar esta ordem (exige senha)"
+                  >
+                    <Trash2 className="size-4 mr-2" />
+                    Excluir ordem
+                  </Button>
+                )}
+                <Button variant="default" onClick={() => setDetailCompra(null)}>
                   Fechar
                 </Button>
               </DialogFooter>
@@ -1094,6 +1318,44 @@ export function Compra() {
           )}
         </DialogContent>
       </Dialog>
+
+      {simpleConfirm ? (
+        <SimpleConfirmDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setSimpleConfirm(null);
+          }}
+          title={simpleConfirm.title}
+          description={simpleConfirm.description}
+          confirmLabel={simpleConfirm.confirmLabel}
+          onConfirm={simpleConfirm.onConfirm}
+        />
+      ) : null}
+
+      <ConfirmacaoComSenhaDialog
+        open={excluirCompraOpen}
+        onOpenChange={setExcluirCompraOpen}
+        title="Cancelar ordem de compra"
+        description="A ordem ficará no histórico como cancelada e deixará de contar no saldo do fornecedor (os itens não são apagados)."
+        confirmLabel="Confirmar cancelamento"
+        onVerified={async () => {
+          if (!detailCompra || !/^\d+$/.test(String(detailCompra.id))) return;
+          const idStr = String(detailCompra.id);
+          await api.deleteCompra(idStr);
+          toast.success("Ordem cancelada");
+          await loadData();
+          try {
+            const refreshed = await api.getCompraDetalhe(idStr);
+            setDetailCompra(
+              refreshed && typeof refreshed === "object"
+                ? { ...(refreshed as OrdemCompra), cancelada: (refreshed as OrdemCompra).cancelada === true }
+                : { ...detailCompra, cancelada: true }
+            );
+          } catch {
+            setDetailCompra({ ...detailCompra, cancelada: true });
+          }
+        }}
+      />
     </div>
   );
 }

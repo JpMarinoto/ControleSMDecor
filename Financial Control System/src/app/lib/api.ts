@@ -108,6 +108,20 @@ export const api = {
       clearAuthToken();
     }
   },
+
+  authVerifyPassword: async (password: string) => {
+    const response = await fetch(`${API_BASE_URL}/auth/verify-password/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ password }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(messageFromApiError(body) || 'Senha incorreta');
+    }
+    return body;
+  },
+
   authMe: async () => {
     const response = await fetch(`${API_BASE_URL}/auth/me/`, { headers: authHeaders() });
     if (!response.ok) return null;
@@ -338,6 +352,27 @@ export const api = {
     return response.json();
   },
 
+  patchVenda: async (id: string, body: { data?: string; data_venda?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/vendas/${id}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response);
+  },
+
+  deleteVenda: async (id: string) => {
+    const response = await fetch(`${API_BASE_URL}/vendas/${id}/`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    if (response.status === 204) return;
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(messageFromApiError(body) || `HTTP ${response.status}`);
+    }
+  },
+
   addItemVenda: async (vendaId: string, data: { produto: number; quantidade: number; preco_unitario?: number }) => {
     const response = await fetch(`${API_BASE_URL}/vendas/${vendaId}/add_item/`, {
       method: 'POST',
@@ -392,13 +427,13 @@ export const api = {
     return data?.preco ?? null;
   },
 
-  createVenda: async (data: any) => {
+  createVenda: async (payload: Record<string, unknown>) => {
     const response = await fetch(`${API_BASE_URL}/vendas/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
-    return response.json();
+    return readJsonOrThrow(response);
   },
 
   // Compras
@@ -412,6 +447,15 @@ export const api = {
   getCompraDetalhe: async (id: string) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, { headers: authHeaders() });
     return response.json();
+  },
+
+  patchCompraOrdemData: async (id: string, body: { data?: string; data_compra?: string }) => {
+    const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response);
   },
 
   updateCompra: async (id: string, data: { quantidade?: number; preco_no_dia?: number; material?: number; fornecedor?: number }) => {

@@ -1,8 +1,12 @@
 """
 Serializers para a API REST consumida pelo frontend React (Financial Control System).
 """
+from zoneinfo import ZoneInfo
+
+from django.utils import timezone
 from rest_framework import serializers
 from decimal import Decimal
+
 from .models import (
     Cliente,
     Fornecedor,
@@ -20,6 +24,23 @@ from .models import (
     MovimentoCaixa,
     ContaBanco,
 )
+
+
+def _data_compra_iso_br(data_compra):
+    """YYYY-MM-DD no calendário de America/Sao_Paulo (igual histórico de pagamentos)."""
+    if not data_compra:
+        return None
+    dv = data_compra
+    tz_br = ZoneInfo('America/Sao_Paulo')
+    if hasattr(dv, 'hour'):
+        if timezone.is_naive(dv):
+            dt_br = dv.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz_br)
+        else:
+            dt_br = dv.astimezone(tz_br)
+        return dt_br.date().isoformat()
+    if hasattr(dv, 'isoformat'):
+        return dv.isoformat()[:10]
+    return str(dv).strip()[:10]
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -130,15 +151,34 @@ class ItemVendaSerializer(serializers.ModelSerializer):
 class VendaSerializer(serializers.ModelSerializer):
     clienteNome = serializers.CharField(source='cliente.nome', read_only=True)
     data = serializers.SerializerMethodField()
+    data_lancamento = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
     itens = ItemVendaSerializer(many=True, read_only=True)
 
     class Meta:
         model = Venda
-        fields = ['id', 'cliente', 'clienteNome', 'data_venda', 'data', 'total', 'cancelada', 'itens']
+        fields = [
+            'id', 'cliente', 'clienteNome', 'data_venda', 'data', 'data_lancamento',
+            'total', 'cancelada', 'itens',
+        ]
+
+    def get_data_lancamento(self, obj):
+        return _data_compra_iso_br(getattr(obj, 'data_lancamento', None))
 
     def get_data(self, obj):
-        return obj.data_venda.date().isoformat() if obj.data_venda else None
+        if not obj.data_venda:
+            return None
+        dv = obj.data_venda
+        tz_br = ZoneInfo('America/Sao_Paulo')
+        if hasattr(dv, 'hour'):
+            if timezone.is_naive(dv):
+                dt_br = dv.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz_br)
+            else:
+                dt_br = dv.astimezone(tz_br)
+            return dt_br.date().isoformat()
+        if hasattr(dv, 'isoformat'):
+            return dv.isoformat()[:10]
+        return str(dv).strip()[:10]
 
     def get_total(self, obj):
         return float(obj.total_venda)
@@ -205,15 +245,19 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
     fornecedor = serializers.CharField(source='fornecedor.nome', read_only=True)
     fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
     data = serializers.SerializerMethodField()
+    data_lancamento = serializers.SerializerMethodField()
     itens = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdemCompra
-        fields = ['id', 'fornecedor_id', 'fornecedor', 'data', 'itens', 'total']
+        fields = ['id', 'fornecedor_id', 'fornecedor', 'data', 'data_lancamento', 'cancelada', 'itens', 'total']
 
     def get_data(self, obj):
-        return obj.data_compra.date().isoformat() if obj.data_compra else None
+        return _data_compra_iso_br(obj.data_compra)
+
+    def get_data_lancamento(self, obj):
+        return _data_compra_iso_br(getattr(obj, 'data_lancamento', None))
 
     def get_itens(self, obj):
         # Junta itens de material + itens de produto (revenda)
@@ -248,7 +292,7 @@ class CompraSerializer(serializers.ModelSerializer):
         fields = ['id', 'material', 'material_nome', 'fornecedor_id', 'fornecedor', 'quantidade', 'preco_no_dia', 'data_compra', 'data', 'total']
 
     def get_data(self, obj):
-        return obj.data_compra.date().isoformat() if obj.data_compra else None
+        return _data_compra_iso_br(obj.data_compra)
 
     def get_total(self, obj):
         return float(obj.total_compra)

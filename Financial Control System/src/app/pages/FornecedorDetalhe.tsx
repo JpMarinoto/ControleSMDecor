@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight } from "lucide-react";
+import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight, Ban } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
@@ -29,9 +29,19 @@ type CompraLinhaFornecedor = {
   id: string;
   data: string;
   material: string;
+  quantidade?: number;
   total: number;
   ordem_id?: number | null;
+  ordem_cancelada?: boolean;
 };
+
+function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 function agruparComprasPorOrdem(
   exibirCompras: CompraLinhaFornecedor[],
@@ -238,6 +248,11 @@ export function FornecedorDetalhe() {
         return t >= limites.inicio && t <= limites.fim;
       })
     : [];
+  /** Compras que ainda contam no saldo (ordens não canceladas e linhas avulsas). */
+  const exibirCompras = comprasFiltradas.filter((c) => c.ordem_cancelada !== true);
+  /** Apenas itens de ordens canceladas — só na secção Histórico. */
+  const exibirComprasHistorico = comprasFiltradas.filter((c) => c.ordem_cancelada === true);
+
   const pagamentosFiltrados = data
     ? data.pagamentos.filter((p) => {
         if (!limites) return true;
@@ -245,7 +260,7 @@ export function FornecedorDetalhe() {
         return t >= limites.inicio && t <= limites.fim;
       })
     : [];
-  const totalComprasPeriodo = comprasFiltradas.reduce((s, c) => s + c.total, 0);
+  const totalComprasPeriodo = exibirCompras.reduce((s, c) => s + c.total, 0);
   const totalPagoPeriodo = pagamentosFiltrados.reduce((s, p) => s + p.valor, 0);
   const saldoNoPeriodo = totalComprasPeriodo - totalPagoPeriodo;
 
@@ -254,16 +269,43 @@ export function FornecedorDetalhe() {
     const janela = window.open("", "_blank");
     if (!janela) return;
     const usarComprasSelecionadas = usarSelecao && comprasSelecionadas.length > 0;
-    const comprasParaImprimir = usarComprasSelecionadas ? comprasSelecionadas : (limites ? comprasFiltradas : data.compras);
-    const comprasRows = comprasParaImprimir
-      .map((c) => `<tr><td>${formatDateOnly(c.data)}</td><td>${c.material}</td><td class="num">${formatCurrency(c.total)}</td></tr>`)
+    const comprasAtivasDoc = data.compras.filter((c) => c.ordem_cancelada !== true);
+    const comprasParaImprimir = usarComprasSelecionadas
+      ? comprasSelecionadas
+      : limites
+        ? comprasFiltradas.filter((c) => c.ordem_cancelada !== true)
+        : comprasAtivasDoc;
+    const gruposImpressao = agruparComprasPorOrdem(comprasParaImprimir, parseData);
+    const linhaQtd = (q: number | undefined) =>
+      q != null && !Number.isNaN(Number(q)) ? String(q) : "—";
+    const comprasRows = gruposImpressao
+      .map((g) => {
+        if (g.ordemId != null) {
+          const cabecalho = `Ordem #${g.ordemId} · ${formatDateOnly(g.dataRef)} · ${g.lines.length} item(ns) · Total: ${formatCurrency(g.totalGrupo)}`;
+          const itens = g.lines
+            .map((linha) => {
+              const q = linhaQtd(linha.quantidade);
+              return `<tr class="row-item-ordem"><td></td><td>${escapeHtml(linha.material)}</td><td class="num">${q}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
+            })
+            .join("");
+          return `<tr class="row-ordem-cabecalho"><td colspan="4">${escapeHtml(cabecalho)}</td></tr>${itens}`;
+        }
+        const linha = g.lines[0];
+        const qtd = linhaQtd(linha.quantidade);
+        return `<tr><td>${formatDateOnly(linha.data)}</td><td>${escapeHtml(linha.material)}</td><td class="num">${qtd}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
+      })
       .join("");
     const pagRows = (limites ? pagamentosFiltrados : data.pagamentos)
       .map((p) => `<tr><td>${formatDateOnly(p.data)}</td><td class="num">${formatCurrency(p.valor)}</td></tr>`)
       .join("");
     const totalComprasDoc = comprasParaImprimir.reduce((s, c) => s + c.total, 0);
+    const ordensNoDoc = gruposImpressao.filter((g) => g.ordemId != null).length;
+    const avulsasNoDoc = gruposImpressao.filter((g) => g.ordemId == null).length;
+    const partesSelecao: string[] = [];
+    if (ordensNoDoc > 0) partesSelecao.push(`${ordensNoDoc} ordem(ns)`);
+    if (avulsasNoDoc > 0) partesSelecao.push(`${avulsasNoDoc} compra(s) avulsa(s)`);
     const periodoLabel = usarComprasSelecionadas
-      ? `Fechamento selecionado (${comprasSelecionadas.length} item(ns))`
+      ? `Fechamento selecionado (${partesSelecao.join(" · ") || "—"})`
       : periodo === "semana"
         ? "Última semana"
         : periodo === "mes"
@@ -294,6 +336,9 @@ export function FornecedorDetalhe() {
             th, td { border: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; }
             th { background: #f1f5f9; font-weight: 600; color: #334155; }
             .num { text-align: right; white-space: nowrap; }
+            tr.row-ordem-cabecalho td { background: #e2e8f0; font-weight: 600; color: #0f172a; padding: 10px 12px; }
+            tr.row-item-ordem td { background: #f8fafc; }
+            tr.row-item-ordem td:nth-child(2) { padding-left: 18px; }
             .resumo-box {
               background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
               border: 1px solid #facc15;
@@ -321,7 +366,7 @@ export function FornecedorDetalhe() {
           </div>
           <h3 style="font-size:14px;margin:16px 0 8px;">Compras</h3>
           <table>
-            <thead><tr><th>Data</th><th>Material</th><th class="num">Total</th></tr></thead>
+            <thead><tr><th>Data</th><th>Item</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead>
             <tbody>${comprasRows}</tbody>
           </table>
           <h3 style="font-size:14px;margin:20px 0 8px;">Pagamentos</h3>
@@ -341,11 +386,11 @@ export function FornecedorDetalhe() {
   if (loading && !data) return <p className="text-muted-foreground">Carregando...</p>;
   if (!data) return <p className="text-muted-foreground">Fornecedor não encontrado.</p>;
 
-  const { fornecedor, total_compras, total_pago, saldo_devedor, compras, pagamentos } = data;
-  const exibirCompras = limites ? comprasFiltradas : compras;
+  const { fornecedor, total_compras, total_pago, saldo_devedor, pagamentos } = data;
   const exibirPagamentos = limites ? pagamentosFiltrados : pagamentos;
 
   const gruposCompras = agruparComprasPorOrdem(exibirCompras, parseData);
+  const gruposComprasHistorico = agruparComprasPorOrdem(exibirComprasHistorico, parseData);
 
   const toggleOrdemGrupo = (lineIds: string[]) => {
     setSelectedCompraIds((prev) => {
@@ -379,7 +424,13 @@ export function FornecedorDetalhe() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <Select value={periodo} onValueChange={(v) => setPeriodo(v as Periodo)}>
+          <Select
+            value={periodo}
+            onValueChange={(v) => {
+              setSelectedCompraIds(new Set());
+              setPeriodo(v as Periodo);
+            }}
+          >
             <SelectTrigger className="w-40">
               <SelectValue placeholder="Período" />
             </SelectTrigger>
@@ -392,8 +443,24 @@ export function FornecedorDetalhe() {
           </Select>
           {periodo === "personalizado" && (
             <>
-              <Input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="w-36" />
-              <Input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="w-36" />
+              <Input
+                type="date"
+                value={dataInicio}
+                onChange={(e) => {
+                  setSelectedCompraIds(new Set());
+                  setDataInicio(e.target.value);
+                }}
+                className="w-36"
+              />
+              <Input
+                type="date"
+                value={dataFim}
+                onChange={(e) => {
+                  setSelectedCompraIds(new Set());
+                  setDataFim(e.target.value);
+                }}
+                className="w-36"
+              />
             </>
           )}
           <Button variant="outline" size="sm" onClick={() => imprimirFechamento(false)}>
@@ -620,11 +687,20 @@ export function FornecedorDetalhe() {
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Marque por <strong>ordem de compra</strong> (um único checkbox agrupa todos os itens da mesma compra). Registos antigos sem ordem aparecem como uma linha isolada.
-            </p>
+          <CardHeader className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Ordens canceladas não aparecem aqui — ficam em <strong>Histórico</strong> abaixo. Marque por ordem (um checkbox agrupa os itens). Registos antigos sem ordem são uma linha isolada.
+                </p>
+              </div>
+              {isChefe && exibirCompras.length > 0 ? (
+                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setSelectedCompraIds(new Set(exibirCompras.map((c) => c.id)))}>
+                  Selecionar tudo
+                </Button>
+              ) : null}
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
@@ -633,14 +709,15 @@ export function FornecedorDetalhe() {
                   {isChefe && <TableHead className="w-10">Ordem</TableHead>}
                   <TableHead>Data</TableHead>
                   <TableHead>Detalhe</TableHead>
+                  <TableHead className="text-right w-20 tabular-nums">Qtd</TableHead>
                   {isChefe && <TableHead className="text-right">Total</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {exibirCompras.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 4 : 2} className="text-center text-muted-foreground">
-                      Nenhuma compra{limites ? " no período" : ""}
+                    <TableCell colSpan={isChefe ? 5 : 3} className="text-center text-muted-foreground">
+                      Nenhuma compra ativa{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -661,10 +738,9 @@ export function FornecedorDetalhe() {
                             <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
                             <TableCell>
                               <span className="font-medium">Ordem #{g.ordemId}</span>
-                              <span className="text-muted-foreground text-sm block">
-                                {g.lines.length} item(ns) nesta compra
-                              </span>
+                              <span className="text-muted-foreground text-sm block">{g.lines.length} item(ns) nesta compra</span>
                             </TableCell>
+                            <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
                             {isChefe && (
                               <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
                             )}
@@ -674,6 +750,9 @@ export function FornecedorDetalhe() {
                               {isChefe && <TableCell />}
                               <TableCell />
                               <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {linha.quantidade != null ? linha.quantidade : "—"}
+                              </TableCell>
                               {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
                             </TableRow>
                           ))}
@@ -693,6 +772,9 @@ export function FornecedorDetalhe() {
                         )}
                         <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
                         <TableCell>{linha.material}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {linha.quantidade != null ? linha.quantidade : "—"}
+                        </TableCell>
                         {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
                       </TableRow>
                     );
@@ -700,6 +782,82 @@ export function FornecedorDetalhe() {
                 )}
               </TableBody>
             </Table>
+
+            {exibirComprasHistorico.length > 0 ? (
+              <Collapsible defaultOpen={false} className="group mt-8 border-t pt-6">
+                <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md py-2 text-left font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground">
+                  <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                  <Ban className="size-4 shrink-0 text-destructive" aria-hidden />
+                  <span>
+                    Histórico — ordens canceladas
+                    <span className="ml-1.5 font-normal text-muted-foreground">
+                      ({exibirComprasHistorico.length} item(ns) · só consulta)
+                    </span>
+                  </span>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {isChefe && <TableHead className="w-10" />}
+                        <TableHead>Data</TableHead>
+                        <TableHead>Detalhe</TableHead>
+                        <TableHead className="text-right w-20 tabular-nums">Qtd</TableHead>
+                        {isChefe && <TableHead className="text-right">Total</TableHead>}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {gruposComprasHistorico.map((g) => {
+                        if (g.ordemId != null) {
+                          return (
+                            <Fragment key={g.key}>
+                              <TableRow>
+                                {isChefe && <TableCell className="align-top" />}
+                                <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
+                                <TableCell>
+                                  <span className="inline-flex items-center gap-1.5 font-medium">
+                                    <Ban className="size-3.5 shrink-0 text-destructive" aria-hidden />
+                                    Ordem #{g.ordemId}
+                                  </span>
+                                  <span className="text-muted-foreground text-sm block">
+                                    {g.lines.length} item(ns) — cancelada
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
+                                {isChefe && (
+                                  <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
+                                )}
+                              </TableRow>
+                              {g.lines.map((linha) => (
+                                <TableRow key={linha.id} className="bg-muted/15">
+                                  {isChefe && <TableCell />}
+                                  <TableCell />
+                                  <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
+                                  <TableCell className="text-right text-sm tabular-nums">
+                                    {linha.quantidade != null ? linha.quantidade : "—"}
+                                  </TableCell>
+                                  {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
+                                </TableRow>
+                              ))}
+                            </Fragment>
+                          );
+                        }
+                        const linha = g.lines[0];
+                        return (
+                          <TableRow key={g.key}>
+                            {isChefe && <TableCell />}
+                            <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
+                            <TableCell>{linha.material}</TableCell>
+                            <TableCell className="text-right tabular-nums">{linha.quantidade != null ? linha.quantidade : "—"}</TableCell>
+                            {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </CollapsibleContent>
+              </Collapsible>
+            ) : null}
           </CardContent>
         </Card>
         <Card>

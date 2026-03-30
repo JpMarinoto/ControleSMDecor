@@ -17,6 +17,26 @@ Caso queira pegar o mais recente
 cd "/home/deploy/ControleSMDecor"
 ls -1t backups/db/db-*.sqlite3 | head -1
 
+Depois dar o comando
+
+scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/NOMEBANCO "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMENOPC.sqlite3"
+
+
+Sequiser pegar o banco do backup e colocar na localhost voce da
+
+
+DO BACKUP DO SISTEMA
+copy /Y "C:\Users\jpsma\OneDrive\Desktop\ControleSMDecor\backups\db\NOMEDOBANCO" db.sqlite3
+python manage.py migrate --noinput
+
+
+DA PASTA POR FORA DE BACKUP
+copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMEDOBANCO.sqlite3" db.sqlite3
+
+
+se quiser pegar o banco local e mandar para VPS
+
+
 
 Depois dar esse comando **no PowerShell do PC** (mudar o nome do ficheiro se for outro):
 

@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from decimal import Decimal
 from django.contrib.auth.models import User
 
@@ -57,8 +58,20 @@ class Fornecedor(models.Model):
     def saldo_devedor(self):
         # Materiais (related_name compras) + produtos de revenda (compras_produtos)
         z = Decimal("0")
-        total_m = sum((c.total_compra for c in self.compras.all()), z)
-        total_p = sum((c.total_compra for c in self.compras_produtos.all()), z)
+
+        def _conta_linha(c):
+            if c.ordem_id is None:
+                return True
+            return not c.ordem.cancelada
+
+        total_m = sum(
+            (c.total_compra for c in self.compras.select_related('ordem').all() if _conta_linha(c)),
+            z,
+        )
+        total_p = sum(
+            (c.total_compra for c in self.compras_produtos.select_related('ordem').all() if _conta_linha(c)),
+            z,
+        )
         total_compras = total_m + total_p
         total_pagos = sum((p.valor for p in self.pagamentos_feitos.all()), z)
         return total_compras - total_pagos
@@ -132,7 +145,16 @@ class ProdutoInsumo(models.Model):
 
 class Venda(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='vendas')
-    data_venda = models.DateTimeField(auto_now_add=True)
+    data_lancamento = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Data de lançamento',
+        help_text='Momento em que a venda foi registrada no sistema (não altera com a data da venda).',
+    )
+    data_venda = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Data da venda',
+        help_text='Data da operação de venda (pode ser ajustada após salvar).',
+    )
     cancelada = models.BooleanField(default=False, verbose_name="Cancelada")
 
     def __str__(self):
@@ -182,7 +204,17 @@ class PrecoClienteProduto(models.Model):
 class OrdemCompra(models.Model):
     """Ordem de compra (uma compra com N itens), como Venda com ItemVenda."""
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='ordens_compra')
-    data_compra = models.DateTimeField(auto_now_add=True)
+    data_lancamento = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Data de lançamento',
+        help_text='Momento em que a ordem foi registrada no sistema.',
+    )
+    data_compra = models.DateTimeField(
+        default=timezone.now,
+        verbose_name='Data da compra',
+        help_text='Data da operação de compra (pode ser ajustada após salvar).',
+    )
+    cancelada = models.BooleanField(default=False, verbose_name='Cancelada')
 
     class Meta:
         ordering = ['-data_compra']
@@ -200,7 +232,8 @@ class CompraMaterial(models.Model):
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras')
     quantidade = models.PositiveIntegerField()
     preco_no_dia = models.DecimalField(max_digits=10, decimal_places=2)
-    data_compra = models.DateTimeField(auto_now_add=True)
+    data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
+    data_compra = models.DateTimeField(default=timezone.now, verbose_name='Data da compra')
     ordem = models.ForeignKey(
         OrdemCompra,
         on_delete=models.CASCADE,
@@ -220,7 +253,8 @@ class CompraProduto(models.Model):
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras_produtos')
     quantidade = models.PositiveIntegerField()
     preco_no_dia = models.DecimalField(max_digits=10, decimal_places=2)
-    data_compra = models.DateTimeField(auto_now_add=True)
+    data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
+    data_compra = models.DateTimeField(default=timezone.now, verbose_name='Data da compra')
     ordem = models.ForeignKey(
         OrdemCompra,
         on_delete=models.CASCADE,

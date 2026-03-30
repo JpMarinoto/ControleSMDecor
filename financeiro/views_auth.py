@@ -130,6 +130,33 @@ class AuthLogout(APIView):
         return Response({"ok": True})
 
 
+@method_decorator(csrf_exempt, name="dispatch")
+class AuthVerifyPassword(APIView):
+    """POST JSON { \"password\": \"...\" } — confere a senha com o utilizador do token atual."""
+
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                {"error": "Não autenticado.", "detail": "not_authenticated"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        data = getattr(request, "data", None) or {}
+        if not isinstance(data, dict):
+            data = {}
+        password = data.get("password") or ""
+        if not str(password).strip():
+            return Response(
+                {"password": ["Informe a senha."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not request.user.check_password(password):
+            return Response(
+                {"password": ["Senha incorreta."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"ok": True})
+
+
 class AuthMe(APIView):
     """GET: retorna o usuário atual (via token). PUT: atualiza nome de exibição e/ou senha (qualquer usuário logado)."""
     def get(self, request):
