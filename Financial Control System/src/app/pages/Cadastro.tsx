@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -822,6 +822,45 @@ export function Cadastro() {
 
   const categoriasProduto = categorias.filter(c => c.tipo === 'produto');
   const categoriasMaterial = categorias.filter(c => c.tipo === 'material');
+  const produtosAgrupados = useMemo(() => {
+    const catById = new Map<string, { id: string; nome: string }>();
+    for (const c of categoriasProduto) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
+
+    const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof produtos }>();
+    for (const p of produtos) {
+      const catId = p.categoria ? String(p.categoria) : "";
+      const cat = catId ? catById.get(catId) : null;
+      const k = cat ? `cat-${cat.id}` : "cat-sem";
+      const nome = cat ? cat.nome : "Sem categoria";
+      if (!groups.has(k)) groups.set(k, { categoriaId: cat ? cat.id : null, categoriaNome: nome, itens: [] });
+      groups.get(k)!.itens.push(p);
+    }
+
+    const out = Array.from(groups.values());
+    out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
+    out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
+    return out;
+  }, [produtos, categoriasProduto]);
+
+  const materiaisAgrupados = useMemo(() => {
+    const catById = new Map<string, { id: string; nome: string }>();
+    for (const c of categoriasMaterial) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
+
+    const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof materiais }>();
+    for (const m of materiais) {
+      const catId = m.categoria ? String(m.categoria) : "";
+      const cat = catId ? catById.get(catId) : null;
+      const k = cat ? `cat-${cat.id}` : "cat-sem";
+      const nome = cat ? cat.nome : "Sem categoria";
+      if (!groups.has(k)) groups.set(k, { categoriaId: cat ? cat.id : null, categoriaNome: nome, itens: [] });
+      groups.get(k)!.itens.push(m);
+    }
+
+    const out = Array.from(groups.values());
+    out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
+    out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
+    return out;
+  }, [materiais, categoriasMaterial]);
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
 
@@ -1350,63 +1389,80 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {produtos.length > 0 ? (
-              produtos.map((produto, index) => (
-                <motion.div
-                  key={produto.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: index * 0.03 }}
-                >
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant="outline">{categorias.find(c => sid(c.id) === produto.categoria || c.nome === produto.categoria)?.nome ?? produto.categoria}</Badge>
-                            {produto.fabricado && <Badge variant="secondary">Fabricado</Badge>}
-                            <h3 className="font-medium">{produto.nome}</h3>
-                          </div>
-                          {produto.fornecedor && (
-                            <p className="text-sm text-muted-foreground">
-                              Fornecedor: {fornecedores.find((f) => String(f.id) === String(produto.fornecedor))?.nomeRazaoSocial ?? "—"}
-                            </p>
-                          )}
-                          <p className="text-lg font-semibold text-primary">
-                            {formatCurrency(produto.precoInicial)}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleEditProduto(produto)}>
-                            <Pencil className="size-4" />
-                          </Button>
-                          {isChefe && (
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <Trash2 className="size-4 text-destructive" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Tem certeza que deseja excluir este produto?
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDeleteProduto(produto.id)}>
-                                    Excluir
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          )}
-                        </div>
+              produtosAgrupados.map((grupo, gi) => (
+                <div key={grupo.categoriaId ?? `sem-${gi}`} className="space-y-2">
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="h-5 w-1.5 rounded-full bg-primary/70 shrink-0" />
+                        <div className="font-semibold truncate">{grupo.categoriaNome}</div>
                       </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                      <Badge variant="outline" className="tabular-nums shrink-0">
+                        {grupo.itens.length}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {grupo.itens.map((produto, index) => (
+                      <motion.div
+                        key={produto.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.15, delay: index * 0.01 }}
+                      >
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  {produto.fabricado && <Badge variant="secondary">Fabricado</Badge>}
+                                  <h3 className="font-medium">{produto.nome}</h3>
+                                </div>
+                                {produto.fornecedor && (
+                                  <p className="text-sm text-muted-foreground">
+                                    Fornecedor: {fornecedores.find((f) => String(f.id) === String(produto.fornecedor))?.nomeRazaoSocial ?? "—"}
+                                  </p>
+                                )}
+                                <p className="text-lg font-semibold text-primary">
+                                  {formatCurrency(produto.precoInicial)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button variant="ghost" size="icon" onClick={() => handleEditProduto(produto)}>
+                                  <Pencil className="size-4" />
+                                </Button>
+                                {isChefe && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="ghost" size="icon">
+                                        <Trash2 className="size-4 text-destructive" />
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          Tem certeza que deseja excluir este produto?
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteProduto(produto.id)}>
+                                          Excluir
+                                        </AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
               ))
             ) : (
               <Card>
@@ -1739,10 +1795,10 @@ export function Cadastro() {
                         </div>
                       </div>
                       {(() => {
-                        const materiaisDoFornecedor = materiais.filter(
-                          (m) => String(m.fornecedor) === String(fornecedor.id)
+                        const produtosDoFornecedor = produtos.filter(
+                          (p) => String(p.fornecedor) === String(fornecedor.id)
                         );
-                        if (materiaisDoFornecedor.length === 0) return null;
+                        if (produtosDoFornecedor.length === 0) return null;
                         return (
                           <div className="border-t mt-4 pt-4">
                             <h4 className="font-medium mb-2 text-sm">Produtos deste fornecedor</h4>
@@ -1750,66 +1806,16 @@ export function Cadastro() {
                               <TableHeader>
                                 <TableRow>
                                   <TableHead>Produto</TableHead>
-                                  <TableHead className="text-right w-24">Quantidade</TableHead>
-                                  {isChefe && (
-                                    <>
-                                      <TableHead className="text-right w-28">Preço atual</TableHead>
-                                      <TableHead className="w-32">Novo preço</TableHead>
-                                      <TableHead className="w-20"></TableHead>
-                                    </>
-                                  )}
+                                  <TableHead className="text-right w-32">Preço venda</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {materiaisDoFornecedor.map((m) => (
-                                  <TableRow key={m.id}>
-                                    <TableCell className="font-medium">{m.nome}</TableCell>
-                                    <TableCell className="text-right">{m.estoque_atual ?? 0}</TableCell>
-                                    {isChefe && (
-                                      <>
-                                        <TableCell className="text-right">
-                                          {formatCurrency(Number(m.precoUnitarioBase ?? 0))}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Input
-                                            type="text"
-                                            inputMode="decimal"
-                                            className="h-8 text-sm"
-                                            placeholder="0,00"
-                                            value={precoRapidoMaterial[m.id] ?? ""}
-                                            onChange={(e) => setPrecoRapidoMaterial((prev) => ({ ...prev, [m.id]: e.target.value }))}
-                                          />
-                                        </TableCell>
-                                        <TableCell>
-                                          <Button
-                                            size="sm"
-                                            className="h-8"
-                                            disabled={!((precoRapidoMaterial[m.id] ?? "").trim()) || savingPrecoMaterialId === m.id}
-                                            onClick={async () => {
-                                              const valorEdit = precoRapidoMaterial[m.id] ?? "";
-                                              const v = roundDecimalPlaces(parseFloat(valorEdit.replace(",", ".")), 4);
-                                              if (isNaN(v) || v < 0) {
-                                                toast.error("Preço inválido");
-                                                return;
-                                              }
-                                              setSavingPrecoMaterialId(m.id);
-                                              try {
-                                                await api.updateMaterial(m.id, { preco_unitario_base: v, precoUnitarioBase: v });
-                                                toast.success("Preço atualizado");
-                                                setPrecoRapidoMaterial((prev) => ({ ...prev, [m.id]: "" }));
-                                                await loadData();
-                                              } catch (err) {
-                                                toast.error(err instanceof Error ? err.message : "Erro ao atualizar preço");
-                                              } finally {
-                                                setSavingPrecoMaterialId(null);
-                                              }
-                                            }}
-                                          >
-                                            {savingPrecoMaterialId === m.id ? "..." : "Salvar"}
-                                          </Button>
-                                        </TableCell>
-                                      </>
-                                    )}
+                                {produtosDoFornecedor.map((p) => (
+                                  <TableRow key={p.id}>
+                                    <TableCell className="font-medium">{p.nome}</TableCell>
+                                    <TableCell className="text-right tabular-nums">
+                                      {formatCurrency(Number(p.precoInicial ?? 0))}
+                                    </TableCell>
                                   </TableRow>
                                 ))}
                               </TableBody>
@@ -1952,60 +1958,79 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {materiais.length > 0 ? (
-              materiais.map((material, index) => (
-                <motion.div
-                  key={material.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2, delay: index * 0.03 }}
-                >
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant="outline">{categorias.find(c => sid(c.id) === material.categoria || c.nome === material.categoria)?.nome ?? material.categoria}</Badge>
-                            <span className="text-sm text-muted-foreground">Fornecedor: {fornecedores.find(f => String(f.id) === String(material.fornecedor))?.nomeRazaoSocial ?? '—'}</span>
-                            <h3 className="font-medium">{material.nome}</h3>
-                          </div>
-                          {isChefe && (
-                            <p className="text-lg font-semibold text-primary">
-                              {formatCurrency(material.precoUnitarioBase)}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleEditMaterial(material)}>
-                            <Pencil className="size-4" />
-                          </Button>
-                          {isChefe && (
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <Trash2 className="size-4 text-destructive" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Tem certeza que deseja excluir este material?
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDeleteMaterial(material.id)}>
-                                    Excluir
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          )}
-                        </div>
+              materiaisAgrupados.map((grupo, gi) => (
+                <div key={grupo.categoriaId ?? `sem-${gi}`} className="space-y-2">
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="h-5 w-1.5 rounded-full bg-primary/70 shrink-0" />
+                        <div className="font-semibold truncate">{grupo.categoriaNome}</div>
                       </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                      <Badge variant="outline" className="tabular-nums shrink-0">
+                        {grupo.itens.length}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {grupo.itens.map((material, index) => (
+                      <motion.div
+                        key={material.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.15, delay: index * 0.01 }}
+                      >
+                        <Card>
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="text-sm text-muted-foreground">
+                                    Fornecedor: {fornecedores.find(f => String(f.id) === String(material.fornecedor))?.nomeRazaoSocial ?? '—'}
+                                  </span>
+                                  <h3 className="font-medium">{material.nome}</h3>
+                                </div>
+                                {isChefe && (
+                                  <p className="text-lg font-semibold text-primary">
+                                    {formatCurrency(material.precoUnitarioBase)}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button variant="ghost" size="icon" onClick={() => handleEditMaterial(material)}>
+                                  <Pencil className="size-4" />
+                                </Button>
+                                {isChefe && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="ghost" size="icon">
+                                        <Trash2 className="size-4 text-destructive" />
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          Tem certeza que deseja excluir este material?
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteMaterial(material.id)}>
+                                          Excluir
+                                        </AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
               ))
             ) : (
               <Card>
