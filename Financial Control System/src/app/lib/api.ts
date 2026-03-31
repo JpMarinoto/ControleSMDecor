@@ -295,8 +295,12 @@ export const api = {
   },
 
   // Produtos
-  getProdutos: async () => {
-    const response = await fetch(`${API_BASE_URL}/produtos/`, { headers: authHeaders() });
+  getProdutos: async (params?: { incluir_inativos?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (params?.incluir_inativos) sp.set("incluir_inativos", "1");
+    const qs = sp.toString();
+    const url = qs ? `${API_BASE_URL}/produtos/?${qs}` : `${API_BASE_URL}/produtos/`;
+    const response = await fetch(url, { headers: authHeaders() });
     return response.json();
   },
   

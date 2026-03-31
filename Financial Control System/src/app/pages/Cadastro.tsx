@@ -201,7 +201,8 @@ export function Cadastro() {
       const [clientesRes, categoriasRes, produtosRes, fornecedoresRes, materiaisRes, contasRes] = await Promise.all([
         api.getClientes().catch(() => []),
         api.getCategorias().catch(() => []),
-        api.getProdutos().catch(() => []),
+        // Em cadastro, mostrar também produtos inativos para não "sumirem" da lista
+        api.getProdutos({ incluir_inativos: true }).catch(() => []),
         api.getFornecedores().catch(() => []),
         api.getMateriais().catch(() => []),
         api.getContas().catch(() => []),
@@ -1308,7 +1309,7 @@ export function Cadastro() {
                               toast.error("Selecione material e quantidade válida");
                               return;
                             }
-                            const precoBase = Number(mat.precoUnitarioBase ?? mat.preco_unitario_base) || 0;
+                            const precoBase = Number(mat.precoUnitarioBase ?? 0) || 0;
                             const total = precoBase * qtd;
                             setInsumosProduto((prev) => {
                               const idx = prev.findIndex((i) => i.material === Number(mat.id));
@@ -1798,28 +1799,63 @@ export function Cadastro() {
                         const produtosDoFornecedor = produtos.filter(
                           (p) => String(p.fornecedor) === String(fornecedor.id)
                         );
-                        if (produtosDoFornecedor.length === 0) return null;
+                        const materiaisDoFornecedor = materiais.filter(
+                          (m) => String(m.fornecedor) === String(fornecedor.id)
+                        );
+                        if (produtosDoFornecedor.length === 0 && materiaisDoFornecedor.length === 0) return null;
                         return (
                           <div className="border-t mt-4 pt-4">
-                            <h4 className="font-medium mb-2 text-sm">Produtos deste fornecedor</h4>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Produto</TableHead>
-                                  <TableHead className="text-right w-32">Preço venda</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {produtosDoFornecedor.map((p) => (
-                                  <TableRow key={p.id}>
-                                    <TableCell className="font-medium">{p.nome}</TableCell>
-                                    <TableCell className="text-right tabular-nums">
-                                      {formatCurrency(Number(p.precoInicial ?? 0))}
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                            {produtosDoFornecedor.length > 0 && (
+                              <div className="space-y-2">
+                                <h4 className="font-medium text-sm">Produtos deste fornecedor</h4>
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Produto</TableHead>
+                                      <TableHead className="text-right w-32">Preço venda</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {produtosDoFornecedor.map((p) => (
+                                      <TableRow key={p.id}>
+                                        <TableCell className="font-medium">{p.nome}</TableCell>
+                                        <TableCell className="text-right tabular-nums">
+                                          {formatCurrency(Number(p.precoInicial ?? 0))}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            )}
+
+                            {materiaisDoFornecedor.length > 0 && (
+                              <div className={produtosDoFornecedor.length > 0 ? "mt-4 space-y-2" : "space-y-2"}>
+                                <h4 className="font-medium text-sm">Materiais deste fornecedor</h4>
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Material</TableHead>
+                                      {isChefe && <TableHead className="text-right w-32">Preço base</TableHead>}
+                                      <TableHead className="text-right w-24">Estoque</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {materiaisDoFornecedor.map((m) => (
+                                      <TableRow key={m.id}>
+                                        <TableCell className="font-medium">{m.nome}</TableCell>
+                                        {isChefe && (
+                                          <TableCell className="text-right tabular-nums">
+                                            {formatCurrency(Number(m.precoUnitarioBase ?? 0))}
+                                          </TableCell>
+                                        )}
+                                        <TableCell className="text-right tabular-nums">{Number(m.estoque_atual ?? 0)}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
