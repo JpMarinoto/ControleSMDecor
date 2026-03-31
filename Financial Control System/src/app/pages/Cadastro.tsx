@@ -127,6 +127,7 @@ export function Cadastro() {
   const [savingPrecoMaterialId, setSavingPrecoMaterialId] = useState<string | null>(null);
   const [editingCategoria, setEditingCategoria] = useState<Categoria | null>(null);
   const [editingProduto, setEditingProduto] = useState<Produto | null>(null);
+  const [editingProdutoId, setEditingProdutoId] = useState<string | null>(null);
   const [editingFornecedor, setEditingFornecedor] = useState<Fornecedor | null>(null);
   const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [editingConta, setEditingConta] = useState<ContaBancaria | null>(null);
@@ -373,10 +374,11 @@ export function Cadastro() {
     };
     try {
       setSavingProduto(true);
-      if (editingProduto) {
-        await api.updateProduto(editingProduto.id, payload);
+      if (editingProdutoId) {
+        await api.updateProduto(editingProdutoId, payload);
         toast.success('Produto atualizado');
         setEditingProduto(null);
+        setEditingProdutoId(null);
         resetProdutoForm();
       } else {
         await api.createProduto(payload);
@@ -540,6 +542,7 @@ export function Cadastro() {
     setMaterialInsumoProduto('');
     setQuantidadeInsumoProduto('');
     setInsumosProduto([]);
+    setEditingProdutoId(null);
   };
 
   const resetFornecedorForm = () => {
@@ -595,6 +598,7 @@ export function Cadastro() {
 
   const handleEditProduto = (produto: Produto) => {
     setEditingProduto(produto);
+    setEditingProdutoId(produto.id);
     setCategoriaProduto(produto.categoria);
     setNomeProduto(produto.nome);
     setPrecoInicial(fmtDecimalPt(Number(produto.precoInicial)));
