@@ -60,8 +60,6 @@ scp "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOME_DO_BACKUP.sqlit
 
 
 
-
-
 Depois dar esse comando **no PowerShell do PC** (mudar o nome do ficheiro se for outro):
 
 ```powershell

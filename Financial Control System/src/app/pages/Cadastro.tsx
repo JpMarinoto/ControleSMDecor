@@ -160,6 +160,7 @@ export function Cadastro() {
   const [cidadeFornecedor, setCidadeFornecedor] = useState('');
   const [estadoFornecedor, setEstadoFornecedor] = useState('');
   const [loadingCepFornecedor, setLoadingCepFornecedor] = useState(false);
+  const [savingFornecedor, setSavingFornecedor] = useState(false);
 
   // Form states - Categorias
   const [nomeCategoria, setNomeCategoria] = useState('');
@@ -175,6 +176,7 @@ export function Cadastro() {
   const [precoCustoProduto, setPrecoCustoProduto] = useState('');
   const [maoObraProduto, setMaoObraProduto] = useState('');
   const [margemLucroProduto, setMargemLucroProduto] = useState('');
+  const [savingProduto, setSavingProduto] = useState(false);
   const [calcProdutoSource, setCalcProdutoSource] = useState<'preco_venda' | 'preco_custo' | 'margem' | null>(null);
   const [materialInsumoProduto, setMaterialInsumoProduto] = useState('');
   const [quantidadeInsumoProduto, setQuantidadeInsumoProduto] = useState('');
@@ -339,6 +341,7 @@ export function Cadastro() {
 
   const handleSubmitProduto = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingProduto) return;
     if (!nomeProduto.trim() || !categoriaProduto || !precoInicial) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
@@ -368,23 +371,29 @@ export function Cadastro() {
         : [],
     };
     try {
+      setSavingProduto(true);
       if (editingProduto) {
         await api.updateProduto(editingProduto.id, payload);
         toast.success('Produto atualizado');
         setEditingProduto(null);
+        resetProdutoForm();
       } else {
         await api.createProduto(payload);
         toast.success('Produto cadastrado');
+        // UX: ao cadastrar produtos em sequência do mesmo fornecedor, manter o fornecedor selecionado
+        resetProdutoForm({ keepFornecedor: true });
       }
       await loadData();
-      resetProdutoForm();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao salvar produto');
+    } finally {
+      setSavingProduto(false);
     }
   };
 
   const handleSubmitFornecedor = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingFornecedor) return;
     if (!nomeFornecedor.trim()) {
       toast.error('Nome/Razão Social é obrigatório');
       return;
@@ -406,6 +415,7 @@ export function Cadastro() {
       estado: estadoFornecedor || null,
     };
     try {
+      setSavingFornecedor(true);
       if (editingFornecedor) {
         await api.updateFornecedor(editingFornecedor.id, payload);
         toast.success('Fornecedor atualizado');
@@ -418,6 +428,8 @@ export function Cadastro() {
       resetFornecedorForm();
     } catch (err) {
       toast.error('Erro ao salvar fornecedor');
+    } finally {
+      setSavingFornecedor(false);
     }
   };
 
@@ -514,12 +526,12 @@ export function Cadastro() {
     setDescricaoCategoria('');
   };
 
-  const resetProdutoForm = () => {
+  const resetProdutoForm = (opts?: { keepFornecedor?: boolean }) => {
     setCategoriaProduto('');
     setNomeProduto('');
     setPrecoInicial('');
     setProdutoFabricado(false);
-    setFornecedorProduto('');
+    if (!opts?.keepFornecedor) setFornecedorProduto('');
     setPrecoCustoProduto('');
     setMaoObraProduto('');
     setMargemLucroProduto('');
@@ -1320,8 +1332,8 @@ export function Cadastro() {
                 )}
 
                 <div className="flex gap-2">
-                  <Button type="submit">
-                    {editingProduto ? 'Atualizar' : 'Cadastrar'}
+                  <Button type="submit" disabled={savingProduto}>
+                    {savingProduto ? 'Salvando...' : (editingProduto ? 'Atualizar' : 'Cadastrar')}
                   </Button>
                   {editingProduto && (
                     <Button type="button" variant="outline" onClick={() => {
@@ -1653,8 +1665,8 @@ export function Cadastro() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button type="submit">
-                    {editingFornecedor ? 'Atualizar' : 'Cadastrar'}
+                  <Button type="submit" disabled={savingFornecedor}>
+                    {savingFornecedor ? 'Salvando...' : (editingFornecedor ? 'Atualizar' : 'Cadastrar')}
                   </Button>
                   {editingFornecedor && (
                     <Button type="button" variant="outline" onClick={() => {

@@ -56,6 +56,7 @@ urlpatterns = [
     path('clientes/<int:pk>/detalhe/', views_api.ClienteDetalhe.as_view()),
     path('clientes/<int:pk>/precos-produtos/', views_api.ClientePrecosProdutos.as_view()),
     path('fornecedores/<int:pk>/materiais/', views_api.FornecedorMateriais.as_view()),
+    path('fornecedores/<int:pk>/produtos/', views_api.FornecedorProdutos.as_view()),
     path('fornecedores/<int:pk>/detalhe/', views_api.FornecedorDetalhe.as_view()),
     path('funcionarios/', views_api.FuncionarioListCreate.as_view()),
     path('funcionarios/<int:pk>/', views_api.FuncionarioDetail.as_view()),

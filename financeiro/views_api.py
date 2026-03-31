@@ -2378,6 +2378,25 @@ class FornecedorMateriais(APIView):
         return Response(data)
 
 
+# --- Fornecedor: produtos vinculados ---
+@method_decorator(csrf_exempt, name='dispatch')
+class FornecedorProdutos(APIView):
+    """Lista produtos cujo fornecedor é este (para consulta rápida no detalhe do fornecedor)."""
+    def get(self, request, pk):
+        produtos = Produto.objects.filter(fornecedor_id=pk).order_by('nome')
+        data = [
+            {
+                'id': p.id,
+                'nome': p.nome,
+                'preco_venda': float(p.preco_venda or 0),
+                'estoque_atual': int(p.estoque_atual or 0),
+                'ativo': bool(p.ativo),
+            }
+            for p in produtos
+        ]
+        return Response(data)
+
+
 # --- Fornecedor detalhe ---
 @method_decorator(csrf_exempt, name='dispatch')
 class FornecedorDetalhe(APIView):

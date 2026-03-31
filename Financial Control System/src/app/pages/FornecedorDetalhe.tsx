@@ -103,6 +103,7 @@ export function FornecedorDetalhe() {
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
   const [materiais, setMateriais] = useState<{ id: number; nome: string; preco_unitario_base: number }[]>([]);
+  const [produtos, setProdutos] = useState<{ id: number; nome: string; preco_venda: number; estoque_atual: number; ativo: boolean }[]>([]);
   const [editingMaterialId, setEditingMaterialId] = useState<number | null>(null);
   const [editingMaterialPreco, setEditingMaterialPreco] = useState("");
   const [savingMaterialId, setSavingMaterialId] = useState<number | null>(null);
@@ -160,9 +161,16 @@ export function FornecedorDetalhe() {
     if (!id) return;
     api.getFornecedorMateriais(id).then(setMateriais).catch(() => setMateriais([]));
   };
+  const loadProdutos = () => {
+    if (!id) return;
+    api.getFornecedorProdutos(id).then(setProdutos).catch(() => setProdutos([]));
+  };
 
   useEffect(() => {
     if (id) loadMateriais();
+  }, [id]);
+  useEffect(() => {
+    if (id) loadProdutos();
   }, [id]);
 
   const handleSaveMaterialPreco = async (materialId: number, novoValorStr: string) => {
@@ -786,7 +794,7 @@ export function FornecedorDetalhe() {
             <CardTitle className="flex items-center gap-2">
               <ChevronRight className="size-5 transition-transform group-data-[state=open]:rotate-90" />
               <Package className="size-5" />
-              Materiais deste fornecedor
+              Produtos e materiais deste fornecedor
             </CardTitle>
             <p className="text-sm text-muted-foreground">
               Produtos/materiais cadastrados com este fornecedor. Clique para abrir.
@@ -795,49 +803,80 @@ export function FornecedorDetalhe() {
         </CardHeader>
         <CollapsibleContent>
         <CardContent className="pt-0">
-          {materiais.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum material vinculado a este fornecedor. Vincule no Cadastro (Materiais).</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Material</TableHead>
-                  <TableHead className="text-right w-40">Preço base (R$)</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {materiais.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell className="font-medium">{m.nome}</TableCell>
-                    <TableCell className="text-right">
-                      {savingMaterialId === m.id ? (
-                        <span className="text-muted-foreground text-sm">Salvando...</span>
-                      ) : (
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          className="h-8 w-28 text-right ml-auto"
-                          value={editingMaterialId === m.id ? editingMaterialPreco : m.preco_unitario_base.toFixed(2).replace(".", ",")}
-                          onChange={(e) => {
-                            setEditingMaterialId(m.id);
-                            setEditingMaterialPreco(e.target.value);
-                          }}
-                          onFocus={() => {
-                            setEditingMaterialId(m.id);
-                            setEditingMaterialPreco(m.preco_unitario_base.toFixed(2).replace(".", ","));
-                          }}
-                          onBlur={() => handleSaveMaterialPreco(m.id, editingMaterialId === m.id ? editingMaterialPreco : m.preco_unitario_base.toFixed(2).replace(".", ","))}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                          }}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Produtos</div>
+              {produtos.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhum produto vinculado a este fornecedor. Vincule no Cadastro (Produtos).</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Produto</TableHead>
+                      <TableHead className="text-right w-44">Preço venda</TableHead>
+                      <TableHead className="text-right w-28">Estoque</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {produtos.map((p) => (
+                      <TableRow key={p.id} className={p.ativo === false ? "opacity-60" : ""}>
+                        <TableCell className="font-medium">{p.nome}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCurrency(Number(p.preco_venda ?? 0))}</TableCell>
+                        <TableCell className="text-right tabular-nums">{Number(p.estoque_atual ?? 0)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Materiais</div>
+              {materiais.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhum material vinculado a este fornecedor. Vincule no Cadastro (Materiais).</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Material</TableHead>
+                      <TableHead className="text-right w-40">Preço base (R$)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {materiais.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="font-medium">{m.nome}</TableCell>
+                        <TableCell className="text-right">
+                          {savingMaterialId === m.id ? (
+                            <span className="text-muted-foreground text-sm">Salvando...</span>
+                          ) : (
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              className="h-8 w-28 text-right ml-auto"
+                              value={editingMaterialId === m.id ? editingMaterialPreco : m.preco_unitario_base.toFixed(2).replace(".", ",")}
+                              onChange={(e) => {
+                                setEditingMaterialId(m.id);
+                                setEditingMaterialPreco(e.target.value);
+                              }}
+                              onFocus={() => {
+                                setEditingMaterialId(m.id);
+                                setEditingMaterialPreco(m.preco_unitario_base.toFixed(2).replace(".", ","));
+                              }}
+                              onBlur={() => handleSaveMaterialPreco(m.id, editingMaterialId === m.id ? editingMaterialPreco : m.preco_unitario_base.toFixed(2).replace(".", ","))}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              }}
+                            />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
         </CardContent>
         </CollapsibleContent>
       </Card>

@@ -974,6 +974,13 @@ export const api = {
     const data = await response.json();
     return Array.isArray(data) ? data : [];
   },
+  getFornecedorProdutos: async (
+    id: string
+  ): Promise<{ id: number; nome: string; preco_venda: number; estoque_atual: number; ativo: boolean }[]> => {
+    const response = await fetch(`${API_BASE_URL}/fornecedores/${id}/produtos/`, { headers: authHeaders() });
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  },
   pagarFornecedor: async (id: string, valor: number) => {
     const response = await fetch(`${API_BASE_URL}/fornecedores/${id}/detalhe/`, {
       method: 'POST',
