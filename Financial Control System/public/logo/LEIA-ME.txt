@@ -1,0 +1,6 @@
+Coloque aqui a imagem da empresa com um destes nomes:
+  logo.png   (recomendado)
+  logo.jpg
+  logo.webp
+
+A imagem aparece nas impressões de venda e nos cabeçalhos que usam esta pasta.

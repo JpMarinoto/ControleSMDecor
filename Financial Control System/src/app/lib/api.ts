@@ -361,10 +361,11 @@ export const api = {
     return readJsonOrThrow(response);
   },
 
-  deleteVenda: async (id: string) => {
+  deleteVenda: async (id: string, motivo: string) => {
     const response = await fetch(`${API_BASE_URL}/vendas/${id}/`, {
       method: 'DELETE',
-      headers: authHeaders(),
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ motivo }),
     });
     if (response.status === 204) return;
     const body = await response.json().catch(() => ({}));
@@ -467,8 +468,17 @@ export const api = {
     return response.json();
   },
 
-  deleteCompra: async (id: string) => {
-    await fetch(`${API_BASE_URL}/compras/${id}/`, { method: 'DELETE', headers: authHeaders() });
+  deleteCompra: async (id: string, motivo: string) => {
+    const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ motivo }),
+    });
+    if (response.status === 204) return;
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(messageFromApiError(body) || `HTTP ${response.status}`);
+    }
   },
 
   copiarCompra: async (compraId: string) => {
@@ -972,4 +982,112 @@ export const api = {
     });
     return response.json();
   },
+
+  /** Editar pagamento de cliente (chefe). Metodo: Pix, Dinheiro, Cartão crédito, Cartão débito, Cheque */
+  updatePagamentoCliente: async (
+    pagamentoId: number | string,
+    body: { valor?: number; metodo?: string; data?: string; conta_id?: number | null; observacao?: string }
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/pagamentos/cliente/${pagamentoId}/`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+    if (!response.ok) {
+      const err = data as Record<string, unknown>;
+      const msg =
+        (typeof err?.error === "string" && err.error) ||
+        (Array.isArray(err?.valor) && String(err.valor[0])) ||
+        `HTTP ${response.status}`;
+      throw new Error(msg);
+    }
+    return data as Record<string, unknown>;
+  },
+
+  deletePagamentoCliente: async (pagamentoId: number | string, motivo: string) => {
+    const response = await fetch(`${API_BASE_URL}/pagamentos/cliente/${pagamentoId}/`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ motivo }),
+    });
+    if (!response.ok && response.status !== 204) {
+      const text = await response.text();
+      let msg = text;
+      try {
+        const j = JSON.parse(text) as unknown;
+        msg = messageFromApiError(j) || text;
+      } catch {
+        /* usar texto cru */
+      }
+      throw new Error(msg || `HTTP ${response.status}`);
+    }
+  },
+
+  updatePagamentoFornecedor: async (
+    pagamentoId: number | string,
+    body: { valor?: number; metodo?: string; data?: string; conta_id?: number | null; observacao?: string }
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/pagamentos/fornecedor/${pagamentoId}/`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+    if (!response.ok) {
+      const err = data as Record<string, unknown>;
+      const msg =
+        (typeof err?.error === "string" && err.error) ||
+        (Array.isArray(err?.valor) && String(err.valor[0])) ||
+        `HTTP ${response.status}`;
+      throw new Error(msg);
+    }
+    return data as Record<string, unknown>;
+  },
+
+  deletePagamentoFornecedor: async (pagamentoId: number | string, motivo: string) => {
+    const response = await fetch(`${API_BASE_URL}/pagamentos/fornecedor/${pagamentoId}/`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ motivo }),
+    });
+    if (!response.ok && response.status !== 204) {
+      const text = await response.text();
+      let msg = text;
+      try {
+        const j = JSON.parse(text) as unknown;
+        msg = messageFromApiError(j) || text;
+      } catch {
+        /* usar texto cru */
+      }
+      throw new Error(msg || `HTTP ${response.status}`);
+    }
+  },
+
+  registrarImpressao: async (body: {
+    tipo: string;
+    titulo?: string;
+    html: string;
+    meta?: Record<string, unknown>;
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/impressoes/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response);
+  },
+
 };

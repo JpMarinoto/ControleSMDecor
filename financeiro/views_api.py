@@ -41,6 +41,7 @@ from .models import (
     Funcionario,
     FuncionarioHoraExtra,
     FuncionarioPagamento,
+    RegistroImpressao,
 )
 from .serializers import (
     ClienteSerializer,
@@ -54,6 +55,9 @@ from .serializers import (
     ItemCompraMaterialSerializer,
     ItemCompraProdutoSerializer,
     CompraSerializer,
+    _lancamento_iso_datetime_br,
+    RegistroImpressaoListSerializer,
+    RegistroImpressaoDetailSerializer,
 )
 
 
@@ -72,6 +76,20 @@ def _api_log(request, acao, tabela, detalhes=""):
     if request and getattr(request, "user", None) and getattr(request.user, "is_authenticated", False):
         user = request.user
     LogSistema.objects.create(usuario=user, acao=acao, tabela=tabela, detalhes=detalhes or "")
+
+
+def _exigir_motivo_exclusao(request):
+    """Motivo obrigatório no corpo JSON do DELETE (mín. 3 caracteres)."""
+    data = request.data if hasattr(request, 'data') and request.data is not None else {}
+    if not isinstance(data, dict):
+        data = {}
+    motivo = (data.get('motivo') or '').strip()
+    if len(motivo) < 3:
+        return None, Response(
+            {'motivo': ['Informe o motivo da exclusão (mínimo 3 caracteres).']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return motivo, None
 
 
 def _produto_elegivel_compra_pronta(produto):
@@ -267,7 +285,7 @@ class ProdutoListCreate(APIView):
 
     def get(self, request):
         incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
-        qs = Produto.objects.prefetch_related('insumos__material').all().order_by('nome')
+        qs = Produto.objects.select_related('categoria').prefetch_related('insumos__material').all().order_by('nome')
         if not incluir_inativos:
             qs = qs.filter(ativo=True)
         serializer = ProdutoSerializer(qs, many=True)
@@ -482,7 +500,7 @@ class VendaListCreate(APIView):
     def get(self, request):
         # Por padrão retorna todas (ativas e canceladas) para histórico
         apenas_ativas = request.GET.get('apenas_ativas', '').strip() == '1'
-        qs = Venda.objects.select_related('cliente').prefetch_related('itens').order_by('-data_venda')
+        qs = Venda.objects.select_related('cliente').prefetch_related('itens').order_by('-data_lancamento', '-id')
         if apenas_ativas:
             qs = qs.filter(cancelada=False)
         serializer = VendaSerializer(qs, many=True)
@@ -510,7 +528,10 @@ class VendaListCreate(APIView):
             )
         else:
             _, data_hora_venda = _data_hora_negocio()
-        venda = Venda.objects.create(cliente=cliente, data_venda=data_hora_venda)
+        obs_txt = (data.get('observacao') or '').strip() if isinstance(data.get('observacao'), str) else ''
+        if not obs_txt and data.get('observacao'):
+            obs_txt = str(data.get('observacao')).strip()
+        venda = Venda.objects.create(cliente=cliente, data_venda=data_hora_venda, observacao=obs_txt)
         for item in itens:
             prod_id = item.get('produto') or item.get('produto_id')
             qty = item.get('quantidade', 1)
@@ -568,10 +589,18 @@ class VendaDetail(APIView):
 
     def delete(self, request, pk):
         """Soft delete: marca a venda como cancelada em vez de apagar."""
+        motivo, err = _exigir_motivo_exclusao(request)
+        if err:
+            return err
         venda = self.get_object(pk)
         venda.cancelada = True
         venda.save()
-        _api_log(request, "Cancelar", "Venda", f"Venda #{pk} cancelada (exclusão lógica)")
+        _api_log(
+            request,
+            "Cancelar",
+            "Venda",
+            f"Venda #{pk} cancelada (exclusão lógica). Motivo: {motivo}",
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -697,43 +726,69 @@ class UltimoPrecoClienteProduto(APIView):
 class CompraListCreate(APIView):
     def get(self, request):
         try:
-            # Retorna lista de ordens (cada ordem com itens); itens sem ordem como ordem de 1 item
+            tz_br = ZoneInfo('America/Sao_Paulo')
             ordens = list(
                 OrdemCompra.objects
                 .prefetch_related('itens__material', 'itens_produtos__produto')
                 .select_related('fornecedor')
-                .order_by('-data_compra')
             )
-            itens_sem_ordem_mat = CompraMaterial.objects.filter(ordem__isnull=True).select_related('fornecedor', 'material').order_by('-data_compra')
-            itens_sem_ordem_prod = CompraProduto.objects.filter(ordem__isnull=True).select_related('fornecedor', 'produto').order_by('-data_compra')
-            out = []
+            itens_sem_ordem_mat = list(
+                CompraMaterial.objects.filter(ordem__isnull=True).select_related('fornecedor', 'material')
+            )
+            itens_sem_ordem_prod = list(
+                CompraProduto.objects.filter(ordem__isnull=True).select_related('fornecedor', 'produto')
+            )
+
+            def _ts(dt):
+                if not dt:
+                    return 0.0
+                if timezone.is_naive(dt):
+                    dt = timezone.make_aware(dt, tz_br)
+                return dt.timestamp()
+
+            merged = []
             for o in ordens:
-                out.append(OrdemCompraSerializer(o).data)
+                dt = o.data_lancamento or o.data_compra
+                merged.append((_ts(dt), o.id or 0, 'ordem', o))
             for c in itens_sem_ordem_mat:
-                # Ordem sintética de 1 item (legado)
-                d_iso = _data_historico_iso(c.data_compra)
-                dl_iso = _data_historico_iso(getattr(c, 'data_lancamento', None) or c.data_compra)
-                out.append({
-                    'id': f'item-mat-{c.id}',
-                    'fornecedor': c.fornecedor.nome,
-                    'fornecedor_id': c.fornecedor_id,
-                    'data': d_iso if d_iso else None,
-                    'data_lancamento': dl_iso if dl_iso else None,
-                    'itens': [ItemCompraMaterialSerializer(c).data],
-                    'total': float(c.total_compra),
-                })
+                dt = c.data_lancamento or c.data_compra
+                merged.append((_ts(dt), c.id or 0, 'mat', c))
             for c in itens_sem_ordem_prod:
-                d_iso = _data_historico_iso(c.data_compra)
-                dl_iso = _data_historico_iso(getattr(c, 'data_lancamento', None) or c.data_compra)
-                out.append({
-                    'id': f'item-prod-{c.id}',
-                    'fornecedor': c.fornecedor.nome,
-                    'fornecedor_id': c.fornecedor_id,
-                    'data': d_iso if d_iso else None,
-                    'data_lancamento': dl_iso if dl_iso else None,
-                    'itens': [ItemCompraProdutoSerializer(c).data],
-                    'total': float(c.total_compra),
-                })
+                dt = c.data_lancamento or c.data_compra
+                merged.append((_ts(dt), c.id or 0, 'prod', c))
+
+            merged.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+            out = []
+            for _, _, kind, obj in merged:
+                if kind == 'ordem':
+                    out.append(OrdemCompraSerializer(obj).data)
+                elif kind == 'mat':
+                    c = obj
+                    d_iso = _data_historico_iso(c.data_compra)
+                    dl_iso = _lancamento_iso_datetime_br(getattr(c, 'data_lancamento', None) or c.data_compra)
+                    out.append({
+                        'id': f'item-mat-{c.id}',
+                        'fornecedor': c.fornecedor.nome,
+                        'fornecedor_id': c.fornecedor_id,
+                        'data': d_iso if d_iso else None,
+                        'data_lancamento': dl_iso if dl_iso else None,
+                        'itens': [ItemCompraMaterialSerializer(c).data],
+                        'total': float(c.total_compra),
+                    })
+                else:
+                    c = obj
+                    d_iso = _data_historico_iso(c.data_compra)
+                    dl_iso = _lancamento_iso_datetime_br(getattr(c, 'data_lancamento', None) or c.data_compra)
+                    out.append({
+                        'id': f'item-prod-{c.id}',
+                        'fornecedor': c.fornecedor.nome,
+                        'fornecedor_id': c.fornecedor_id,
+                        'data': d_iso if d_iso else None,
+                        'data_lancamento': dl_iso if dl_iso else None,
+                        'itens': [ItemCompraProdutoSerializer(c).data],
+                        'total': float(c.total_compra),
+                    })
             return Response(out)
         except Exception as e:
             # Migração 0018 (OrdemCompra/ordem) não aplicada ou outro erro de BD
@@ -987,9 +1042,17 @@ class CompraDetail(APIView):
         if ordem:
             if ordem.cancelada:
                 return Response(status=status.HTTP_204_NO_CONTENT)
+            motivo, err = _exigir_motivo_exclusao(request)
+            if err:
+                return err
             ordem.cancelada = True
             ordem.save(update_fields=['cancelada'])
-            _api_log(request, "Cancelar", "Compra", f"Ordem #{pk} cancelada (permanece no histórico)")
+            _api_log(
+                request,
+                "Cancelar",
+                "Compra",
+                f"Ordem #{pk} cancelada (permanece no histórico). Motivo: {motivo}",
+            )
             return Response(status=status.HTTP_204_NO_CONTENT)
         try:
             obj = CompraMaterial.objects.select_related('ordem').get(pk=pk_int)
@@ -1002,19 +1065,25 @@ class CompraDetail(APIView):
                 return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
             if objp.ordem_id and objp.ordem.cancelada:
                 return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+            motivo, err = _exigir_motivo_exclusao(request)
+            if err:
+                return err
             ordem = objp.ordem
             objp.delete()
             if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
                 ordem.delete()
-            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída")
+            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}")
             return Response(status=status.HTTP_204_NO_CONTENT)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+        motivo, err = _exigir_motivo_exclusao(request)
+        if err:
+            return err
         ordem = obj.ordem
         obj.delete()
         if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
             ordem.delete()
-        _api_log(request, "Excluir", "Compra", f"Compra #{pk} excluída")
+        _api_log(request, "Excluir", "Compra", f"Compra #{pk} excluída. Motivo: {motivo}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1230,6 +1299,66 @@ class LogList(APIView):
                 'usuario': usuario_nome or (l.usuario.username if l.usuario else None),
             })
         return Response(out)
+
+
+# --- Registro de impressões (ordens / fechamentos) ---
+@method_decorator(csrf_exempt, name='dispatch')
+class ImpressaoListCreate(APIView):
+    def get(self, request):
+        if not getattr(request.user, 'is_authenticated', False):
+            return Response({'error': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            from .views_auth import _is_chefe
+            if not _is_chefe(request):
+                return Response({'error': 'Apenas o chefe pode listar impressões.'}, status=status.HTTP_403_FORBIDDEN)
+        except Exception:
+            return Response({'error': 'Apenas o chefe pode listar impressões.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            limit = min(int(request.GET.get('limit', 200)), 500)
+        except (TypeError, ValueError):
+            limit = 200
+        qs = RegistroImpressao.objects.select_related('usuario').order_by('-criado_em')[:limit]
+        return Response(RegistroImpressaoListSerializer(qs, many=True).data)
+
+    def post(self, request):
+        if not getattr(request.user, 'is_authenticated', False):
+            return Response({'error': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+        body = request.data or {}
+        tipo = (body.get('tipo') or '').strip()
+        titulo = (body.get('titulo') or '').strip()[:255]
+        html = body.get('html')
+        valid_tipos = {c[0] for c in RegistroImpressao.Tipo.choices}
+        if tipo not in valid_tipos:
+            return Response({'tipo': ['Tipo inválido.']}, status=status.HTTP_400_BAD_REQUEST)
+        if html is None or not str(html).strip():
+            return Response({'html': ['Conteúdo HTML obrigatório.']}, status=status.HTTP_400_BAD_REQUEST)
+        meta = body.get('meta') if isinstance(body.get('meta'), dict) else {}
+        reg = RegistroImpressao.objects.create(
+            tipo=tipo,
+            titulo=titulo,
+            html=str(html),
+            meta=meta,
+            usuario=request.user if request.user.is_authenticated else None,
+        )
+        _api_log(request, "Registrar impressão", "RegistroImpressao", f"{tipo} — {titulo or reg.id}")
+        return Response(RegistroImpressaoDetailSerializer(reg).data, status=status.HTTP_201_CREATED)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ImpressaoDetail(APIView):
+    def get(self, request, pk):
+        if not getattr(request.user, 'is_authenticated', False):
+            return Response({'error': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            from .views_auth import _is_chefe
+            if not _is_chefe(request):
+                return Response({'error': 'Apenas o chefe pode ver impressões.'}, status=status.HTTP_403_FORBIDDEN)
+        except Exception:
+            return Response({'error': 'Apenas o chefe pode ver impressões.'}, status=status.HTTP_403_FORBIDDEN)
+        reg = RegistroImpressao.objects.select_related('usuario').filter(pk=pk).first()
+        if not reg:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(RegistroImpressaoDetailSerializer(reg).data)
 
 
 # --- Dívidas gerais ---
@@ -1617,13 +1746,17 @@ class CaixaPagamento(APIView):
                 except Exception:
                     pass
                 # #endregion
-                Pagamento.objects.create(cliente_id=cliente_id, valor=v, metodo=metodo, observacao=observacao, conta=conta_obj, data_pagamento=data_hoje)
+                cliente = Cliente.objects.get(pk=cliente_id)
+                pag = Pagamento.objects.create(
+                    cliente_id=cliente_id, valor=v, metodo=metodo, observacao=observacao,
+                    conta=conta_obj, data_pagamento=data_hoje,
+                )
                 if conta_id:
                     try:
                         conta = ContaBanco.objects.get(pk=conta_id)
                         MovimentoBanco.objects.create(
                             conta=conta, tipo='entrada',
-                            descricao=f'Recebimento cliente ID {cliente_id}', valor=v
+                            descricao=f'Recebimento cliente ID {cliente_id} pag #{pag.id}', valor=v
                         )
                         conta.saldo_atual += v
                         conta.save()
@@ -1649,13 +1782,17 @@ class CaixaPagamento(APIView):
                 # #endregion
                 tz_br = ZoneInfo('America/Sao_Paulo')
                 data_hora_gravar = datetime.combine(data_hoje, datetime.min.time().replace(hour=12), tzinfo=tz_br)
-                PagamentoFornecedor.objects.create(fornecedor_id=fornecedor_id, valor=v, metodo=metodo, observacao=observacao, conta=conta_obj, data_pagamento=data_hora_gravar)
+                fornecedor = Fornecedor.objects.get(pk=fornecedor_id)
+                pag_f = PagamentoFornecedor.objects.create(
+                    fornecedor_id=fornecedor_id, valor=v, metodo=metodo, observacao=observacao,
+                    conta=conta_obj, data_pagamento=data_hora_gravar,
+                )
                 if conta_id:
                     try:
                         conta = ContaBanco.objects.get(pk=conta_id)
                         MovimentoBanco.objects.create(
                             conta=conta, tipo='saida',
-                            descricao=f'Pagamento fornecedor ID {fornecedor_id}', valor=v
+                            descricao=f'Pagamento fornecedor ID {fornecedor_id} pag #{pag_f.id}', valor=v
                         )
                         conta.saldo_atual -= v
                         conta.save()
@@ -1666,6 +1803,263 @@ class CaixaPagamento(APIView):
             except (ValueError, TypeError):
                 return Response({'valor': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'error': 'tipo e ids obrigatórios'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _requer_chefe_pagamento(request):
+    if not getattr(getattr(request, "user", None), "is_authenticated", False):
+        return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        from .views_auth import _is_chefe
+        if not _is_chefe(request):
+            return Response({"error": "Apenas o chefe pode alterar ou excluir pagamentos."}, status=status.HTTP_403_FORBIDDEN)
+    except Exception:
+        return Response({"error": "Apenas o chefe pode alterar ou excluir pagamentos."}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
+def _reverse_banco_pagamento_cliente(pag):
+    """Desfaz entrada no saldo e remove MovimentoBanco ligado."""
+    if not pag.conta_id:
+        return
+    try:
+        conta = ContaBanco.objects.get(pk=pag.conta_id)
+    except ContaBanco.DoesNotExist:
+        return
+    conta.saldo_atual -= pag.valor
+    conta.save()
+    ref = f'pag #{pag.id}'
+    qs = MovimentoBanco.objects.filter(conta_id=pag.conta_id, tipo='entrada', descricao__contains=ref)
+    if qs.exists():
+        qs.delete()
+        return
+    leg = MovimentoBanco.objects.filter(
+        conta_id=pag.conta_id, tipo='entrada',
+        descricao=f'Recebimento cliente ID {pag.cliente_id}',
+        valor=pag.valor,
+    ).order_by('-id').first()
+    if leg:
+        leg.delete()
+
+
+def _apply_banco_pagamento_cliente(pag):
+    if not pag.conta_id:
+        return
+    try:
+        conta = ContaBanco.objects.get(pk=pag.conta_id)
+    except ContaBanco.DoesNotExist:
+        return
+    MovimentoBanco.objects.create(
+        conta=conta, tipo='entrada',
+        descricao=f'Recebimento cliente ID {pag.cliente_id} pag #{pag.id}',
+        valor=pag.valor,
+    )
+    conta.saldo_atual += pag.valor
+    conta.save()
+
+
+def _reverse_banco_pagamento_fornecedor(pag):
+    if not pag.conta_id:
+        return
+    try:
+        conta = ContaBanco.objects.get(pk=pag.conta_id)
+    except ContaBanco.DoesNotExist:
+        return
+    conta.saldo_atual += pag.valor
+    conta.save()
+    ref = f'pag #{pag.id}'
+    qs = MovimentoBanco.objects.filter(conta_id=pag.conta_id, tipo='saida', descricao__contains=ref)
+    if qs.exists():
+        qs.delete()
+        return
+    leg = MovimentoBanco.objects.filter(
+        conta_id=pag.conta_id, tipo='saida',
+        descricao=f'Pagamento fornecedor ID {pag.fornecedor_id}',
+        valor=pag.valor,
+    ).order_by('-id').first()
+    if leg:
+        leg.delete()
+
+
+def _apply_banco_pagamento_fornecedor(pag):
+    if not pag.conta_id:
+        return
+    try:
+        conta = ContaBanco.objects.get(pk=pag.conta_id)
+    except ContaBanco.DoesNotExist:
+        return
+    MovimentoBanco.objects.create(
+        conta=conta, tipo='saida',
+        descricao=f'Pagamento fornecedor ID {pag.fornecedor_id} pag #{pag.id}',
+        valor=pag.valor,
+    )
+    conta.saldo_atual -= pag.valor
+    conta.save()
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class PagamentoClienteDetail(APIView):
+    """PUT/PATCH/DELETE de pagamento de cliente (ajusta conta bancária se houver)."""
+
+    def put(self, request, pk):
+        err = _requer_chefe_pagamento(request)
+        if err:
+            return err
+        try:
+            pag = Pagamento.objects.get(pk=pk)
+        except Pagamento.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        body = request.data or {}
+        novo_valor = None
+        if body.get('valor') is not None:
+            try:
+                novo_valor = Decimal(str(body.get('valor')).replace(',', '.'))
+                if novo_valor <= 0:
+                    return Response({'valor': ['Deve ser positivo']}, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError):
+                return Response({'valor': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+        if body.get('metodo'):
+            if body.get('metodo') not in METODO_PAGAMENTO_CHOICES:
+                return Response({'error': 'Forma de pagamento inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+        if body.get('data') is not None and body.get('data') != '':
+            if _parse_data_request(body.get('data')) is None:
+                return Response({'data': ['Data inválida (use YYYY-MM-DD).']}, status=status.HTTP_400_BAD_REQUEST)
+        if 'conta_id' in body and body.get('conta_id') not in (None, '', 'null'):
+            try:
+                ContaBanco.objects.get(pk=int(body.get('conta_id')))
+            except (ValueError, TypeError, ContaBanco.DoesNotExist):
+                return Response({'conta_id': ['Conta inválida.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        _reverse_banco_pagamento_cliente(pag)
+        if novo_valor is not None:
+            pag.valor = novo_valor
+        if body.get('metodo'):
+            pag.metodo = body.get('metodo')
+        if body.get('observacao') is not None:
+            pag.observacao = (body.get('observacao') or '').strip()[:255]
+        if body.get('data') is not None:
+            d = _parse_data_request(body.get('data'))
+            if d:
+                pag.data_pagamento = d
+        if 'conta_id' in body:
+            cid = body.get('conta_id')
+            pag.conta_id = int(cid) if cid not in (None, '', 'null') else None
+        pag.save()
+        _apply_banco_pagamento_cliente(pag)
+        _api_log(request, "Editar pagamento (cliente)", "Pagamento", f"ID {pk} cliente {pag.cliente_id} R$ {float(pag.valor)}")
+        return Response({
+            'id': pag.id,
+            'data': pag.data_pagamento.isoformat() if pag.data_pagamento else '',
+            'valor': _safe_float(pag.valor),
+            'metodo': pag.metodo or '',
+            'conta_id': pag.conta_id,
+            'observacao': pag.observacao or '',
+        })
+
+    def delete(self, request, pk):
+        err = _requer_chefe_pagamento(request)
+        if err:
+            return err
+        motivo, merr = _exigir_motivo_exclusao(request)
+        if merr:
+            return merr
+        try:
+            pag = Pagamento.objects.get(pk=pk)
+        except Pagamento.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        cid = pag.cliente_id
+        _reverse_banco_pagamento_cliente(pag)
+        pag.delete()
+        _api_log(
+            request,
+            "Excluir pagamento (cliente)",
+            "Pagamento",
+            f"ID {pk} cliente {cid}. Motivo: {motivo}",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class PagamentoFornecedorDetail(APIView):
+    """PUT/PATCH/DELETE de pagamento a fornecedor."""
+
+    def put(self, request, pk):
+        err = _requer_chefe_pagamento(request)
+        if err:
+            return err
+        try:
+            pag = PagamentoFornecedor.objects.get(pk=pk)
+        except PagamentoFornecedor.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        body = request.data or {}
+        novo_valor = None
+        if body.get('valor') is not None:
+            try:
+                novo_valor = Decimal(str(body.get('valor')).replace(',', '.'))
+                if novo_valor <= 0:
+                    return Response({'valor': ['Deve ser positivo']}, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError):
+                return Response({'valor': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+        if body.get('metodo'):
+            if body.get('metodo') not in METODO_PAGAMENTO_CHOICES:
+                return Response({'error': 'Forma de pagamento inválida.'}, status=status.HTTP_400_BAD_REQUEST)
+        if body.get('data') is not None and body.get('data') != '':
+            if _parse_data_request(body.get('data')) is None:
+                return Response({'data': ['Data inválida (use YYYY-MM-DD).']}, status=status.HTTP_400_BAD_REQUEST)
+        if 'conta_id' in body and body.get('conta_id') not in (None, '', 'null'):
+            try:
+                ContaBanco.objects.get(pk=int(body.get('conta_id')))
+            except (ValueError, TypeError, ContaBanco.DoesNotExist):
+                return Response({'conta_id': ['Conta inválida.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        _reverse_banco_pagamento_fornecedor(pag)
+        if novo_valor is not None:
+            pag.valor = novo_valor
+        if body.get('metodo'):
+            pag.metodo = body.get('metodo')
+        if body.get('observacao') is not None:
+            pag.observacao = (body.get('observacao') or '').strip()[:255]
+        if body.get('data') is not None:
+            d = _parse_data_request(body.get('data'))
+            if d:
+                tz_br = ZoneInfo('America/Sao_Paulo')
+                pag.data_pagamento = datetime.combine(d, datetime.min.time().replace(hour=12), tzinfo=tz_br)
+        if 'conta_id' in body:
+            cid = body.get('conta_id')
+            pag.conta_id = int(cid) if cid not in (None, '', 'null') else None
+        pag.save()
+        _apply_banco_pagamento_fornecedor(pag)
+        _api_log(request, "Editar pagamento (fornecedor)", "PagamentoFornecedor", f"ID {pk} fornecedor {pag.fornecedor_id} R$ {float(pag.valor)}")
+        data_str = _data_historico_iso(pag.data_pagamento)
+        return Response({
+            'id': pag.id,
+            'data': data_str,
+            'valor': _safe_float(pag.valor),
+            'metodo': pag.metodo or '',
+            'conta_id': pag.conta_id,
+            'observacao': pag.observacao or '',
+        })
+
+    def delete(self, request, pk):
+        err = _requer_chefe_pagamento(request)
+        if err:
+            return err
+        motivo, merr = _exigir_motivo_exclusao(request)
+        if merr:
+            return merr
+        try:
+            pag = PagamentoFornecedor.objects.get(pk=pk)
+        except PagamentoFornecedor.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        fid = pag.fornecedor_id
+        _reverse_banco_pagamento_fornecedor(pag)
+        pag.delete()
+        _api_log(
+            request,
+            "Excluir pagamento (fornecedor)",
+            "PagamentoFornecedor",
+            f"ID {pk} fornecedor {fid}. Motivo: {motivo}",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # --- Caixa: histórico de recebimentos e pagamentos (raw SQL para evitar decimal.InvalidOperation no valor) ---
@@ -1793,7 +2187,7 @@ class ContaAtualizarSaldo(APIView):
 class ClienteDetalhe(APIView):
     def get(self, request, pk):
         cliente = Cliente.objects.get(pk=pk)
-        vendas = Venda.objects.filter(cliente=cliente).select_related('cliente').prefetch_related('itens__produto').order_by('-data_venda')
+        vendas = Venda.objects.filter(cliente=cliente).select_related('cliente').prefetch_related('itens__produto').order_by('-data_lancamento', '-id')
         pagamentos = Pagamento.objects.filter(cliente=cliente).select_related('conta').order_by('-data_pagamento')
         total_vendas = _safe_float(sum(_safe_float(v.total_venda) for v in vendas))
         total_pago = _safe_float(sum(_safe_float(p.valor) for p in pagamentos))
@@ -1801,9 +2195,23 @@ class ClienteDetalhe(APIView):
         vendas_data = []
         for v in vendas[:50]:
             itens = [{'produto': item.produto.nome, 'quantidade': item.quantidade, 'preco_unitario': _safe_float(item.preco_unitario), 'total_item': _safe_float(item.quantidade * item.preco_unitario)} for item in v.itens.all()]
-            vendas_data.append({'id': v.id, 'data': v.data_venda.date().isoformat() if v.data_venda else '', 'total': _safe_float(v.total_venda), 'itens': itens})
+            vendas_data.append({
+                'id': v.id,
+                'data': v.data_venda.date().isoformat() if v.data_venda else '',
+                'data_lancamento': _lancamento_iso_datetime_br(getattr(v, 'data_lancamento', None)),
+                'total': _safe_float(v.total_venda),
+                'itens': itens,
+            })
         pagamentos_data = [
-            {'id': p.id, 'data': p.data_pagamento.isoformat() if hasattr(p.data_pagamento, 'isoformat') else str(p.data_pagamento)[:10], 'valor': _safe_float(p.valor), 'metodo': getattr(p, 'metodo', '') or '', 'conta_nome': p.conta.nome if p.conta_id and p.conta else ''}
+            {
+                'id': p.id,
+                'data': p.data_pagamento.isoformat() if hasattr(p.data_pagamento, 'isoformat') else str(p.data_pagamento)[:10],
+                'valor': _safe_float(p.valor),
+                'metodo': getattr(p, 'metodo', '') or '',
+                'conta_nome': p.conta.nome if p.conta_id and p.conta else '',
+                'conta_id': p.conta_id,
+                'observacao': (p.observacao or '') if hasattr(p, 'observacao') else '',
+            }
             for p in pagamentos[:50]
         ]
         return Response({
@@ -1999,16 +2407,22 @@ class FornecedorDetalhe(APIView):
                 row = cursor.fetchone()
                 total_pago = _safe_float(row[0] if row else 0)
                 cursor.execute(
-                    f"SELECT pf.id, pf.data_pagamento, pf.valor, COALESCE(pf.metodo, ''), cb.nome FROM {table} pf "
+                    f"SELECT pf.id, pf.data_pagamento, pf.valor, COALESCE(pf.metodo, ''), cb.nome, pf.conta_id, COALESCE(pf.observacao, '') FROM {table} pf "
                     f"LEFT JOIN {conta_table} cb ON cb.id = pf.conta_id WHERE pf.fornecedor_id = %s ORDER BY pf.data_pagamento DESC LIMIT 50",
                     [pk]
                 )
                 rows = cursor.fetchall()
             pagamentos_data = []
             for r in rows:
-                id_, data_pag, val, metodo, conta_nome = r[0], r[1], r[2], (r[3] or '') if len(r) > 3 else '', (r[4] or '') if len(r) > 4 else ''
+                id_, data_pag, val, metodo, conta_nome = r[0], r[1], r[2], (r[3] or ''), (r[4] or '')
+                conta_id_raw = r[5] if len(r) > 5 else None
+                obs = (r[6] or '') if len(r) > 6 else ''
                 data_str = _data_historico_iso(data_pag)
-                pagamentos_data.append({'id': id_, 'data': data_str, 'valor': _safe_float(val), 'metodo': metodo, 'conta_nome': conta_nome})
+                pagamentos_data.append({
+                    'id': id_, 'data': data_str, 'valor': _safe_float(val), 'metodo': metodo, 'conta_nome': conta_nome,
+                    'conta_id': int(conta_id_raw) if conta_id_raw is not None else None,
+                    'observacao': obs,
+                })
             saldo = _safe_float(total_compras - total_pago)
             linhas = []
             for c in compras_mat:

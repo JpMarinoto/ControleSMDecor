@@ -203,7 +203,14 @@ class CompraDataApiTest(TestCase):
         )
         self.assertEqual(r0.status_code, 201)
         oid = r0.data["id"]
-        r1 = CompraDetail.as_view()(factory.delete(f"/api/compras/{oid}/"), pk=oid)
+        r1 = CompraDetail.as_view()(
+            factory.delete(
+                f"/api/compras/{oid}/",
+                data=json.dumps({"motivo": "Cancelamento de teste"}),
+                content_type="application/json",
+            ),
+            pk=oid,
+        )
         self.assertEqual(r1.status_code, status.HTTP_204_NO_CONTENT)
         ordem = OrdemCompra.objects.get(pk=oid)
         self.assertTrue(ordem.cancelada)

@@ -8,13 +8,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight, Ban } from "lucide-react";
+import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight, Ban, Pencil, Trash2 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
+import { ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
+import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 import {
   Dialog,
   DialogContent,
@@ -64,13 +66,23 @@ function agruparComprasPorOrdem(
   return groups;
 }
 
+const METODOS_PAGAMENTO_API = ["Pix", "Dinheiro", "Cartão crédito", "Cartão débito", "Cheque"] as const;
+
 interface FornecedorDetalheData {
   fornecedor: { id: number; nome: string; telefone: string };
   total_compras: number;
   total_pago: number;
   saldo_devedor: number;
   compras: CompraLinhaFornecedor[];
-  pagamentos: { id: number; data: string; valor: number; metodo?: string; conta_nome?: string }[];
+  pagamentos: {
+    id: number;
+    data: string;
+    valor: number;
+    metodo?: string;
+    conta_nome?: string;
+    conta_id?: number | null;
+    observacao?: string;
+  }[];
 }
 
 export function FornecedorDetalhe() {
@@ -95,6 +107,20 @@ export function FornecedorDetalhe() {
   const [editingMaterialPreco, setEditingMaterialPreco] = useState("");
   const [savingMaterialId, setSavingMaterialId] = useState<number | null>(null);
   const [selectedCompraIds, setSelectedCompraIds] = useState<Set<string>>(new Set());
+  const [editPagamentoOpen, setEditPagamentoOpen] = useState(false);
+  const [editPagamentoId, setEditPagamentoId] = useState<number | null>(null);
+  const [editPagValor, setEditPagValor] = useState("");
+  const [editPagMetodo, setEditPagMetodo] = useState("");
+  const [editPagData, setEditPagData] = useState("");
+  const [editPagContaId, setEditPagContaId] = useState("");
+  const [editPagObs, setEditPagObs] = useState("");
+  const [editPagSaving, setEditPagSaving] = useState(false);
+  const [pagamentoExcluir, setPagamentoExcluir] = useState<FornecedorDetalheData["pagamentos"][0] | null>(null);
+  const [printPreview, setPrintPreview] = useState<{
+    html: string;
+    titulo: string;
+    downloadBaseName: string;
+  } | null>(null);
 
   const getEmpresaHeaderHtml = () => {
     const doc = empresaDocumento();
@@ -200,6 +226,53 @@ export function FornecedorDetalhe() {
     }
   };
 
+  const abrirEdicaoPagamento = (p: FornecedorDetalheData["pagamentos"][0]) => {
+    setEditPagamentoId(p.id);
+    setEditPagValor(String(p.valor).replace(".", ","));
+    const m = p.metodo || "Dinheiro";
+    setEditPagMetodo(METODOS_PAGAMENTO_API.includes(m as (typeof METODOS_PAGAMENTO_API)[number]) ? m : "Dinheiro");
+    setEditPagData((p.data || "").slice(0, 10));
+    setEditPagContaId(p.conta_id != null && p.conta_id !== undefined ? String(p.conta_id) : "nenhuma");
+    setEditPagObs(p.observacao || "");
+    setEditPagamentoOpen(true);
+    loadContas();
+  };
+
+  const salvarEdicaoPagamento = async () => {
+    if (editPagamentoId == null) return;
+    const valor = parseFloat(editPagValor.replace(",", "."));
+    if (isNaN(valor) || valor <= 0) {
+      toast.error("Informe um valor válido.");
+      return;
+    }
+    if (!editPagMetodo) {
+      toast.error("Selecione a forma de pagamento.");
+      return;
+    }
+    setEditPagSaving(true);
+    try {
+      await api.updatePagamentoFornecedor(editPagamentoId, {
+        valor,
+        metodo: editPagMetodo,
+        data: editPagData.slice(0, 10),
+        conta_id: editPagContaId && editPagContaId !== "nenhuma" ? Number(editPagContaId) : null,
+        observacao: editPagObs.trim() || "",
+      });
+      toast.success("Pagamento atualizado.");
+      setEditPagamentoOpen(false);
+      setEditPagamentoId(null);
+      load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar pagamento.");
+    } finally {
+      setEditPagSaving(false);
+    }
+  };
+
+  const excluirPagamento = (p: FornecedorDetalheData["pagamentos"][0]) => {
+    setPagamentoExcluir(p);
+  };
+
   const normalizarContas = (res: any): { id: number; nome: string }[] => {
     if (Array.isArray(res)) return res.map((x: any) => ({ id: x.id, nome: x.nome ?? "" }));
     if (res && typeof res === "object" && Array.isArray(res.results)) return res.results.map((x: any) => ({ id: x.id, nome: x.nome ?? "" }));
@@ -266,8 +339,6 @@ export function FornecedorDetalhe() {
 
   const imprimirFechamento = (usarSelecao?: boolean) => {
     if (!data) return;
-    const janela = window.open("", "_blank");
-    if (!janela) return;
     const usarComprasSelecionadas = usarSelecao && comprasSelecionadas.length > 0;
     const comprasAtivasDoc = data.compras.filter((c) => c.ordem_cancelada !== true);
     const comprasParaImprimir = usarComprasSelecionadas
@@ -314,7 +385,8 @@ export function FornecedorDetalhe() {
             ? `${formatDateOnly(dataInicio)} a ${formatDateOnly(dataFim)}`
             : "Todo o período";
     const hojeStr = new Date().toLocaleString("pt-BR");
-    janela.document.write(`
+    const tipoImp = usarComprasSelecionadas ? "fechamento_fornecedor_selecao" : "fechamento_fornecedor";
+    const htmlForn = `
       <!DOCTYPE html>
       <html>
         <head><meta charset="utf-8"><title>Fechamento – ${data.fornecedor.nome}</title>
@@ -376,10 +448,27 @@ export function FornecedorDetalhe() {
           </table>
           <p class="muted">Impresso em ${hojeStr}</p>
         </body>
-      </html>`);
-    janela.document.close();
-    janela.focus();
-    setTimeout(() => janela.print(), 300);
+      </html>`;
+    const tituloPrev = `Fechamento — ${data.fornecedor.nome} (${periodoLabel})`;
+    void api
+      .registrarImpressao({
+        tipo: tipoImp,
+        titulo: tituloPrev,
+        html: htmlForn,
+        meta: {
+          fornecedor_id: Number(id),
+          periodo: periodoLabel,
+          selecao: usarComprasSelecionadas,
+        },
+      })
+      .catch(() => {});
+    setPrintPreview({
+      html: htmlForn,
+      titulo: tituloPrev,
+      downloadBaseName: usarComprasSelecionadas
+        ? `fechamento-fornecedor-${id}-selecao`
+        : `fechamento-fornecedor-${id}`,
+    });
   };
 
   if (!id) return null;
@@ -548,6 +637,76 @@ export function FornecedorDetalhe() {
             </form>
           </DialogContent>
         </Dialog>
+          )}
+
+          {isChefe && (
+            <Dialog
+              open={editPagamentoOpen}
+              onOpenChange={(open) => {
+                setEditPagamentoOpen(open);
+                if (!open) setEditPagamentoId(null);
+              }}
+            >
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Editar pagamento</DialogTitle>
+                  <DialogDescription>Alterar valor, data, forma ou conta vinculada.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div>
+                    <Label>Valor (R$)</Label>
+                    <Input type="text" inputMode="decimal" value={editPagValor} onChange={(e) => setEditPagValor(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Forma de pagamento</Label>
+                    <Select value={editPagMetodo} onValueChange={setEditPagMetodo}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {METODOS_PAGAMENTO_API.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Data</Label>
+                    <Input type="date" value={editPagData} onChange={(e) => setEditPagData(e.target.value)} />
+                  </div>
+                  <div>
+                    <Label>Conta bancária</Label>
+                    <Select value={editPagContaId} onValueChange={setEditPagContaId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Nenhuma" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="nenhuma">Nenhuma</SelectItem>
+                        {contas.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.nome}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Observação</Label>
+                    <Input value={editPagObs} onChange={(e) => setEditPagObs(e.target.value)} maxLength={255} />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setEditPagamentoOpen(false)}>
+                    Cancelar
+                  </Button>
+                  <Button type="button" onClick={() => void salvarEdicaoPagamento()} disabled={editPagSaving}>
+                    {editPagSaving ? "Salvando…" : "Salvar"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
         </div>
       </div>
@@ -872,12 +1031,13 @@ export function FornecedorDetalhe() {
                   {isChefe && <TableHead className="text-right">Valor</TableHead>}
                   {isChefe && <TableHead>Forma de pagamento</TableHead>}
                   {isChefe && <TableHead>Conta</TableHead>}
+                  {isChefe && <TableHead className="w-[100px] text-right">Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {exibirPagamentos.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 4 : 1} className="text-center text-muted-foreground">
+                    <TableCell colSpan={isChefe ? 5 : 1} className="text-center text-muted-foreground">
                       Nenhum pagamento{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
@@ -890,6 +1050,25 @@ export function FornecedorDetalhe() {
                       {isChefe && <TableCell className="text-right text-green-600">{formatCurrency(p.valor)}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.conta_nome || "-"}</TableCell>}
+                      {isChefe && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-0.5">
+                            <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Editar" onClick={() => abrirEdicaoPagamento(p)}>
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                              title="Excluir"
+                              onClick={() => excluirPagamento(p)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
@@ -898,6 +1077,43 @@ export function FornecedorDetalhe() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmacaoComSenhaDialog
+        open={pagamentoExcluir != null}
+        onOpenChange={(o) => {
+          if (!o) setPagamentoExcluir(null);
+        }}
+        title="Excluir pagamento"
+        description={
+          pagamentoExcluir
+            ? `Pagamento de ${formatCurrency(pagamentoExcluir.valor)} em ${formatDateOnly(pagamentoExcluir.data)}. O saldo da conta (se houver) será ajustado. Informe o motivo e confirme com sua senha.`
+            : ""
+        }
+        confirmLabel="Confirmar exclusão"
+        requireMotivo
+        onVerified={async ({ motivo }) => {
+          if (!pagamentoExcluir) return;
+          const pid = pagamentoExcluir.id;
+          setPagamentoExcluir(null);
+          try {
+            await api.deletePagamentoFornecedor(pid, motivo);
+            toast.success("Pagamento excluído.");
+            load();
+          } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Erro ao excluir.");
+          }
+        }}
+      />
+
+      <DocumentPrintPreview
+        open={printPreview != null}
+        onOpenChange={(o) => {
+          if (!o) setPrintPreview(null);
+        }}
+        html={printPreview?.html ?? ""}
+        titulo={printPreview?.titulo ?? ""}
+        downloadBaseName={printPreview?.downloadBaseName}
+      />
     </div>
   );
 }

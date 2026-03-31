@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -30,12 +30,38 @@ export function FornecedoresList() {
       .finally(() => setLoading(false));
   }, []);
 
+  const fmt = useMemo(
+    () => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }),
+    []
+  );
+
+  const totais = useMemo(() => {
+    const soma = fornecedores.reduce((s, f) => s + Math.max(0, Number(f.saldo_devedor ?? 0)), 0);
+    return { soma };
+  }, [fornecedores]);
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold">Fornecedores</h1>
         <p className="text-muted-foreground">Lista de fornecedores — clique para ver detalhes e pagar</p>
       </div>
+
+      {isChefe && !loading && fornecedores.length > 0 && (
+        <div className="max-w-xl rounded-md border border-border/50 bg-muted/25 px-3 py-2.5 shadow-none">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <span className="text-xs font-normal text-muted-foreground">
+              Total em aberto com fornecedores
+            </span>
+            <span className="text-sm font-medium tabular-nums text-muted-foreground">
+              {fmt.format(totais.soma)}
+            </span>
+          </div>
+          <p className="text-[11px] leading-snug text-muted-foreground/80 mt-1.5">
+            Soma da coluna «Valor que devo» (todos os fornecedores).
+          </p>
+        </div>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}

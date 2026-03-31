@@ -6,16 +6,16 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog";
 import { ShoppingCart, Plus, Trash2, Eye, Copy, Pencil, Check, X, Printer, Calendar, Hash, Package, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatDateOnly, parseDateOnlyToTime, getTodayLocalISO } from "../lib/format";
+import { formatDateOnly, parseDateOnlyToTime, parseLancamentoToTime, getTodayLocalISO } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
 import { SimpleConfirmDialog, ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
+import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 
 interface ItemCompra {
   id: number;
@@ -38,6 +38,16 @@ interface OrdemCompra {
   cancelada?: boolean;
   itens: ItemCompra[];
   total: number;
+}
+
+function sortOrdemCompraRecentFirst(a: OrdemCompra, b: OrdemCompra): number {
+  const t =
+    parseLancamentoToTime(b.data_lancamento, b.data) - parseLancamentoToTime(a.data_lancamento, a.data);
+  if (t !== 0) return t;
+  const na = Number(a.id);
+  const nb = Number(b.id);
+  if (!isNaN(na) && !isNaN(nb)) return nb - na;
+  return String(b.id).localeCompare(String(a.id));
 }
 
 interface NovoItemCompraForm {
@@ -94,6 +104,12 @@ export function Compra() {
     onConfirm: () => void;
   } | null>(null);
   const [excluirCompraOpen, setExcluirCompraOpen] = useState(false);
+  const [excluirItemCompraId, setExcluirItemCompraId] = useState<string | number | null>(null);
+  const [printPreview, setPrintPreview] = useState<{
+    html: string;
+    titulo: string;
+    downloadBaseName: string;
+  } | null>(null);
   const [editDetailDataCompra, setEditDetailDataCompra] = useState("");
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
@@ -296,14 +312,14 @@ export function Compra() {
     });
   };
 
-  const handleDeleteCompra = async (id: string | number) => {
+  const handleDeleteCompra = async (id: string | number, motivo: string) => {
     try {
-      await api.deleteCompra(String(id));
+      await api.deleteCompra(String(id), motivo);
       toast.success("Item excluído");
       await loadData();
       setDetailCompra(null);
-    } catch {
-      toast.error("Erro ao excluir");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao excluir");
     }
   };
 
@@ -537,15 +553,20 @@ export function Compra() {
     </div>
   </body>
 </html>`;
-    const janela = window.open("", "_blank");
-    if (!janela) {
-      toast.error("Permita pop-ups para imprimir.");
-      return;
-    }
-    janela.document.write(html);
-    janela.document.close();
-    janela.focus();
-    setTimeout(() => janela.print(), 300);
+    const tituloPrev = `Ordem #${ordem.id} — ${ordem.fornecedor || ""}`.trim();
+    void api
+      .registrarImpressao({
+        tipo: "compra",
+        titulo: tituloPrev,
+        html,
+        meta: { ordem_id: ordem.id },
+      })
+      .catch(() => {});
+    setPrintPreview({
+      html,
+      titulo: tituloPrev,
+      downloadBaseName: `ordem-compra-${ordem.id}`,
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1037,7 +1058,7 @@ export function Compra() {
                   </TableHeader>
                   <TableBody>
                     {[...ordensFiltradas]
-                      .sort((a, b) => parseDateOnlyToTime(b.data) - parseDateOnlyToTime(a.data))
+                      .sort(sortOrdemCompraRecentFirst)
                       .map((ordem) => (
                         <TableRow
                           key={ordem.id}
@@ -1201,33 +1222,16 @@ export function Compra() {
                             >
                               <Pencil className="size-4" />
                             </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive"
-                                  title="Excluir"
-                                  disabled={!!detailCompra.cancelada}
-                                >
-                                  <Trash2 className="size-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Excluir item</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Confirma excluir {getItemNome(item)} desta ordem? O valor deixará de contar nas compras do fornecedor.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                  <AlertDialogAction onClick={async () => { await handleDeleteCompra(item.id); setDetailCompra(null); }}>
-                                    Excluir
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              title="Excluir"
+                              disabled={!!detailCompra.cancelada}
+                              onClick={() => setExcluirItemCompraId(item.id)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1336,12 +1340,13 @@ export function Compra() {
         open={excluirCompraOpen}
         onOpenChange={setExcluirCompraOpen}
         title="Cancelar ordem de compra"
-        description="A ordem ficará no histórico como cancelada e deixará de contar no saldo do fornecedor (os itens não são apagados)."
+        description="A ordem ficará no histórico como cancelada e deixará de contar no saldo do fornecedor (os itens não são apagados). Informe o motivo e confirme com sua senha."
         confirmLabel="Confirmar cancelamento"
-        onVerified={async () => {
+        requireMotivo
+        onVerified={async ({ motivo }) => {
           if (!detailCompra || !/^\d+$/.test(String(detailCompra.id))) return;
           const idStr = String(detailCompra.id);
-          await api.deleteCompra(idStr);
+          await api.deleteCompra(idStr, motivo);
           toast.success("Ordem cancelada");
           await loadData();
           try {
@@ -1355,6 +1360,33 @@ export function Compra() {
             setDetailCompra({ ...detailCompra, cancelada: true });
           }
         }}
+      />
+
+      <ConfirmacaoComSenhaDialog
+        open={excluirItemCompraId != null}
+        onOpenChange={(o) => {
+          if (!o) setExcluirItemCompraId(null);
+        }}
+        title="Excluir item da ordem"
+        description="O valor deixará de contar nas compras do fornecedor. Informe o motivo e confirme com sua senha."
+        confirmLabel="Confirmar exclusão"
+        requireMotivo
+        onVerified={async ({ motivo }) => {
+          if (excluirItemCompraId == null) return;
+          const idDel = excluirItemCompraId;
+          setExcluirItemCompraId(null);
+          await handleDeleteCompra(idDel, motivo);
+        }}
+      />
+
+      <DocumentPrintPreview
+        open={printPreview != null}
+        onOpenChange={(o) => {
+          if (!o) setPrintPreview(null);
+        }}
+        html={printPreview?.html ?? ""}
+        titulo={printPreview?.titulo ?? ""}
+        downloadBaseName={printPreview?.downloadBaseName}
       />
     </div>
   );

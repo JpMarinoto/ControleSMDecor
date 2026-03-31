@@ -20,6 +20,19 @@ export function parseDateOnlyToTime(dateStr: string | null | undefined): number 
   return new Date(y, m - 1, d).getTime();
 }
 
+/** Ordenação do mais recente no sistema: ISO completo em data_lancamento, senão só a data. */
+export function parseLancamentoToTime(
+  dataLancamento: string | null | undefined,
+  dataOperacao: string | null | undefined
+): number {
+  const dl = (dataLancamento ?? "").trim();
+  if (dl.length > 10) {
+    const t = Date.parse(dl);
+    if (!isNaN(t)) return t;
+  }
+  return parseDateOnlyToTime(dataOperacao ?? dataLancamento);
+}
+
 /** Data de hoje no fuso do usuário, no formato YYYY-MM-DD (para enviar à API ao registrar pagamento). */
 export function getTodayLocalISO(): string {
   const d = new Date();

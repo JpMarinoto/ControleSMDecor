@@ -10,6 +10,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Users, ChevronRight, Printer, Calendar, FileText } from "lucide-react";
 import { motion } from "motion/react";
+import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 
 interface Cliente {
   id: number;
@@ -41,6 +42,11 @@ export function ClientesList() {
   const [dataFim, setDataFim] = useState("");
   const [usarFiltro, setUsarFiltro] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const [printPreview, setPrintPreview] = useState<{
+    html: string;
+    titulo: string;
+    downloadBaseName: string;
+  } | null>(null);
 
   const load = (params?: { data_inicio?: string; data_fim?: string }) => {
     setLoading(true);
@@ -85,15 +91,13 @@ export function ClientesList() {
 
   const imprimir = () => {
     if (!printRef.current) return;
-    const janela = window.open("", "_blank");
-    if (!janela) return;
     const colSaldo = isChefe ? "<th>Saldo devedor</th>" : "";
     const totalLinha = isChefe ? `<p class="total">Total a receber: ${formatCurrency(totalAReceber)}</p>` : "";
     const linhas = clientes.map(
       (c) =>
         `<tr><td>${c.nome}</td><td>${c.telefone || "-"}</td><td>${c.cpf || c.cnpj || "-"}</td>${isChefe ? `<td>${formatCurrency(Number(c.saldo_devedor ?? 0))}</td>` : ""}</tr>`
     );
-    janela.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html>
         <head><meta charset="utf-8"><title>Clientes – Fechamento</title>
@@ -117,10 +121,12 @@ export function ClientesList() {
           <p><small>Impresso em ${new Date().toLocaleString("pt-BR")}</small></p>
         </body>
       </html>
-    `);
-    janela.document.close();
-    janela.focus();
-    setTimeout(() => janela.print(), 300);
+    `;
+    setPrintPreview({
+      html,
+      titulo: "Lista de clientes",
+      downloadBaseName: "lista-clientes",
+    });
   };
 
   return (
@@ -245,6 +251,16 @@ export function ClientesList() {
           )}
         </CardContent>
       </Card>
+
+      <DocumentPrintPreview
+        open={printPreview != null}
+        onOpenChange={(o) => {
+          if (!o) setPrintPreview(null);
+        }}
+        html={printPreview?.html ?? ""}
+        titulo={printPreview?.titulo ?? ""}
+        downloadBaseName={printPreview?.downloadBaseName}
+      />
     </div>
   );
 }

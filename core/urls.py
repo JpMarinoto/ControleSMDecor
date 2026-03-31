@@ -17,6 +17,8 @@ urlpatterns = [
     path('legacy/', include('financeiro.urls')),
     # Frontend React na raiz: ficheiros estáticos do build
     path('assets/<path:path>', serve, {'document_root': os.path.join(FCS_DIST, 'assets')}),
+    # Public do Vite (ex.: public/logo/logo.png → dist/logo/) — antes da SPA para não devolver index.html
+    path('logo/<path:path>', serve, {'document_root': os.path.join(FCS_DIST, 'logo')}),
     # SPA: qualquer rota devolve index.html do Financial Control System
     path('', react_spa),
     path('<path:path>', react_spa),

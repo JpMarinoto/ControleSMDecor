@@ -36,6 +36,30 @@ copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMEDOBANCO.sqli
 
 se quiser pegar o banco local e mandar para VPS
 
+salva na pasta de backup
+cd /d "C:\Users\jpsma\OneDrive\Desktop\ControleSMDecor"
+if not exist "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle" mkdir "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle"
+for /f "delims=" %A in ('powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd_HHmmss'"') do set STAMP=%A
+copy /Y db.sqlite3 "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-local-%STAMP%.sqlite3"
+
+manda para vps
+
+scp "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOME_DO_BACKUP.sqlite3" deploy@129.121.53.239:/home/deploy/ControleSMDecor/db.sqlite3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 Depois dar esse comando **no PowerShell do PC** (mudar o nome do ficheiro se for outro):
@@ -51,6 +75,24 @@ scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/db-2026-03-28_
 ## DO PC À VPS
 
 Objetivo: copiar o `db.sqlite3` da pasta do projeto no Windows para a VPS (como cópia em `backups/db/` — mais seguro do que substituir o `db.sqlite3` em produção sem parar o serviço).
+
+### 0. Fluxo completo: backup local + enviar para a VPS (PowerShell)
+
+Numa só sequência: grava cópia no projeto, em `Documentos\BackupBancoControle` e envia para `backups/db/` na VPS (substitui o `NOMEFICHEIRO` na última linha se usares outro stamp manual).
+
+```powershell
+cd "C:\Users\jpsma\OneDrive\Desktop\ControleSMDecor"
+$stamp = Get-Date -Format "yyyy-MM-dd_HHmmss"
+$name = "db-local-$stamp.sqlite3"
+New-Item -ItemType Directory -Force -Path ".\backups\db" | Out-Null
+New-Item -ItemType Directory -Force -Path "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle" | Out-Null
+$b = Join-Path ".\backups\db" $name
+Copy-Item ".\db.sqlite3" $b -Force
+Copy-Item ".\db.sqlite3" "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\$name" -Force
+scp $b "deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/$name"
+```
+
+Confirma na VPS: `ls -lt /home/deploy/ControleSMDecor/backups/db/ | head`
 
 ### 1. No PowerShell (na pasta do projeto ou com caminho completo)
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../lib/api";
-import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime } from "../lib/format";
+import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime, parseLancamentoToTime } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -9,7 +9,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { ArrowLeft, User, Receipt, CreditCard, Printer, Calendar, FileCheck, Wallet, Tag, Trash2 } from "lucide-react";
+import { ArrowLeft, User, Receipt, CreditCard, Printer, Calendar, FileCheck, Wallet, Tag, Trash2, Pencil } from "lucide-react";
 import { motion } from "motion/react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
@@ -17,6 +17,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../componen
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
+import { ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
+import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 
 interface ItemVenda {
   produto: string;
@@ -28,8 +30,16 @@ interface ItemVenda {
 interface VendaCliente {
   id: number;
   data: string;
+  data_lancamento?: string;
   total: number;
   itens?: ItemVenda[];
+}
+
+function sortVendaClienteMaisRecentePrimeiro(a: VendaCliente, b: VendaCliente): number {
+  const t =
+    parseLancamentoToTime(b.data_lancamento, b.data) - parseLancamentoToTime(a.data_lancamento, a.data);
+  if (t !== 0) return t;
+  return b.id - a.id;
 }
 
 interface ClienteDetalheData {
@@ -38,10 +48,21 @@ interface ClienteDetalheData {
   total_pago: number;
   saldo_devedor: number;
   vendas: VendaCliente[];
-  pagamentos: { id: number; data: string; valor: number; metodo?: string; conta_nome?: string }[];
+  pagamentos: {
+    id: number;
+    data: string;
+    valor: number;
+    metodo?: string;
+    conta_nome?: string;
+    conta_id?: number | null;
+    observacao?: string;
+  }[];
 }
 
 type Periodo = "todos" | "semana" | "mes" | "personalizado";
+
+/** Alinhado ao backend METODO_PAGAMENTO_CHOICES */
+const METODOS_PAGAMENTO_API = ["Pix", "Dinheiro", "Cartão crédito", "Cartão débito", "Cheque"] as const;
 
 function parseData(s: string): number {
   return parseDateOnlyToTime(s);
@@ -63,6 +84,21 @@ export function ClienteDetalhe() {
   const [pagamentoData, setPagamentoData] = useState(getTodayLocalISO());
   const [contas, setContas] = useState<{ id: number; nome: string }[]>([]);
   const [pagamentoLoading, setPagamentoLoading] = useState(false);
+  const [pagamentoMetodo, setPagamentoMetodo] = useState<string>("Dinheiro");
+  const [editPagamentoOpen, setEditPagamentoOpen] = useState(false);
+  const [editPagamentoId, setEditPagamentoId] = useState<number | null>(null);
+  const [editPagValor, setEditPagValor] = useState("");
+  const [editPagMetodo, setEditPagMetodo] = useState("");
+  const [editPagData, setEditPagData] = useState("");
+  const [editPagContaId, setEditPagContaId] = useState("");
+  const [editPagObs, setEditPagObs] = useState("");
+  const [editPagSaving, setEditPagSaving] = useState(false);
+  const [pagamentoExcluir, setPagamentoExcluir] = useState<ClienteDetalheData["pagamentos"][0] | null>(null);
+  const [printPreview, setPrintPreview] = useState<{
+    html: string;
+    titulo: string;
+    downloadBaseName: string;
+  } | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   const [precosProdutos, setPrecosProdutos] = useState<{ id: number; produto_id: number; produto_nome: string; preco: number }[]>([]);
@@ -269,7 +305,7 @@ export function ClienteDetalhe() {
           const t = parseData(v.data);
           return t >= limites.inicio && t <= limites.fim;
         })]
-        .sort((a, b) => parseData(a.data) - parseData(b.data))
+        .sort(sortVendaClienteMaisRecentePrimeiro)
     : [];
   const pagamentosFiltrados = data
     ? data.pagamentos.filter((p) => {
@@ -310,8 +346,6 @@ export function ClienteDetalhe() {
 
   const imprimirFechamento = () => {
     if (!printRef.current || !data) return;
-    const janela = window.open("", "_blank");
-    if (!janela) return;
     const periodoLabel =
       periodo === "semana"
         ? "Última semana"
@@ -320,7 +354,7 @@ export function ClienteDetalhe() {
           : periodo === "personalizado" && dataInicio && dataFim
             ? `${formatDateOnly(dataInicio)} a ${formatDateOnly(dataFim)}`
             : "Todo o período";
-    janela.document.write(`
+    const htmlFech = `
       <!DOCTYPE html>
       <html>
         <head><meta charset="utf-8"><title>Fechamento – ${data.cliente.nome}</title>
@@ -374,10 +408,21 @@ export function ClienteDetalhe() {
           <p class="muted">${empresa.nome || "Empresa"} — Impresso em ${new Date().toLocaleString("pt-BR")}</p>
         </body>
       </html>
-    `);
-    janela.document.close();
-    janela.focus();
-    setTimeout(() => janela.print(), 300);
+    `;
+    const tituloPrev = `Fechamento — ${data.cliente.nome} (${periodoLabel})`;
+    void api
+      .registrarImpressao({
+        tipo: "fechamento_cliente",
+        titulo: tituloPrev,
+        html: htmlFech,
+        meta: { cliente_id: Number(id), periodo: periodoLabel },
+      })
+      .catch(() => {});
+    setPrintPreview({
+      html: htmlFech,
+      titulo: tituloPrev,
+      downloadBaseName: `fechamento-cliente-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}`,
+    });
   };
 
   const toggleVendaSelection = (vendaId: number) => {
@@ -395,8 +440,6 @@ export function ClienteDetalhe() {
       return;
     }
     if (!data) return;
-    const janela = window.open("", "_blank");
-    if (!janela) return;
 
     const porData = [...vendasSelecionadas].sort((a, b) => parseData(a.data) - parseData(b.data));
     const notasHtml = porData
@@ -464,7 +507,7 @@ export function ClienteDetalhe() {
     const saldoTotal = data.saldo_devedor ?? 0;
     const saldoFora = saldoTotal - totalSelecionado;
 
-    janela.document.write(`
+    const htmlSel = `
       <!DOCTYPE html>
       <html>
         <head><meta charset="utf-8"><title>Fechamento – ${data.cliente.nome}</title>
@@ -555,10 +598,25 @@ export function ClienteDetalhe() {
           </div>
         </body>
       </html>
-    `);
-    janela.document.close();
-    janela.focus();
-    setTimeout(() => janela.print(), 300);
+    `;
+    const tituloSel = `Fechamento (seleção) — ${data.cliente.nome} · ${vendasSelecionadas.length} nota(s)`;
+    void api
+      .registrarImpressao({
+        tipo: "fechamento_cliente_selecao",
+        titulo: tituloSel,
+        html: htmlSel,
+        meta: {
+          cliente_id: Number(id),
+          venda_ids: vendasSelecionadas.map((v) => v.id),
+          total_selecionado: totalSelecionado,
+        },
+      })
+      .catch(() => {});
+    setPrintPreview({
+      html: htmlSel,
+      titulo: tituloSel,
+      downloadBaseName: `fechamento-cliente-${id}-selecao`,
+    });
   };
 
   const normalizarContas = (res: any): { id: number; nome: string }[] => {
@@ -587,7 +645,7 @@ export function ClienteDetalhe() {
         tipo: "cliente",
         cliente_id: Number(id),
         valor,
-        metodo: "Dinheiro",
+        metodo: pagamentoMetodo,
         data: pagamentoData,
         ...(pagamentoContaId && pagamentoContaId !== "nenhuma" ? { conta_id: Number(pagamentoContaId) } : {}),
       });
@@ -595,6 +653,7 @@ export function ClienteDetalhe() {
       setPagamentoOpen(false);
       setPagamentoValor("");
       setPagamentoContaId("");
+      setPagamentoMetodo("Dinheiro");
       setPagamentoData(getTodayLocalISO());
       loadDetalhe();
     } catch {
@@ -604,12 +663,59 @@ export function ClienteDetalhe() {
     }
   };
 
+  const abrirEdicaoPagamento = (p: ClienteDetalheData["pagamentos"][0]) => {
+    setEditPagamentoId(p.id);
+    setEditPagValor(String(p.valor).replace(".", ","));
+    const m = p.metodo || "Dinheiro";
+    setEditPagMetodo(METODOS_PAGAMENTO_API.includes(m as (typeof METODOS_PAGAMENTO_API)[number]) ? m : "Dinheiro");
+    setEditPagData((p.data || "").slice(0, 10));
+    setEditPagContaId(p.conta_id != null && p.conta_id !== undefined ? String(p.conta_id) : "nenhuma");
+    setEditPagObs(p.observacao || "");
+    setEditPagamentoOpen(true);
+    loadContas();
+  };
+
+  const salvarEdicaoPagamento = async () => {
+    if (editPagamentoId == null || !id) return;
+    const valor = parseFloat(editPagValor.replace(",", "."));
+    if (isNaN(valor) || valor <= 0) {
+      toast.error("Informe um valor válido.");
+      return;
+    }
+    if (!editPagMetodo) {
+      toast.error("Selecione a forma de pagamento.");
+      return;
+    }
+    setEditPagSaving(true);
+    try {
+      await api.updatePagamentoCliente(editPagamentoId, {
+        valor,
+        metodo: editPagMetodo,
+        data: editPagData.slice(0, 10),
+        conta_id: editPagContaId && editPagContaId !== "nenhuma" ? Number(editPagContaId) : null,
+        observacao: editPagObs.trim() || "",
+      });
+      toast.success("Pagamento atualizado.");
+      setEditPagamentoOpen(false);
+      setEditPagamentoId(null);
+      loadDetalhe();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar pagamento.");
+    } finally {
+      setEditPagSaving(false);
+    }
+  };
+
+  const excluirPagamento = (p: ClienteDetalheData["pagamentos"][0]) => {
+    setPagamentoExcluir(p);
+  };
+
   if (!id) return null;
   if (loading && !data) return <p className="text-muted-foreground">Carregando...</p>;
   if (!data) return <p className="text-muted-foreground">Cliente não encontrado.</p>;
 
   const { cliente, total_vendas, total_pago, saldo_devedor, vendas, pagamentos } = data;
-  const vendasOrdenadas = [...vendas].sort((a, b) => parseData(a.data) - parseData(b.data));
+  const vendasOrdenadas = [...vendas].sort(sortVendaClienteMaisRecentePrimeiro);
   const exibirVendas = limites ? vendasFiltradas : vendasOrdenadas;
   const exibirPagamentos = limites ? pagamentosFiltrados : pagamentos;
   const vendasSelecionadas = [...exibirVendas.filter((v) => selectedVendaIds.has(v.id))].sort(
@@ -695,6 +801,21 @@ export function ClienteDetalhe() {
               />
             </div>
             <div className="space-y-2">
+              <Label>Forma de pagamento</Label>
+              <Select value={pagamentoMetodo} onValueChange={setPagamentoMetodo}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {METODOS_PAGAMENTO_API.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>Data do pagamento</Label>
               <Input
                 type="date"
@@ -729,6 +850,75 @@ export function ClienteDetalhe() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      )}
+
+      {isChefe && (
+        <Dialog
+          open={editPagamentoOpen}
+          onOpenChange={(open) => {
+            setEditPagamentoOpen(open);
+            if (!open) setEditPagamentoId(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Editar pagamento</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Valor (R$)</Label>
+                <Input type="text" inputMode="decimal" value={editPagValor} onChange={(e) => setEditPagValor(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Forma de pagamento</Label>
+                <Select value={editPagMetodo} onValueChange={setEditPagMetodo}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {METODOS_PAGAMENTO_API.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Data</Label>
+                <Input type="date" value={editPagData} onChange={(e) => setEditPagData(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Conta bancária</Label>
+                <Select value={editPagContaId} onValueChange={setEditPagContaId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Nenhuma" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="nenhuma">Nenhuma</SelectItem>
+                    {contas.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Observação (opcional)</Label>
+                <Input value={editPagObs} onChange={(e) => setEditPagObs(e.target.value)} maxLength={255} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditPagamentoOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={() => void salvarEdicaoPagamento()} disabled={editPagSaving}>
+                {editPagSaving ? "Salvando…" : "Salvar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {isChefe && (
@@ -1115,12 +1305,13 @@ export function ClienteDetalhe() {
                   {isChefe && <TableHead className="text-right">Valor</TableHead>}
                   {isChefe && <TableHead>Forma de pagamento</TableHead>}
                   {isChefe && <TableHead>Conta</TableHead>}
+                  {isChefe && <TableHead className="w-[100px] text-right">Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {exibirPagamentos.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 4 : 1} className="text-center text-muted-foreground">
+                    <TableCell colSpan={isChefe ? 5 : 1} className="text-center text-muted-foreground">
                       Nenhum pagamento{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
@@ -1133,6 +1324,25 @@ export function ClienteDetalhe() {
                       {isChefe && <TableCell className="text-right text-green-600">{formatCurrency(p.valor)}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.conta_nome || "-"}</TableCell>}
+                      {isChefe && (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-0.5">
+                            <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Editar" onClick={() => abrirEdicaoPagamento(p)}>
+                              <Pencil className="size-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                              title="Excluir"
+                              onClick={() => excluirPagamento(p)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
@@ -1141,6 +1351,43 @@ export function ClienteDetalhe() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmacaoComSenhaDialog
+        open={pagamentoExcluir != null}
+        onOpenChange={(o) => {
+          if (!o) setPagamentoExcluir(null);
+        }}
+        title="Excluir pagamento"
+        description={
+          pagamentoExcluir
+            ? `Pagamento de ${formatCurrency(pagamentoExcluir.valor)} em ${formatDateOnly(pagamentoExcluir.data)}. O saldo da conta (se houver) será ajustado. Informe o motivo e confirme com sua senha.`
+            : ""
+        }
+        confirmLabel="Confirmar exclusão"
+        requireMotivo
+        onVerified={async ({ motivo }) => {
+          if (!pagamentoExcluir) return;
+          const pid = pagamentoExcluir.id;
+          setPagamentoExcluir(null);
+          try {
+            await api.deletePagamentoCliente(pid, motivo);
+            toast.success("Pagamento excluído.");
+            loadDetalhe();
+          } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Erro ao excluir.");
+          }
+        }}
+      />
+
+      <DocumentPrintPreview
+        open={printPreview != null}
+        onOpenChange={(o) => {
+          if (!o) setPrintPreview(null);
+        }}
+        html={printPreview?.html ?? ""}
+        titulo={printPreview?.titulo ?? ""}
+        downloadBaseName={printPreview?.downloadBaseName}
+      />
     </div>
   );
 }

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Textarea } from "../components/ui/textarea";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
   AlertDialog,
@@ -19,12 +20,14 @@ import {
 import { TrendingUp, Plus, Trash2, Copy, Eye, Pencil, Check, X, Printer, Calendar, Hash, Package, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatDateOnly, parseDateOnlyToTime, getTodayLocalISO } from "../lib/format";
+import { formatDateOnly, parseDateOnlyToTime, parseLancamentoToTime, getTodayLocalISO } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
+import { resolvePrintLogoDataUrl } from "../lib/printLogo";
 import { SimpleConfirmDialog, ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
+import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 
 interface ItemVenda {
   id: number;
@@ -49,6 +52,7 @@ interface Venda {
   data: string;
   data_lancamento?: string;
   cancelada?: boolean;
+  observacao?: string;
   itens?: ItemVenda[];
 }
 
@@ -70,6 +74,7 @@ export function Venda() {
   const [quantidade, setQuantidade] = useState("");
   const [formaPagamento, setFormaPagamento] = useState("");
   const [data, setData] = useState(getTodayLocalISO());
+  const [observacaoNova, setObservacaoNova] = useState("");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editQtd, setEditQtd] = useState("");
   const [editPreco, setEditPreco] = useState("");
@@ -88,6 +93,11 @@ export function Venda() {
     onConfirm: () => void;
   } | null>(null);
   const [excluirVendaOpen, setExcluirVendaOpen] = useState(false);
+  const [printPreview, setPrintPreview] = useState<{
+    html: string;
+    titulo: string;
+    downloadBaseName: string;
+  } | null>(null);
   const [editDetailDataVenda, setEditDetailDataVenda] = useState("");
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
@@ -96,15 +106,16 @@ export function Venda() {
     if (detailVenda?.data) setEditDetailDataVenda(String(detailVenda.data).slice(0, 10));
   }, [detailVenda?.id, detailVenda?.data]);
 
-  const getEmpresaHeaderHtml = () => {
+  const getEmpresaHeaderHtml = (logoDataUrl: string | null) => {
     const doc = empresaDocumento();
     const endereco = empresaEnderecoLinha();
     const contatos = [empresa.telefone, empresa.email, empresa.site].filter(Boolean).join(" • ");
+    const logoBlock = logoDataUrl
+      ? `<div class="os-logo"><img src="${logoDataUrl}" alt="" /></div>`
+      : "";
     return `
       <div class="os-header">
-        <div class="os-logo">
-          <img src="/logo/logo.png" alt="Logo" onerror="this.onerror=null;this.src='/logo/logo.jpg';" />
-        </div>
+        ${logoBlock}
         <div class="empresa-block">
           <div class="empresa-nome">${empresa.nome || "Empresa"}</div>
           ${empresa.nomeFantasia && empresa.nomeFantasia !== (empresa.nome || "") ? `<div class="empresa-fantasia">${empresa.nomeFantasia}</div>` : ""}
@@ -155,6 +166,7 @@ export function Venda() {
               data: v.data || "",
               data_lancamento: v.data_lancamento || "",
               cancelada: v.cancelada === true,
+              observacao: typeof v.observacao === "string" ? v.observacao : "",
               itens: v.itens || [],
             }))
           : []
@@ -341,7 +353,19 @@ export function Venda() {
     });
   };
 
-  const imprimirVenda = (venda: Venda) => {
+  const slugNomeArquivo = (nome: string) =>
+    nome
+      .replace(/[/\\?%*:|"<>]/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 72) || "cliente";
+
+  const imprimirVenda = async (venda: Venda) => {
+    const logoDataUrl = await resolvePrintLogoDataUrl();
+    const empresaHeader = getEmpresaHeaderHtml(logoDataUrl);
+    const escHtml = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const dataFormatada = formatDateOnly(venda.data);
     const usuarioNome =
       (user as any)?.first_name ||
@@ -370,6 +394,7 @@ export function Venda() {
       return s + totalItem;
     }, 0);
     const totalVenda = toNum((venda as any).total) > 0 ? toNum((venda as any).total) : totalCalculadoVenda;
+    const obsRaw = (venda.observacao || "").trim();
 
     const itensRows = itens
       .map((i) => {
@@ -398,7 +423,7 @@ export function Venda() {
     const conteudoVia = (viaLabel: string) => `
       <div class="doc">
         <div class="via">${viaLabel}</div>
-        ${getEmpresaHeaderHtml()}
+        ${empresaHeader}
         <div class="doc-title">
           <h1>VENDA</h1>
           <div class="sub">Nº ${numeroVenda || "-"} — ${dataFormatada}</div>
@@ -410,6 +435,7 @@ export function Venda() {
           ${clienteTelefone ? `<div><strong>Telefone:</strong> ${clienteTelefone}</div>` : ""}
           <div><strong>Lançado por:</strong> ${usuarioNome || "-"}</div>
         </div>
+        ${obsRaw ? `<div class="info" style="grid-column:1/-1;"><strong>Observação:</strong> ${escHtml(obsRaw)}</div>` : ""}
 
         <div class="tabela-itens">
           <table>
@@ -442,9 +468,10 @@ export function Venda() {
       </div>
     `;
 
+    const docTitleEsc = escHtml(`Venda ${numeroVenda || "?"} — ${venda.clienteNome || ""}`.trim());
     const html = `<!DOCTYPE html>
 <html>
-  <head><meta charset="utf-8"><title></title>
+  <head><meta charset="utf-8"><title>${docTitleEsc}</title>
     <style>
       @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
@@ -454,24 +481,21 @@ export function Venda() {
       .folha::after {
         content: "";
         position: absolute;
-        left: 0;
-        right: 0;
+        left: 6%;
+        right: 6%;
         top: 50%;
-        border-top: 2px dashed #cbd5e1;
-        transform: translateY(-1px);
+        border-top: 1px dashed rgba(148, 163, 184, 0.35);
+        transform: translateY(-50%);
       }
       .folha::before {
-        content: "corte aqui";
+        content: "";
         position: absolute;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        background: #ffffff;
-        padding: 0 8px;
-        font-size: 10px;
-        color: #94a3b8;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
+        width: 20px;
+        height: 1px;
+        background: rgba(148, 163, 184, 0.25);
       }
       .grid { display: grid; grid-template-rows: 1fr 1fr; height: 100%; }
       .via-bloco { height: 148.5mm; padding: 7mm; }
@@ -518,8 +542,8 @@ export function Venda() {
         .tabela-itens th, .tabela-itens td { border-color: #000 !important; }
         .tabela-itens th { background: #fff !important; color: #000 !important; }
         .empresa-fantasia, .empresa-docs, .empresa-endereco, .empresa-contato, .doc-title .sub, .via, .assinatura-texto { color: #000 !important; }
-        .folha::after { border-top-color: #000 !important; }
-        .folha::before { color: #000 !important; }
+        .folha::after { border-top-color: rgba(0, 0, 0, 0.12) !important; }
+        .folha::before { background: rgba(0, 0, 0, 0.08) !important; }
       }
     </style>
   </head>
@@ -532,18 +556,21 @@ export function Venda() {
     </div>
   </body>
 </html>`;
-    const janela = window.open("", "_blank");
-    if (!janela) {
-      toast.error("Permita pop-ups para imprimir.");
-      return;
-    }
-    try {
-      janela.document.title = "";
-    } catch {}
-    janela.document.write(html);
-    janela.document.close();
-    janela.focus();
-    setTimeout(() => janela.print(), 300);
+    const tituloPrev = `Venda #${numeroVenda || "?"} — ${venda.clienteNome || ""}`.trim();
+    void api
+      .registrarImpressao({
+        tipo: "venda",
+        titulo: tituloPrev,
+        html,
+        meta: { venda_id: venda.id, cliente_id: venda.cliente },
+      })
+      .catch(() => {});
+    const nomeSlug = slugNomeArquivo(venda.clienteNome || "cliente");
+    setPrintPreview({
+      html,
+      titulo: tituloPrev,
+      downloadBaseName: `${nomeSlug}-venda-${numeroVenda || "nova"}`,
+    });
   };
 
   const handleAddItemToVenda = async () => {
@@ -644,6 +671,21 @@ export function Venda() {
   };
 
   const produtoSelecionado = produtos.find((p: any) => String(p.id) === produtoId);
+
+  const produtosAgrupados = useMemo(() => {
+    const m = new Map<string, typeof produtos>();
+    for (const p of produtos) {
+      const raw = (p as { categoria_nome?: string }).categoria_nome;
+      const label = raw && String(raw).trim() ? String(raw).trim() : "Sem categoria";
+      if (!m.has(label)) m.set(label, []);
+      m.get(label)!.push(p);
+    }
+    return [...m.entries()].sort(([a], [b]) => {
+      if (a === "Sem categoria") return 1;
+      if (b === "Sem categoria") return -1;
+      return a.localeCompare(b, "pt-BR");
+    });
+  }, [produtos]);
   const precoNum = precoUnitario
     ? parseFloat(precoUnitario.replace(",", "."))
     : (produtoSelecionado?.preco_venda ?? produtoSelecionado?.precoInicial ?? 0);
@@ -755,17 +797,45 @@ export function Venda() {
       confirmLabel: "Registrar venda",
       onConfirm: () => {
         void (async () => {
+          const nomeCliente =
+            (clientes.find((c: { id: number; nome?: string }) => String(c.id) === clienteId)?.nome as string) || "";
           try {
-            await api.createVenda({
+            const created = (await api.createVenda({
               cliente: Number(clienteId),
               itens: itensPayload,
               data: dataVenda,
               data_venda: dataVenda,
               forma_pagamento: formaPagamento || undefined,
-            });
-            toast.success("Venda registrada com sucesso");
+              observacao: observacaoNova.trim() || undefined,
+            })) as Record<string, unknown>;
+            toast.success(nomeCliente ? `Venda registrada — ${nomeCliente}` : "Venda registrada com sucesso");
             await loadData();
             resetForm();
+            const rawItens = created.itens;
+            const itensNorm = Array.isArray(rawItens)
+              ? rawItens.map((it: Record<string, unknown>) => ({
+                  id: Number(it.id),
+                  produto: Number(it.produto),
+                  produto_nome: typeof it.produto_nome === "string" ? it.produto_nome : undefined,
+                  quantidade: Number(it.quantidade) || 0,
+                  preco_unitario: Number(it.preco_unitario) || 0,
+                }))
+              : [];
+            const novaVenda: Venda = {
+              id: created.id as string | number,
+              cliente: Number(created.cliente ?? clienteId),
+              clienteNome: (created.clienteNome as string) || nomeCliente,
+              total: Number(created.total) || 0,
+              data: (created.data as string) || dataVenda,
+              data_lancamento: created.data_lancamento as string | undefined,
+              cancelada: false,
+              observacao:
+                typeof created.observacao === "string"
+                  ? created.observacao
+                  : observacaoNova.trim() || undefined,
+              itens: itensNorm,
+            };
+            await imprimirVenda(novaVenda);
           } catch {
             toast.error("Erro ao registrar venda");
           }
@@ -781,6 +851,7 @@ export function Venda() {
     setPrecoUnitario("");
     setQuantidade("");
     setFormaPagamento("");
+    setObservacaoNova("");
     setData(getTodayLocalISO());
     setItensForm([]);
   };
@@ -870,17 +941,22 @@ export function Venda() {
                   <SelectTrigger id="produtoId">
                     <SelectValue placeholder="Selecione um produto" />
                   </SelectTrigger>
-                  <SelectContent>
-                    {                    produtos.length > 0 ? (
-                      produtos.map((produto: any) => (
-                        <SelectItem key={produto.id} value={String(produto.id)}>
-                          {produto.nome}
-                        </SelectItem>
-                      ))
-                    ) : (
+                  <SelectContent className="max-h-[min(24rem,var(--radix-select-content-available-height))]">
+                    {produtos.length === 0 ? (
                       <SelectItem value="none" disabled>
                         Nenhum produto cadastrado
                       </SelectItem>
+                    ) : (
+                      produtosAgrupados.map(([cat, list]) => (
+                        <SelectGroup key={cat}>
+                          <SelectLabel className="px-2 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/90 dark:bg-blue-950/50 border-b border-blue-100 dark:border-blue-900">{cat}</SelectLabel>
+                          {list.map((produto: any) => (
+                            <SelectItem key={produto.id} value={String(produto.id)}>
+                              {produto.nome}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))
                     )}
                   </SelectContent>
                 </Select>
@@ -1017,6 +1093,18 @@ export function Venda() {
                   onChange={(e) => setData(e.target.value)}
                 />
               </div>
+
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="observacaoNova">Observação (opcional)</Label>
+                <Textarea
+                  id="observacaoNova"
+                  placeholder="Notas sobre esta venda"
+                  rows={2}
+                  className="min-h-[3.25rem] resize-y"
+                  value={observacaoNova}
+                  onChange={(e) => setObservacaoNova(e.target.value)}
+                />
+              </div>
             </div>
 
             <Button type="submit" disabled={produtos.length === 0}>
@@ -1077,7 +1165,13 @@ export function Venda() {
                   </TableHeader>
                   <TableBody>
                     {[...vendasFiltradas]
-                      .sort((a, b) => parseDateOnlyToTime(b.data) - parseDateOnlyToTime(a.data))
+                      .sort((a, b) => {
+                        const t =
+                          parseLancamentoToTime(b.data_lancamento, b.data) -
+                          parseLancamentoToTime(a.data_lancamento, a.data);
+                        if (t !== 0) return t;
+                        return Number(b.id) - Number(a.id);
+                      })
                       .map((venda) => (
                         <TableRow
                           key={venda.id}
@@ -1204,6 +1298,12 @@ export function Venda() {
                       </Button>
                     </div>
                   )}
+                  {(detailVenda.observacao || "").trim() ? (
+                    <div className="rounded-lg border bg-background/80 px-3 py-2 text-sm">
+                      <span className="text-muted-foreground">Observação: </span>
+                      <span className="whitespace-pre-wrap">{detailVenda.observacao}</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
                   <Table>
@@ -1332,12 +1432,17 @@ export function Venda() {
                     <SelectTrigger className="w-48">
                       <SelectValue placeholder="Produto" />
                     </SelectTrigger>
-                    <SelectContent>
-                      {produtos.map((p: any) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.nome}
-                          {isChefe && ` – ${formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}`}
-                        </SelectItem>
+                    <SelectContent className="max-h-[min(24rem,var(--radix-select-content-available-height))]">
+                      {produtosAgrupados.map(([cat, list]) => (
+                        <SelectGroup key={cat}>
+                          <SelectLabel className="px-2 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50/90 dark:bg-blue-950/50 border-b border-blue-100 dark:border-blue-900">{cat}</SelectLabel>
+                          {list.map((p: any) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.nome}
+                              {isChefe && ` – ${formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}`}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1366,7 +1471,7 @@ export function Venda() {
               </div>
 
               <DialogFooter className="shrink-0 gap-2 border-t bg-muted/30 px-6 py-4 sm:flex sm:flex-row sm:flex-wrap sm:justify-end">
-                <Button variant="outline" onClick={() => detailVenda && imprimirVenda(detailVenda)} title="Imprimir esta venda para o cliente pagar">
+                <Button variant="outline" onClick={() => detailVenda && void imprimirVenda(detailVenda)} title="Imprimir esta venda para o cliente pagar">
                   <Printer className="size-4 mr-2" />
                   Imprimir venda
                 </Button>
@@ -1426,15 +1531,26 @@ export function Venda() {
         open={excluirVendaOpen}
         onOpenChange={setExcluirVendaOpen}
         title="Excluir venda"
-        description="A venda será cancelada e deixará de contar no saldo do cliente (fica no histórico como cancelada). Digite sua senha para confirmar."
+        description="A venda será cancelada e deixará de contar no saldo do cliente (fica no histórico como cancelada). Digite o motivo e sua senha para confirmar."
         confirmLabel="Confirmar exclusão"
-        onVerified={async () => {
+        requireMotivo
+        onVerified={async ({ motivo }) => {
           if (!detailVenda) return;
-          await api.deleteVenda(String(detailVenda.id));
+          await api.deleteVenda(String(detailVenda.id), motivo);
           toast.success("Venda cancelada");
           await loadData();
           setDetailVenda(null);
         }}
+      />
+
+      <DocumentPrintPreview
+        open={printPreview != null}
+        onOpenChange={(o) => {
+          if (!o) setPrintPreview(null);
+        }}
+        html={printPreview?.html ?? ""}
+        titulo={printPreview?.titulo ?? ""}
+        downloadBaseName={printPreview?.downloadBaseName}
       />
     </div>
   );

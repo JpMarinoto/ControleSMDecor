@@ -23,6 +23,7 @@ from .models import (
     PagamentoFornecedor,
     MovimentoCaixa,
     ContaBanco,
+    RegistroImpressao,
 )
 
 
@@ -41,6 +42,23 @@ def _data_compra_iso_br(data_compra):
     if hasattr(dv, 'isoformat'):
         return dv.isoformat()[:10]
     return str(dv).strip()[:10]
+
+
+def _lancamento_iso_datetime_br(dt):
+    """Data/hora de lançamento em ISO (fuso America/Sao_Paulo) para ordenação no frontend."""
+    if not dt:
+        return None
+    dv = dt
+    tz_br = ZoneInfo('America/Sao_Paulo')
+    if hasattr(dv, 'hour'):
+        if timezone.is_naive(dv):
+            dt_br = dv.replace(tzinfo=ZoneInfo('UTC')).astimezone(tz_br)
+        else:
+            dt_br = dv.astimezone(tz_br)
+        return dt_br.isoformat()
+    if hasattr(dv, 'isoformat'):
+        return dv.isoformat()
+    return str(dv).strip() or None
 
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -71,6 +89,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
     insumos = serializers.SerializerMethodField(read_only=True)
     custo_materiais = serializers.SerializerMethodField(read_only=True)
     custo_total_fabricacao = serializers.SerializerMethodField(read_only=True)
+    categoria_nome = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Produto
@@ -79,6 +98,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
             'ativo',
             'nome',
             'categoria',
+            'categoria_nome',
             'revenda',
             'fabricado',
             'fornecedor',
@@ -91,6 +111,11 @@ class ProdutoSerializer(serializers.ModelSerializer):
             'custo_materiais',
             'custo_total_fabricacao',
         ]
+
+    def get_categoria_nome(self, obj):
+        if obj.categoria_id and obj.categoria:
+            return obj.categoria.nome or ''
+        return ''
 
     def get_insumos(self, obj):
         itens = []
@@ -159,7 +184,7 @@ class VendaSerializer(serializers.ModelSerializer):
         model = Venda
         fields = [
             'id', 'cliente', 'clienteNome', 'data_venda', 'data', 'data_lancamento',
-            'total', 'cancelada', 'itens',
+            'total', 'cancelada', 'observacao', 'itens',
         ]
 
     def get_data_lancamento(self, obj):
@@ -257,7 +282,7 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
         return _data_compra_iso_br(obj.data_compra)
 
     def get_data_lancamento(self, obj):
-        return _data_compra_iso_br(getattr(obj, 'data_lancamento', None))
+        return _lancamento_iso_datetime_br(getattr(obj, 'data_lancamento', None))
 
     def get_itens(self, obj):
         # Junta itens de material + itens de produto (revenda)
@@ -332,3 +357,19 @@ class TransacaoSerializer(serializers.Serializer):
 
     def get_createdAt(self, obj):
         return obj.get('createdAt', '')
+
+
+class RegistroImpressaoListSerializer(serializers.ModelSerializer):
+    usuario_username = serializers.CharField(source='usuario.username', read_only=True, allow_null=True)
+
+    class Meta:
+        model = RegistroImpressao
+        fields = ['id', 'tipo', 'titulo', 'meta', 'criado_em', 'usuario_username']
+
+
+class RegistroImpressaoDetailSerializer(serializers.ModelSerializer):
+    usuario_username = serializers.CharField(source='usuario.username', read_only=True, allow_null=True)
+
+    class Meta:
+        model = RegistroImpressao
+        fields = ['id', 'tipo', 'titulo', 'html', 'meta', 'criado_em', 'usuario_username']

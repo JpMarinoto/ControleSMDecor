@@ -156,6 +156,7 @@ class Venda(models.Model):
         help_text='Data da operação de venda (pode ser ajustada após salvar).',
     )
     cancelada = models.BooleanField(default=False, verbose_name="Cancelada")
+    observacao = models.TextField(blank=True, verbose_name="Observação")
 
     def __str__(self):
         return f"Venda {self.id} - {self.cliente.nome}"
@@ -435,7 +436,39 @@ class MovimentoBanco(models.Model):
 
 
 # ==========================================
-# 5. LOGS
+# 5. REGISTRO DE IMPRESSÕES (ORDENS / FECHAMENTOS)
+# ==========================================
+
+
+class RegistroImpressao(models.Model):
+    """Cópia do HTML gerado na impressão (venda, compra, fechamentos)."""
+
+    class Tipo(models.TextChoices):
+        VENDA = 'venda', 'Venda'
+        COMPRA = 'compra', 'Compra'
+        FECHAMENTO_CLIENTE = 'fechamento_cliente', 'Fechamento cliente'
+        FECHAMENTO_CLIENTE_SELECAO = 'fechamento_cliente_selecao', 'Fechamento cliente (seleção)'
+        FECHAMENTO_FORNECEDOR = 'fechamento_fornecedor', 'Fechamento fornecedor'
+        FECHAMENTO_FORNECEDOR_SELECAO = 'fechamento_fornecedor_selecao', 'Fechamento fornecedor (seleção)'
+
+    tipo = models.CharField(max_length=48, choices=Tipo.choices)
+    titulo = models.CharField(max_length=255, blank=True)
+    html = models.TextField()
+    meta = models.JSONField(default=dict, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    usuario = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='impressoes_registradas'
+    )
+
+    class Meta:
+        ordering = ['-criado_em']
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} — {self.titulo or self.pk}"
+
+
+# ==========================================
+# 6. LOGS
 # ==========================================
 
 class LogSistema(models.Model):
@@ -450,7 +483,7 @@ class LogSistema(models.Model):
 
 
 # ==========================================
-# 6. PERFIL (CHEFE / FUNCIONÁRIO)
+# 7. PERFIL (CHEFE / FUNCIONÁRIO)
 # ==========================================
 
 class PerfilUsuario(models.Model):
