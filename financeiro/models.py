@@ -178,7 +178,7 @@ class ItemVenda(models.Model):
 class Pagamento(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='pagamentos')
     valor = models.DecimalField(max_digits=10, decimal_places=2)
-    data_pagamento = models.DateField(auto_now_add=True)
+    data_pagamento = models.DateField(default=timezone.now)
     metodo = models.CharField(max_length=50, default='Pix')
     observacao = models.CharField(max_length=255, blank=True)
     conta = models.ForeignKey('financeiro.ContaBanco', on_delete=models.SET_NULL, null=True, blank=True, related_name='pagamentos_cliente')

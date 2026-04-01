@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime, parseLancamentoToTime } from "../lib/format";
@@ -35,10 +35,14 @@ interface VendaCliente {
   itens?: ItemVenda[];
 }
 
+/** Ordem: data da nota (mais recente primeiro); no mesmo dia, último lançamento primeiro. */
 function sortVendaClienteMaisRecentePrimeiro(a: VendaCliente, b: VendaCliente): number {
-  const t =
-    parseLancamentoToTime(b.data_lancamento, b.data) - parseLancamentoToTime(a.data_lancamento, a.data);
-  if (t !== 0) return t;
+  const da = parseDateOnlyToTime(a.data);
+  const db = parseDateOnlyToTime(b.data);
+  if (db !== da) return db - da;
+  const ta = parseLancamentoToTime(a.data_lancamento, a.data);
+  const tb = parseLancamentoToTime(b.data_lancamento, b.data);
+  if (tb !== ta) return tb - ta;
   return b.id - a.id;
 }
 
@@ -298,6 +302,16 @@ export function ClienteDetalhe() {
   };
 
   const limites = getLimites();
+  const safeNum = (v: unknown): number => {
+    if (typeof v === "number") return isNaN(v) ? 0 : v;
+    if (typeof v === "string") {
+      const n = Number(v.replace(",", "."));
+      return isNaN(n) ? 0 : n;
+    }
+    if (v == null) return 0;
+    const n = Number(v as any);
+    return isNaN(n) ? 0 : n;
+  };
   const vendasFiltradas = data
     ? [...data.vendas
         .filter((v) => {
@@ -315,9 +329,11 @@ export function ClienteDetalhe() {
       })
     : [];
 
-  const totalVendasPeriodo = vendasFiltradas.reduce((s, v) => s + v.total, 0);
-  const totalPagoPeriodo = pagamentosFiltrados.reduce((s, p) => s + p.valor, 0);
+  const totalVendasPeriodo = vendasFiltradas.reduce((s, v) => s + safeNum(v.total), 0);
+  const totalPagoPeriodo = pagamentosFiltrados.reduce((s, p) => s + safeNum(p.valor), 0);
   const saldoNoPeriodo = totalVendasPeriodo - totalPagoPeriodo;
+  const totalPagoGeral = safeNum(data?.total_pago);
+  const saldoDevedorGeral = safeNum(data?.saldo_devedor);
 
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
@@ -377,15 +393,31 @@ export function ClienteDetalhe() {
             th { background: #f1f5f9; font-weight: 600; color: #334155; }
             .total { font-weight: 700; font-size: 14px; margin-top: 16px; color: #1e3a5f; }
             .muted { color: #64748b; font-size: 11px; margin-top: 24px; }
+            .resumo {
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 10px;
+              padding: 14px 16px;
+              margin: 10px 0 16px;
+            }
+            .resumo .linha { display:flex; justify-content:space-between; gap:12px; margin: 6px 0; }
+            .resumo .linha strong { white-space: nowrap; }
+            .resumo .total-a-pagar { font-weight: 800; font-size: 14px; color: #0f172a; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
           </style>
         </head>
         <body>
           ${getEmpresaHeaderHtml()}
           <h1>Fechamento – ${data.cliente.nome}</h1>
           <p class="meta">Período: ${periodoLabel}</p>
-          <p><strong>Vendas no período:</strong> ${vendasFiltradas.length} &nbsp;|&nbsp; <strong>Total vendas:</strong> ${formatCurrency(totalVendasPeriodo)}</p>
-          <p><strong>Pagamentos no período:</strong> ${pagamentosFiltrados.length} &nbsp;|&nbsp; <strong>Total pago:</strong> ${formatCurrency(totalPagoPeriodo)}</p>
-          ${isChefe ? `<p class="total">Saldo no período (a receber): ${formatCurrency(saldoNoPeriodo)}</p>` : ""}
+          <div class="resumo">
+            <div class="linha"><span>Valor deste fechamento (total de vendas no período)</span><strong>${formatCurrency(totalVendasPeriodo)}</strong></div>
+            <div class="linha"><span>Valor pago já pelo cliente (total registrado no sistema)</span><strong>${formatCurrency(totalPagoGeral)}</strong></div>
+            ${isChefe ? `<div class="linha total-a-pagar"><span>Valor pendente a pagar (saldo atual do cliente)</span><strong>${formatCurrency(saldoDevedorGeral)}</strong></div>` : ""}
+            <div style="margin-top:10px;color:#64748b;font-size:11px;">
+              Observação: pagamentos “no período” podem não coincidir com as vendas do período. Por isso o sistema destaca o total pago geral e o saldo pendente atual.
+            </div>
+          </div>
+          <p class="meta"><strong>Vendas no período:</strong> ${vendasFiltradas.length} &nbsp;|&nbsp; <strong>Pagamentos no período:</strong> ${pagamentosFiltrados.length}</p>
           <h3 style="font-size:14px;margin:20px 0 8px;">Vendas</h3>
           <table>
             <thead><tr><th>Data</th><th>Itens (quantidade × produto)</th><th>Total</th></tr></thead>
@@ -434,7 +466,11 @@ export function ClienteDetalhe() {
     });
   };
 
-  const imprimirFechamentoSelecionadas = (vendasSelecionadas: VendaCliente[], totalSelecionado: number) => {
+  const imprimirFechamentoSelecionadas = (
+    vendasSelecionadas: VendaCliente[],
+    totalSelecionado: number,
+    restanteBrutoForaSelecao: number
+  ) => {
     if (vendasSelecionadas.length === 0) {
       toast.error("Selecione pelo menos uma venda para gerar o fechamento.");
       return;
@@ -504,8 +540,23 @@ export function ClienteDetalhe() {
       .join("");
 
     const hojeStr = new Date().toLocaleString("pt-BR");
-    const saldoTotal = data.saldo_devedor ?? 0;
-    const saldoFora = saldoTotal - totalSelecionado;
+    const saldoTotal = safeNum(data.saldo_devedor);
+    const totalSelNum = safeNum(totalSelecionado);
+    const restanteForaBruto = safeNum(restanteBrutoForaSelecao);
+
+    // Pagamentos no intervalo das notas selecionadas (min/max data)
+    const times = porData.map((v) => parseData(v.data)).filter((t) => typeof t === "number" && !isNaN(t));
+    const inicioSel = times.length ? Math.min(...times) : null;
+    const fimSel = times.length ? Math.max(...times) : null;
+    const pagoNoIntervalo = inicioSel != null && fimSel != null
+      ? (data.pagamentos || []).reduce((s, p) => {
+          const t = parseData(p.data);
+          if (t < inicioSel || t > fimSel) return s;
+          return s + safeNum(p.valor);
+        }, 0)
+      : 0;
+
+    const totalAPagarFech = Math.max(0, totalSelNum - pagoNoIntervalo);
 
     const htmlSel = `
       <!DOCTYPE html>
@@ -577,11 +628,14 @@ export function ClienteDetalhe() {
           </div>
 
           <div class="resumo-box">
-            <div class="linha"><span>Saldo devedor total do cliente</span><strong>${formatCurrency(saldoTotal)}</strong></div>
             <div class="linha"><span>Valor deste fechamento (selecionado)</span><strong>${formatCurrency(totalSelecionado)}</strong></div>
-            <div class="linha"><span>Restante a pagar após este fechamento</span><strong>${formatCurrency(saldoFora)}</strong></div>
-            <div class="linha"><span>Total já pago pelo cliente</span><strong>${formatCurrency(data.total_pago ?? 0)}</strong></div>
-            <div class="linha total-fech"><span>Total a pagar neste fechamento</span><span>${formatCurrency(totalSelecionado)}</span></div>
+            <div class="linha"><span>Valor pago no intervalo das notas selecionadas</span><strong>${formatCurrency(pagoNoIntervalo)}</strong></div>
+            <div class="linha total-fech"><span>Total a pagar nesta seleção</span><span>${formatCurrency(totalAPagarFech)}</span></div>
+            <div class="linha"><span>Restante a pagar (fora da seleção) — total bruto das notas não selecionadas</span><strong>${formatCurrency(restanteForaBruto)}</strong></div>
+            <div class="linha"><span>Saldo devedor total do cliente (atual)</span><strong>${formatCurrency(saldoTotal)}</strong></div>
+            <div style="margin-top:10px;color:#64748b;font-size:11px;">
+              “Restante fora da seleção” é a soma dos totais das notas exibidas que não entraram na seleção (valor de face). O “total a pagar nesta seleção” é o total selecionado menos os pagamentos registrados no intervalo de datas das notas selecionadas.
+            </div>
           </div>
 
           ${notasHtml}
@@ -630,6 +684,15 @@ export function ClienteDetalhe() {
       setContas([]);
       toast.error(e?.message || "Erro ao carregar contas bancárias.");
     });
+  };
+
+  const abrirDialogLancarPagamento = () => {
+    setPagamentoValor("");
+    setPagamentoContaId("");
+    setPagamentoMetodo("Dinheiro");
+    setPagamentoData(getTodayLocalISO());
+    loadContas();
+    setPagamentoOpen(true);
   };
 
   const handleLancarPagamento = async () => {
@@ -710,19 +773,63 @@ export function ClienteDetalhe() {
     setPagamentoExcluir(p);
   };
 
+  const vendasRaw = data?.vendas ?? [];
+  const pagamentosRaw = data?.pagamentos ?? [];
+  const vendasOrdenadas = useMemo(
+    () => [...vendasRaw].sort(sortVendaClienteMaisRecentePrimeiro),
+    [vendasRaw]
+  );
+  const exibirVendas = limites ? vendasFiltradas : vendasOrdenadas;
+  const exibirPagamentos = limites ? pagamentosFiltrados : pagamentosRaw;
+  const vendasSelecionadas = useMemo(
+    () =>
+      [...exibirVendas.filter((v) => selectedVendaIds.has(v.id))].sort(
+        (a, b) => parseData(a.data) - parseData(b.data)
+      ),
+    [exibirVendas, selectedVendaIds]
+  );
+  const totalSelecionado = useMemo(
+    () => vendasSelecionadas.reduce((s, v) => s + safeNum(v.total), 0),
+    [vendasSelecionadas]
+  );
+  /** Soma dos totais das notas em exibição que não estão na seleção (valor bruto, sem abater pagamentos). */
+  const restanteBrutoNotasForaSelecao = useMemo(
+    () =>
+      exibirVendas
+        .filter((v) => !selectedVendaIds.has(v.id))
+        .reduce((s, v) => s + safeNum(v.total), 0),
+    [exibirVendas, selectedVendaIds]
+  );
+  // Intervalo real da seleção (min/max datas das vendas selecionadas)
+  const rangeSelecao = useMemo(() => {
+    if (vendasSelecionadas.length === 0) return null;
+    const times = vendasSelecionadas
+      .map((v) => parseData(v.data))
+      .filter((t) => typeof t === "number" && !isNaN(t));
+    if (times.length === 0) return null;
+    return { inicio: Math.min(...times), fim: Math.max(...times) };
+  }, [vendasSelecionadas]);
+
+  const totalPagoNoIntervaloSelecao = useMemo(() => {
+    if (!rangeSelecao) return 0;
+    const { inicio, fim } = rangeSelecao;
+    return pagamentosRaw.reduce((s, p) => {
+      const t = parseData(p.data);
+      if (t < inicio || t > fim) return s;
+      return s + safeNum(p.valor);
+    }, 0);
+  }, [pagamentosRaw, rangeSelecao]);
+
   if (!id) return null;
   if (loading && !data) return <p className="text-muted-foreground">Carregando...</p>;
   if (!data) return <p className="text-muted-foreground">Cliente não encontrado.</p>;
 
-  const { cliente, total_vendas, total_pago, saldo_devedor, vendas, pagamentos } = data;
-  const vendasOrdenadas = [...vendas].sort(sortVendaClienteMaisRecentePrimeiro);
-  const exibirVendas = limites ? vendasFiltradas : vendasOrdenadas;
-  const exibirPagamentos = limites ? pagamentosFiltrados : pagamentos;
-  const vendasSelecionadas = [...exibirVendas.filter((v) => selectedVendaIds.has(v.id))].sort(
-    (a, b) => parseData(a.data) - parseData(b.data)
-  );
-  const totalSelecionado = vendasSelecionadas.reduce((s, v) => s + v.total, 0);
-  const saldoForaFechamento = (data?.saldo_devedor ?? 0) - totalSelecionado;
+  const { cliente, total_vendas, total_pago, saldo_devedor } = data;
+
+  /** Pagamentos entre a menor e a maior data da seleção abatem diretamente o total selecionado (valor das notas do fechamento). */
+  const aPagarDaSelecao = Math.max(0, totalSelecionado - totalPagoNoIntervaloSelecao);
+  const selecionarTodasExibidas = () => setSelectedVendaIds(new Set(exibirVendas.map((v) => v.id)));
+  const limparSelecao = () => setSelectedVendaIds(new Set());
 
   return (
     <div className="space-y-6">
@@ -763,18 +870,26 @@ export function ClienteDetalhe() {
             variant="outline"
             size="sm"
             onClick={() => {
-              if (vendasSelecionadas.length > 0) {
-                imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado);
-              } else {
-                imprimirFechamento();
-              }
+              imprimirFechamento();
             }}
           >
             <FileCheck className="size-4 mr-2" />
-            Fechamento selecionadas
+            Imprimir fechamento do período
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            disabled={vendasSelecionadas.length === 0}
+            onClick={() =>
+              imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado, restanteBrutoNotasForaSelecao)
+            }
+            title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas as vendas selecionadas"}
+          >
+            <Printer className="size-4 mr-2" />
+            Imprimir selecionadas
           </Button>
           {isChefe && (
-            <Button size="sm" onClick={() => setPagamentoOpen(true)}>
+            <Button size="sm" onClick={abrirDialogLancarPagamento}>
               <Wallet className="size-4 mr-2" />
               Lançar pagamento
             </Button>
@@ -783,7 +898,7 @@ export function ClienteDetalhe() {
       </div>
 
       {isChefe && (
-      <Dialog open={pagamentoOpen} onOpenChange={(open) => { setPagamentoOpen(open); if (open) { setPagamentoData(getTodayLocalISO()); loadContas(); } }}>
+      <Dialog open={pagamentoOpen} onOpenChange={setPagamentoOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Lançar pagamento</DialogTitle>
@@ -1168,52 +1283,89 @@ export function ClienteDetalhe() {
       </Collapsible>
       )}
 
-      {vendasSelecionadas.length > 0 && (
-        <Card className="border-primary/30 bg-primary/[0.03]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileCheck className="size-5 text-primary" />
-              Fechamento selecionado
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {vendasSelecionadas.length} nota(s) selecionada(s). Use &quot;Imprimir fechamento&quot; para gerar o comprovante para o cliente pagar apenas este fechamento.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {isChefe && (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-lg border bg-background p-4">
-                  <p className="text-xs font-medium text-muted-foreground">Valor deste fechamento</p>
-                  <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionado)}</p>
-                </div>
-                <div className="rounded-lg border bg-background p-4">
-                  <p className="text-xs font-medium text-muted-foreground">Restante a pagar após este fechamento</p>
-                  <p className={`text-xl font-bold ${saldoForaFechamento > 0 ? "text-amber-600" : "text-muted-foreground"}`}>
-                    {formatCurrency(saldoForaFechamento)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">O que ainda ficará devendo considerando este fechamento</p>
-                </div>
-                <div className="rounded-lg border bg-background p-4">
-                  <p className="text-xs font-medium text-muted-foreground">Total já pago pelo cliente</p>
-                  <p className="text-xl font-bold text-green-600">{formatCurrency(data?.total_pago ?? 0)}</p>
-                </div>
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                onClick={() => imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado)}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Printer className="size-4 mr-2" />
-                Imprimir fechamento
+      <Card className={vendasSelecionadas.length > 0 ? "border-primary/30 bg-primary/[0.03]" : ""}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <Receipt className="size-5 text-muted-foreground" />
+            Fechamento (seleção)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Selecione as vendas na lista abaixo para montar um fechamento “sob medida”. Se não selecionar nada, use “Imprimir fechamento do período”.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={selecionarTodasExibidas} disabled={exibirVendas.length === 0}>
+                Selecionar todas ({exibirVendas.length})
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setSelectedVendaIds(new Set())}>
+              <Button variant="outline" size="sm" onClick={limparSelecao} disabled={selectedVendaIds.size === 0}>
                 Limpar seleção
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div className="text-xs text-muted-foreground">
+              Selecionadas: <span className="font-medium tabular-nums text-foreground">{vendasSelecionadas.length}</span>
+            </div>
+          </div>
+
+          {isChefe && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Total selecionado</p>
+                <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionado)}</p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Saldo atual do cliente</p>
+                <p className={`text-xl font-bold ${(data?.saldo_devedor ?? 0) > 0 ? "text-destructive" : ""}`}>
+                  {formatCurrency(data?.saldo_devedor ?? 0)}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Valor pago no intervalo das vendas selecionadas</p>
+                <p className="text-xl font-bold text-green-600">{formatCurrency(totalPagoNoIntervaloSelecao)}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Considera pagamentos entre a menor e a maior data das vendas selecionadas.
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Total a pagar desta seleção</p>
+                <p className={`text-xl font-bold ${aPagarDaSelecao > 0 ? "text-primary" : "text-muted-foreground"}`}>
+                  {formatCurrency(aPagarDaSelecao)}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Abate direto no total selecionado; não desconta antes o valor bruto das notas fora da seleção.
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Restante a pagar (fora da seleção)
+                </p>
+                <p
+                  className={`text-xl font-bold ${restanteBrutoNotasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"}`}
+                >
+                  {formatCurrency(restanteBrutoNotasForaSelecao)}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Total bruto das notas listadas que não estão selecionadas (sem descontar pagamentos).
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() =>
+                imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado, restanteBrutoNotasForaSelecao)
+              }
+              disabled={vendasSelecionadas.length === 0}
+              title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas a seleção"}
+            >
+              <Printer className="size-4 mr-2" />
+              Imprimir seleção
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {limites && isChefe && (
         <Card ref={printRef}>

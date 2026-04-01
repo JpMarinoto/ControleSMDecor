@@ -2187,7 +2187,12 @@ class ContaAtualizarSaldo(APIView):
 class ClienteDetalhe(APIView):
     def get(self, request, pk):
         cliente = Cliente.objects.get(pk=pk)
-        vendas = Venda.objects.filter(cliente=cliente).select_related('cliente').prefetch_related('itens__produto').order_by('-data_lancamento', '-id')
+        vendas = (
+            Venda.objects.filter(cliente=cliente, cancelada=False)
+            .select_related('cliente')
+            .prefetch_related('itens__produto')
+            .order_by('-data_lancamento', '-id')
+        )
         pagamentos = Pagamento.objects.filter(cliente=cliente).select_related('conta').order_by('-data_pagamento')
         total_vendas = _safe_float(sum(_safe_float(v.total_venda) for v in vendas))
         total_pago = _safe_float(sum(_safe_float(p.valor) for p in pagamentos))
