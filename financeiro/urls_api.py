@@ -63,4 +63,5 @@ urlpatterns = [
     path('funcionarios/<int:pk>/horas-extras/', views_api.FuncionarioHoraExtraCreate.as_view()),
     path('funcionarios/<int:pk>/horas-extras/<int:he_pk>/', views_api.FuncionarioHoraExtraDelete.as_view()),
     path('funcionarios/<int:pk>/pagamentos/', views_api.FuncionarioPagamentoCreate.as_view()),
+    path('precificacoes/shopee/', views_api.PrecificacaoShopeeListCreate.as_view()),
 ]

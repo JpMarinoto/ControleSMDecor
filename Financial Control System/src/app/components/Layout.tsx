@@ -74,6 +74,8 @@ export function Layout() {
 
   const navGroups = user?.is_chefe ? navChefeGroups : navFuncionarioGroups;
   const isFuncionario = !user?.is_chefe;
+  const mainContentFullWidth =
+    location.pathname === "/precificacao" || location.pathname.startsWith("/precificacao/");
 
   const NavLinks = ({ mobile = false, compact = false }: { mobile?: boolean; compact?: boolean }) => (
     <>
@@ -115,10 +117,10 @@ export function Layout() {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header compacto: encolhe ao rolar para liberar espaço */}
       <header
-        className={`border-b bg-card sticky top-0 z-10 transition-all duration-200 ${
+        className={`border-b bg-card text-card-foreground sticky top-0 z-10 transition-all duration-200 ${
           headerCompact ? "shadow-sm" : ""
         }`}
       >
@@ -137,7 +139,7 @@ export function Layout() {
                 <img
                   src={logoTryPng ? "/logo/logo.png" : "/logo/logo.jpg"}
                   alt="Logo SM Decor"
-                  className="h-full w-full object-contain"
+                  className="app-logo h-full w-full object-contain"
                   onError={() => (logoTryPng ? setLogoError(true) : setLogoTryPng(true))}
                 />
               ) : (
@@ -146,9 +148,9 @@ export function Layout() {
                 </span>
               )}
             </div>
-            <Link to="/" className="truncate" onClick={() => setOpen(false)}>
+            <Link to="/" className="truncate text-foreground" onClick={() => setOpen(false)}>
               <span
-                className={`font-bold truncate transition-all duration-200 ${
+                className={`font-bold truncate text-foreground transition-all duration-200 ${
                   headerCompact ? "text-xs md:text-sm" : "text-sm md:text-base"
                 }`}
               >
@@ -223,7 +225,13 @@ export function Layout() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-2 md:px-3 py-3 md:py-4">
+      <main
+        className={
+          mainContentFullWidth
+            ? "mx-auto w-full max-w-none px-3 sm:px-4 md:px-6 py-3 md:py-4 text-foreground"
+            : "container mx-auto px-2 md:px-3 py-3 md:py-4 text-foreground"
+        }
+      >
         <Outlet />
       </main>
 

@@ -65,6 +65,17 @@ export interface EstoqueItem {
   alterado_hoje?: boolean;
 }
 
+/** Resposta da API `/precificacoes/shopee/` (precificação salva no SQLite). */
+export interface PrecificacaoShopeeApiRow {
+  id: number;
+  nome: string;
+  dataIso: string;
+  mesReferencia: string;
+  nfPercent: string;
+  impostoPercent: string;
+  linhas: unknown[];
+}
+
 export const api = {
   // Auth
   authLogin: async (username: string, password: string) => {
@@ -1101,4 +1112,26 @@ export const api = {
     return readJsonOrThrow(response);
   },
 
+  getPrecificacoesShopee: async (): Promise<PrecificacaoShopeeApiRow[]> => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/`, {
+      headers: authHeaders(),
+    });
+    const data = await readJsonOrThrow(response);
+    return Array.isArray(data) ? (data as PrecificacaoShopeeApiRow[]) : [];
+  },
+
+  savePrecificacaoShopee: async (body: {
+    nome: string;
+    mesReferencia: string;
+    nfPercent: string;
+    impostoPercent: string;
+    linhas: unknown[];
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response) as Promise<PrecificacaoShopeeApiRow>;
+  },
 };

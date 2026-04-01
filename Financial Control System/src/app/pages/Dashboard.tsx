@@ -11,12 +11,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { TrendingUp, TrendingDown, Wallet, Receipt, Calendar, DollarSign, Users, Package as PackageIcon, ShoppingCart } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, Receipt, Calendar, DollarSign, Users, Package as PackageIcon, ShoppingCart, Eye, EyeOff } from "lucide-react";
+import { Button } from "../components/ui/button";
 import { BarChart, Bar, LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid, Legend } from "recharts";
 import { motion } from "motion/react";
 
 type PeriodoEntradaSaida = "dia" | "semana" | "mes";
 type PeriodoResumo = "tudo" | "dia" | "semana" | "mes";
+
+/** Recharts: evita cinza fixo (#e5e7eb / #ccc); segue --border e --muted-foreground do tema. */
+const chartSurfaceClass =
+  "min-h-0 [&_.recharts-surface]:bg-transparent [&_.recharts-wrapper]:bg-transparent [&_.recharts-cartesian-grid_line]:stroke-[var(--border)] [&_.recharts-cartesian-axis-tick_text]:fill-[var(--muted-foreground)] [&_.recharts-legend-item-text]:fill-[var(--muted-foreground)] [&_.recharts-rectangle.recharts-tooltip-cursor]:stroke-[var(--border)] [&_.recharts-curve.recharts-tooltip-cursor]:stroke-[var(--border)]";
+
+const STORAGE_VALORES_VISIVEIS = "sm_decor_dashboard_valores_visiveis";
+/** Texto fixo para não vazar tamanho do valor (estilo app de banco). */
+const VALOR_MASCARADO = "R$ ••••••";
 
 /** Dashboard do funcionário: atalhos para Venda, Compra, Estoque e Cadastro (valores só chefe). */
 function DashboardFuncionario() {
@@ -130,6 +139,23 @@ function DashboardChefe() {
   const [contas, setContas] = useState<any[]>([]);
   const [materiais, setMateriais] = useState<any[]>([]);
   const [dividasGerais, setDividasGerais] = useState<any[]>([]);
+  const [valoresVisiveis, setValoresVisiveis] = useState(() => {
+    try {
+      const v = localStorage.getItem(STORAGE_VALORES_VISIVEIS);
+      if (v === null) return true;
+      return v === "1" || v === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_VALORES_VISIVEIS, valoresVisiveis ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [valoresVisiveis]);
 
   const loadFromApi = async () => {
     try {
@@ -386,12 +412,13 @@ function DashboardChefe() {
     0
   );
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    }).format(value);
-  };
+  const formatCurrency = React.useCallback(
+    (value: number) => {
+      if (!valoresVisiveis) return VALOR_MASCARADO;
+      return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+    },
+    [valoresVisiveis],
+  );
 
   const receivableData = getReceivableData();
   const payableData = getPayableData();
@@ -400,12 +427,34 @@ function DashboardChefe() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-semibold">Dashboard</h1>
           <p className="text-muted-foreground">Visão geral das suas finanças</p>
         </div>
-        <TransactionDialog onTransactionAdded={loadTransactions} />
+        <div className="flex items-center gap-2 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9"
+                aria-pressed={valoresVisiveis}
+                aria-label={
+                  valoresVisiveis ? "Ocultar valores monetários na tela" : "Mostrar valores monetários na tela"
+                }
+                onClick={() => setValoresVisiveis((v) => !v)}
+              >
+                {valoresVisiveis ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p>{valoresVisiveis ? "Ocultar valores (como no app do banco)" : "Mostrar valores"}</p>
+            </TooltipContent>
+          </Tooltip>
+          <TransactionDialog onTransactionAdded={loadTransactions} />
+        </div>
       </div>
 
       {/* Top 4 Charts - mesmo tamanho, centralizados */}
@@ -413,13 +462,13 @@ function DashboardChefe() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 w-full max-w-6xl">
           {/* A Receber - soma por cliente (sem repetir) */}
           <motion.div className="flex" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-            <Card className="border-green-200 bg-green-50/50 flex flex-col w-full min-h-[320px]">
+            <Card className="dash-tone-positive flex flex-col w-full min-h-[320px]">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-green-700">A receber</CardTitle>
+                <CardTitle className="text-sm font-medium dash-title-positive">A receber</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100}>
+                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
                     <BarChart data={receivableData}>
                       <RechartsTooltip
                         content={({ active, payload }) => {
@@ -428,27 +477,27 @@ function DashboardChefe() {
                             return (
                               <div className="rounded-lg border bg-background px-3 py-2 shadow-sm text-xs">
                                 <p className="text-muted-foreground font-medium mb-1">{p.label ?? `Dia ${p.date}`}</p>
-                                <p className="text-green-600 font-semibold">A receber: {formatCurrency(p.valor ?? 0)}</p>
+                                <p className="dash-text-positive font-semibold">A receber: {formatCurrency(p.valor ?? 0)}</p>
                               </div>
                             );
                           }
                           return null;
                         }}
-                        cursor={{ fill: 'rgba(16, 185, 129, 0.1)' }}
+                        cursor={{ fill: "var(--chart-3)", fillOpacity: 0.14 }}
                       />
-                      <Bar dataKey="valor" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="valor" fill="var(--chart-3)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="mt-2 text-center">
-                  <p className="text-xl font-bold text-green-600">{formatCurrency(aReceber)}</p>
+                  <p className="text-xl font-bold dash-text-positive">{formatCurrency(aReceber)}</p>
                 </div>
                 <div className="mt-3 space-y-2 max-h-36 overflow-y-auto flex-1">
                   {clientesComSaldo.length > 0 ? (
                     clientesComSaldo.map((c: any) => (
-                      <div key={c.id} className="flex items-center justify-between p-2 rounded bg-white border border-green-200">
+                      <div key={c.id} className="flex items-center justify-between p-2 rounded-md dash-inset-row">
                         <p className="text-sm font-medium truncate flex-1 min-w-0">{c.nome}</p>
-                        <p className="text-sm font-semibold text-green-600 ml-2">{formatCurrency(safeNum(c.saldo_devedor))}</p>
+                        <p className="text-sm font-semibold dash-text-positive ml-2">{formatCurrency(safeNum(c.saldo_devedor))}</p>
                       </div>
                     ))
                   ) : (
@@ -461,13 +510,13 @@ function DashboardChefe() {
 
           {/* A Pagar */}
           <motion.div className="flex" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }}>
-            <Card className="border-red-200 bg-red-50/50 flex flex-col w-full min-h-[320px]">
+            <Card className="dash-tone-negative flex flex-col w-full min-h-[320px]">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-red-700">A pagar</CardTitle>
+                <CardTitle className="text-sm font-medium dash-title-negative">A pagar</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100}>
+                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
                     <BarChart data={payableData}>
                       <RechartsTooltip
                         content={({ active, payload }) => {
@@ -476,34 +525,34 @@ function DashboardChefe() {
                             return (
                               <div className="rounded-lg border bg-background px-3 py-2 shadow-sm text-xs">
                                 <p className="text-muted-foreground font-medium mb-1">{p.label ?? `Dia ${p.date}`}</p>
-                                <p className="text-red-600 font-semibold">A pagar: {formatCurrency(p.valor ?? 0)}</p>
+                                <p className="dash-text-negative font-semibold">A pagar: {formatCurrency(p.valor ?? 0)}</p>
                               </div>
                             );
                           }
                           return null;
                         }}
-                        cursor={{ fill: 'rgba(239, 68, 68, 0.1)' }}
+                        cursor={{ fill: "var(--chart-5)", fillOpacity: 0.14 }}
                       />
-                      <Bar dataKey="valor" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="valor" fill="var(--chart-5)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="mt-2 text-center">
-                  <p className="text-xl font-bold text-red-600">{formatCurrency(aPagar)}</p>
+                  <p className="text-xl font-bold dash-text-negative">{formatCurrency(aPagar)}</p>
                 </div>
                 <div className="mt-3 space-y-2 max-h-36 overflow-y-auto flex-1">
                   {fornecedoresComSaldo.length > 0 || (dividasGerais && dividasGerais.length > 0) ? (
                     <>
                       {fornecedoresComSaldo.map((f: any) => (
-                        <div key={`forn-${f.id}`} className="flex items-center justify-between p-2 rounded bg-white border border-red-200">
+                        <div key={`forn-${f.id}`} className="flex items-center justify-between p-2 rounded-md dash-inset-row">
                           <p className="text-sm font-medium truncate flex-1 min-w-0">{f.nome}</p>
-                          <p className="text-sm font-semibold text-red-600 ml-2">{formatCurrency(safeNum(f.saldo_devedor))}</p>
+                          <p className="text-sm font-semibold dash-text-negative ml-2">{formatCurrency(safeNum(f.saldo_devedor))}</p>
                         </div>
                       ))}
                       {(dividasGerais || []).map((d: any) => (
-                        <div key={`dg-${d.id}`} className="flex items-center justify-between p-2 rounded bg-white border border-red-200">
+                        <div key={`dg-${d.id}`} className="flex items-center justify-between p-2 rounded-md dash-inset-row">
                           <p className="text-sm font-medium truncate flex-1 min-w-0">{d.nome}</p>
-                          <p className="text-sm font-semibold text-red-600 ml-2">{formatCurrency(safeNum(d.valor))}</p>
+                          <p className="text-sm font-semibold dash-text-negative ml-2">{formatCurrency(safeNum(d.valor))}</p>
                         </div>
                       ))}
                     </>
@@ -517,16 +566,16 @@ function DashboardChefe() {
 
           {/* Diário Finanças - linha ao passar o mouse com valor */}
           <motion.div className="flex" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.2 }}>
-            <Card className="border-blue-200 bg-blue-50/50 flex flex-col w-full min-h-[320px]">
+            <Card className="dash-tone-balance flex flex-col w-full min-h-[320px]">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-blue-700">Diário Finanças</CardTitle>
+                <CardTitle className="text-sm font-medium dash-title-balance">Diário Finanças</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100}>
+                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
                     <LineChart data={weeklyBalanceData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.55} vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
                       <YAxis hide />
                       <RechartsTooltip
                         content={({ active, payload }) => {
@@ -535,7 +584,7 @@ function DashboardChefe() {
                             return (
                               <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
                                 <p className="text-xs text-muted-foreground">{p.day}</p>
-                                <p className={`font-semibold ${(p.saldo ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                <p className={`font-semibold ${(p.saldo ?? 0) >= 0 ? "dash-text-balance" : "dash-text-negative"}`}>
                                   {formatCurrency(p.saldo ?? 0)}
                                 </p>
                               </div>
@@ -543,14 +592,14 @@ function DashboardChefe() {
                           }
                           return null;
                         }}
-                        cursor={{ stroke: '#3b82f6', strokeWidth: 1, strokeDasharray: '4 2' }}
+                        cursor={{ stroke: "var(--primary)", strokeWidth: 1, strokeDasharray: "4 2", strokeOpacity: 0.85 }}
                   />
-                      <Line type="monotone" dataKey="saldo" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6' }} />
+                      <Line type="monotone" dataKey="saldo" stroke="var(--chart-2)" strokeWidth={2} dot={{ fill: "var(--chart-2)", strokeWidth: 0 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="mt-2 text-center">
-                  <p className={`text-xl font-bold ${weeklyBalance >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                  <p className={`text-xl font-bold ${weeklyBalance >= 0 ? "dash-text-balance" : "dash-text-negative"}`}>
                     {formatCurrency(weeklyBalance)}
                   </p>
                 </div>
@@ -560,11 +609,11 @@ function DashboardChefe() {
 
           {/* Entradas x Saídas - filtro Dia / Semana / Mês */}
           <motion.div className="flex" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.25 }}>
-            <Card className="border-violet-200 bg-violet-50/50 flex flex-col w-full min-h-[320px]">
+            <Card className="dash-tone-flow flex flex-col w-full min-h-[320px]">
               <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
-                <CardTitle className="text-sm font-medium text-violet-700">Entradas x Saídas</CardTitle>
+                <CardTitle className="text-sm font-medium dash-title-flow">Entradas x Saídas</CardTitle>
                 <Select value={periodoEntradaSaida} onValueChange={(v) => setPeriodoEntradaSaida(v as PeriodoEntradaSaida)}>
-                  <SelectTrigger className="w-[110px] h-8 text-xs border-violet-200">
+                  <SelectTrigger className="w-[110px] h-8 text-xs border-border bg-background/40">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -576,10 +625,10 @@ function DashboardChefe() {
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100}>
+                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
                     <BarChart data={entradasSaidasData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.55} vertical={false} />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} />
                       <YAxis hide />
                       <RechartsTooltip
                         content={({ active, payload }) => {
@@ -588,26 +637,26 @@ function DashboardChefe() {
                             return (
                               <div className="rounded-lg border bg-background px-3 py-2 shadow-sm text-xs">
                                 <p className="text-muted-foreground font-medium mb-1">{p.label}</p>
-                                <p className="text-green-600">Entradas: {formatCurrency(p.entradas ?? 0)}</p>
-                                <p className="text-red-600">Saídas: {formatCurrency(p.saidas ?? 0)}</p>
+                                <p className="dash-text-positive">Entradas: {formatCurrency(p.entradas ?? 0)}</p>
+                                <p className="dash-text-negative">Saídas: {formatCurrency(p.saidas ?? 0)}</p>
                               </div>
                             );
                           }
                           return null;
                         }}
-                        cursor={{ fill: 'rgba(139, 92, 246, 0.1)' }}
+                        cursor={{ fill: "var(--primary)", fillOpacity: 0.08 }}
                       />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="entradas" name="Entradas" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="saidas" name="Saídas" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                      <Legend wrapperStyle={{ fontSize: 11, color: "var(--muted-foreground)" }} />
+                      <Bar dataKey="entradas" name="Entradas" fill="var(--chart-3)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="saidas" name="Saídas" fill="var(--chart-5)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="mt-2 flex justify-center gap-4 text-sm">
-                  <span className="text-green-600 font-medium">
+                  <span className="dash-text-positive font-medium">
                     Entradas: {formatCurrency(entradasSaidasData.reduce((s, d) => s + (d.entradas ?? 0), 0))}
                   </span>
-                  <span className="text-red-600 font-medium">
+                  <span className="dash-text-negative font-medium">
                     Saídas: {formatCurrency(entradasSaidasData.reduce((s, d) => s + (d.saidas ?? 0), 0))}
                   </span>
                 </div>
@@ -656,7 +705,7 @@ function DashboardChefe() {
                 title="Total de Receitas"
                 value={formatCurrency(totalIncome)}
                 icon={TrendingUp}
-                iconColor="bg-green-500/10 text-green-500"
+                iconColor="bg-muted/70 text-[var(--dashboard-positive)]"
               />
             </div>
           </TooltipTrigger>
@@ -674,7 +723,7 @@ function DashboardChefe() {
                 title="Total de Despesas"
                 value={formatCurrency(totalExpense)}
                 icon={TrendingDown}
-                iconColor="bg-red-500/10 text-red-500"
+                iconColor="bg-muted/70 text-[var(--dashboard-negative)]"
               />
             </div>
           </TooltipTrigger>
@@ -692,7 +741,7 @@ function DashboardChefe() {
                 title="Saldo em Contas"
                 value={formatCurrency(totalSaldoContas)}
                 icon={DollarSign}
-                iconColor="bg-blue-500/10 text-blue-500"
+                iconColor="bg-muted/70 text-[var(--dashboard-balance)]"
               />
             </div>
           </TooltipTrigger>
@@ -706,23 +755,23 @@ function DashboardChefe() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {/* A Receber (Clientes) */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.3 }}>
-          <Card className="h-full flex flex-col min-h-[280px]">
+          <Card className="h-full flex flex-col min-h-[280px] dash-tone-positive">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-green-700">A Receber (Clientes)</CardTitle>
+              <CardTitle className="text-sm font-medium dash-title-positive">A Receber (Clientes)</CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col gap-2">
               {clientesComSaldo.length > 0 ? (
                 clientesComSaldo.slice(0, 8).map((c: any) => (
-                  <div key={c.id} className="flex items-center justify-between py-1.5 border-b border-green-100 last:border-0">
+                  <div key={c.id} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
                     <span className="text-sm truncate flex-1 min-w-0">{c.nome}</span>
-                    <span className="text-sm font-medium text-green-600 ml-2">{formatCurrency(safeNum(c.saldo_devedor))}</span>
+                    <span className="text-sm font-medium dash-text-positive ml-2">{formatCurrency(safeNum(c.saldo_devedor))}</span>
                   </div>
                 ))
               ) : (
                 <p className="text-xs text-muted-foreground py-2">Nenhum valor a receber</p>
               )}
-              <div className="mt-auto pt-2 border-t border-green-200">
-                <div className="flex items-center justify-between font-semibold text-green-700">
+              <div className="mt-auto pt-2 border-t border-border/70">
+                <div className="flex items-center justify-between font-semibold dash-title-positive">
                   <span>Total</span>
                   <span>{formatCurrency(aReceber)}</span>
                 </div>
@@ -733,23 +782,23 @@ function DashboardChefe() {
 
         {/* Dívidas de Fornecedores */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.35 }}>
-          <Card className="h-full flex flex-col min-h-[280px]">
+          <Card className="h-full flex flex-col min-h-[280px] dash-tone-negative">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-red-700">Dívidas de Fornecedores</CardTitle>
+              <CardTitle className="text-sm font-medium dash-title-negative">Dívidas de Fornecedores</CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col gap-2">
               {fornecedoresComSaldo.length > 0 ? (
                 fornecedoresComSaldo.slice(0, 8).map((f: any) => (
-                  <div key={f.id} className="flex items-center justify-between py-1.5 border-b border-red-100 last:border-0">
+                  <div key={f.id} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
                     <span className="text-sm truncate flex-1 min-w-0">{f.nome}</span>
-                    <span className="text-sm font-medium text-red-600 ml-2">{formatCurrency(safeNum(f.saldo_devedor))}</span>
+                    <span className="text-sm font-medium dash-text-negative ml-2">{formatCurrency(safeNum(f.saldo_devedor))}</span>
                   </div>
                 ))
               ) : (
                 <p className="text-xs text-muted-foreground py-2">Nenhuma dívida</p>
               )}
-              <div className="mt-auto pt-2 border-t border-red-200">
-                <div className="flex items-center justify-between font-semibold text-red-700">
+              <div className="mt-auto pt-2 border-t border-border/70">
+                <div className="flex items-center justify-between font-semibold dash-title-negative">
                   <span>Total</span>
                   <span>{formatCurrency((fornecedores || []).reduce((s: number, f: any) => s + safeNum(f.saldo_devedor), 0))}</span>
                 </div>
@@ -760,23 +809,23 @@ function DashboardChefe() {
 
         {/* Resumo do total de despesas */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.4 }}>
-          <Card className="h-full flex flex-col min-h-[280px]">
+          <Card className="h-full flex flex-col min-h-[280px] dash-tone-negative">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-red-700">Resumo de despesas</CardTitle>
+              <CardTitle className="text-sm font-medium dash-title-negative">Resumo de despesas</CardTitle>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col gap-2">
-              <div className="flex items-center justify-between py-2 border-b border-red-100">
-                <span className="text-sm font-medium text-red-800">Fornecedores (a pagar)</span>
-                <span className="text-sm font-semibold text-red-600">
+              <div className="flex items-center justify-between py-2 border-b border-border/50">
+                <span className="text-sm font-medium text-foreground/90">Fornecedores (a pagar)</span>
+                <span className="text-sm font-semibold dash-text-negative">
                   {formatCurrency((fornecedores || []).reduce((s: number, f: any) => s + safeNum(f.saldo_devedor), 0))}
                 </span>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-red-100">
-                <span className="text-sm font-medium text-red-800">Dívidas gerais</span>
-                <span className="text-sm font-semibold text-red-600">{formatCurrency(totalDividasGerais)}</span>
+              <div className="flex items-center justify-between py-2 border-b border-border/50">
+                <span className="text-sm font-medium text-foreground/90">Dívidas gerais</span>
+                <span className="text-sm font-semibold dash-text-negative">{formatCurrency(totalDividasGerais)}</span>
               </div>
-              <div className="mt-auto pt-2 border-t-2 border-red-200">
-                <div className="flex items-center justify-between font-semibold text-red-700">
+              <div className="mt-auto pt-2 border-t-2 border-border/70">
+                <div className="flex items-center justify-between font-semibold dash-title-negative">
                   <span>Total de despesas</span>
                   <span>{formatCurrency(aPagar)}</span>
                 </div>
@@ -794,25 +843,25 @@ function DashboardChefe() {
                   <CardTitle className="text-sm font-medium">Total</CardTitle>
                 </CardHeader>
                 <CardContent className="flex-1 flex flex-col gap-3">
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-green-50 border border-green-200">
-                    <span className="text-sm font-medium text-green-700">A Receber</span>
-                    <span className="font-semibold text-green-600">{formatCurrency(aReceber)}</span>
+                  <div className="flex items-center justify-between p-2 rounded-lg dash-chip-positive">
+                    <span className="text-sm font-medium dash-title-positive">A Receber</span>
+                    <span className="font-semibold dash-text-positive">{formatCurrency(aReceber)}</span>
                   </div>
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-red-50 border border-red-200">
-                    <span className="text-sm font-medium text-red-700">Dívidas (Fornecedores + Gerais)</span>
-                    <span className="font-semibold text-red-600">{formatCurrency(aPagar)}</span>
+                  <div className="flex items-center justify-between p-2 rounded-lg dash-chip-negative">
+                    <span className="text-sm font-medium dash-title-negative">Dívidas (Fornecedores + Gerais)</span>
+                    <span className="font-semibold dash-text-negative">{formatCurrency(aPagar)}</span>
                   </div>
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-200">
-                    <span className="text-sm font-medium text-blue-700">Caixa / Contas</span>
-                    <span className="font-semibold text-blue-600">{formatCurrency(totalSaldoContas)}</span>
+                  <div className="flex items-center justify-between p-2 rounded-lg dash-chip-balance">
+                    <span className="text-sm font-medium dash-title-balance">Caixa / Contas</span>
+                    <span className="font-semibold dash-text-balance">{formatCurrency(totalSaldoContas)}</span>
                   </div>
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-emerald-50 border border-emerald-200">
-                    <span className="text-sm font-medium text-emerald-700">Estoque (investimento)</span>
-                    <span className="font-semibold text-emerald-600">{formatCurrency(faltqueTotal)}</span>
+                  <div className="flex items-center justify-between p-2 rounded-lg dash-chip-flow">
+                    <span className="text-sm font-medium dash-title-flow">Estoque (investimento)</span>
+                    <span className="font-semibold dash-text-balance">{formatCurrency(faltqueTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between p-2 rounded-lg bg-primary/10 border border-primary/20 mt-auto">
                     <span className="font-semibold">Saldo</span>
-                    <span className={`text-lg font-bold ${(aReceber - aPagar + totalSaldoContas + faltqueTotal) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <span className={`text-lg font-bold ${(aReceber - aPagar + totalSaldoContas + faltqueTotal) >= 0 ? "dash-text-positive" : "dash-text-negative"}`}>
                       {formatCurrency(safeNum(aReceber - aPagar + totalSaldoContas + faltqueTotal))}
                     </span>
                   </div>
@@ -858,7 +907,7 @@ function DashboardChefe() {
                           {formatDateOnly(transaction.date)}
                         </TableCell>
                         <TableCell className="text-sm">{transaction.description}</TableCell>
-                        <TableCell className="text-sm text-right text-red-600">
+                        <TableCell className="text-sm text-right dash-text-negative">
                           {formatCurrency(transaction.amount)}
                         </TableCell>
                       </TableRow>
@@ -903,7 +952,7 @@ function DashboardChefe() {
                           {formatDateOnly(transaction.date)}
                         </TableCell>
                         <TableCell className="text-sm">{transaction.description}</TableCell>
-                        <TableCell className="text-sm text-right text-green-600">
+                        <TableCell className="text-sm text-right dash-text-positive">
                           {formatCurrency(transaction.amount)}
                         </TableCell>
                       </TableRow>
@@ -1040,7 +1089,7 @@ function DashboardChefe() {
                   contas.map((conta) => (
                     <div key={conta.id} className="flex items-center justify-between p-3 rounded-lg border">
                       <span className="text-sm font-medium">{conta.nome}</span>
-                      <span className={`font-semibold ${safeNum(conta.saldo_atual ?? conta.saldo) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <span className={`font-semibold ${safeNum(conta.saldo_atual ?? conta.saldo) >= 0 ? "dash-text-positive" : "dash-text-negative"}`}>
                         {formatCurrency(safeNum(conta.saldo_atual ?? conta.saldo))}
                       </span>
                     </div>
@@ -1052,7 +1101,7 @@ function DashboardChefe() {
                 )}
                 <div className="flex items-center justify-between p-3 rounded-lg bg-primary/5 border border-primary/20 mt-auto">
                   <span className="font-medium">Saldo Total</span>
-                  <span className={`text-xl font-bold ${totalSaldoContas >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  <span className={`text-xl font-bold ${totalSaldoContas >= 0 ? "dash-text-positive" : "dash-text-negative"}`}>
                     {formatCurrency(totalSaldoContas)}
                   </span>
                 </div>

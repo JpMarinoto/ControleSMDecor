@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTheme } from "next-themes";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -6,7 +7,7 @@ import { Label } from "../components/ui/label";
 import { useAuth } from "../contexts/AuthContext";
 import { api } from "../lib/api";
 import { toast } from "sonner";
-import { User } from "lucide-react";
+import { User, Sun, Moon } from "lucide-react";
 import { motion } from "motion/react";
 
 export function MeusDados() {
@@ -69,7 +70,10 @@ export function MeusDados() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
+        className="space-y-6"
       >
+        <SecaoTemaInterface />
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -139,5 +143,47 @@ export function MeusDados() {
         </Card>
       </motion.div>
     </div>
+  );
+}
+
+function SecaoTemaInterface() {
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const ativo = mounted ? (resolvedTheme ?? theme ?? "light") : "light";
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Configurações</CardTitle>
+        <p className="text-sm text-muted-foreground">Aparência da interface</p>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant={ativo === "light" ? "default" : "outline"}
+          className="gap-2"
+          disabled={!mounted}
+          onClick={() => setTheme("light")}
+        >
+          <Sun className="size-4" aria-hidden />
+          Tema claro
+        </Button>
+        <Button
+          type="button"
+          variant={ativo === "dark" ? "default" : "outline"}
+          className="gap-2"
+          disabled={!mounted}
+          onClick={() => setTheme("dark")}
+        >
+          <Moon className="size-4" aria-hidden />
+          Tema escuro
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

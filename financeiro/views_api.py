@@ -42,6 +42,7 @@ from .models import (
     FuncionarioHoraExtra,
     FuncionarioPagamento,
     RegistroImpressao,
+    PrecificacaoShopee,
 )
 from .serializers import (
     ClienteSerializer,
@@ -2713,3 +2714,82 @@ class FuncionarioPagamentoCreate(APIView):
             'valor': float(p.valor),
             'observacao': p.observacao or '',
         }, status=status.HTTP_201_CREATED)
+
+
+def _requer_chefe_precificacao_shopee(request):
+    if not getattr(request.user, "is_authenticated", False):
+        return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        from .views_auth import _is_chefe
+
+        if not _is_chefe(request):
+            return Response(
+                {"error": "Apenas o chefe pode acessar a precificação Shopee."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    except Exception:
+        return Response(
+            {"error": "Apenas o chefe pode acessar a precificação Shopee."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def _precificacao_shopee_payload(obj):
+    return {
+        "id": obj.id,
+        "nome": obj.nome,
+        "dataIso": obj.atualizado_em.isoformat(),
+        "mesReferencia": obj.mes_referencia or "",
+        "nfPercent": obj.nf_percent or "70",
+        "impostoPercent": obj.imposto_percent or "10",
+        "linhas": obj.linhas if isinstance(obj.linhas, list) else [],
+    }
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PrecificacaoShopeeListCreate(APIView):
+    """Lista e grava precificações Shopee no SQLite (substitui localStorage)."""
+
+    def get(self, request):
+        err = _requer_chefe_precificacao_shopee(request)
+        if err:
+            return err
+        qs = PrecificacaoShopee.objects.order_by("-atualizado_em")
+        return Response([_precificacao_shopee_payload(p) for p in qs])
+
+    def post(self, request):
+        err = _requer_chefe_precificacao_shopee(request)
+        if err:
+            return err
+        body = request.data or {}
+        nome = (body.get("nome") or "").strip()
+        if not nome:
+            return Response({"nome": ["Informe o nome da precificação."]}, status=status.HTTP_400_BAD_REQUEST)
+        mes_ref = (body.get("mesReferencia") or body.get("mes_referencia") or "")[:7]
+        nf_p = str(body.get("nfPercent") or body.get("nf_percent") or "70")[:20]
+        imp_p = str(body.get("impostoPercent") or body.get("imposto_percent") or "10")[:20]
+        linhas = body.get("linhas")
+        if not isinstance(linhas, list):
+            linhas = []
+        if not mes_ref:
+            mes_ref = timezone.now().strftime("%Y-%m")
+        obj, created = PrecificacaoShopee.objects.update_or_create(
+            nome=nome,
+            defaults={
+                "mes_referencia": mes_ref,
+                "nf_percent": nf_p,
+                "imposto_percent": imp_p,
+                "linhas": linhas,
+            },
+        )
+        _api_log(
+            request,
+            "Salvar precificação Shopee",
+            "PrecificacaoShopee",
+            f"{obj.nome} (ID {obj.id})",
+        )
+        return Response(
+            _precificacao_shopee_payload(obj),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )

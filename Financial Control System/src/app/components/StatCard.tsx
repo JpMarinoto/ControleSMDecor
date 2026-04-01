@@ -27,7 +27,7 @@ export function StatCard({ title, value, icon: Icon, iconColor, trend }: StatCar
               <p className="text-sm text-muted-foreground">{title}</p>
               <p className="text-2xl font-semibold">{value}</p>
               {trend && (
-                <p className={`text-xs ${trend.isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                <p className={`text-xs ${trend.isPositive ? "dash-text-positive" : "dash-text-negative"}`}>
                   {trend.isPositive ? '↑' : '↓'} {trend.value}
                 </p>
               )}

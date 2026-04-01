@@ -30,6 +30,11 @@
   --chart-3: #10b981;
   --chart-4: #f59e0b;
   --chart-5: #ef4444;
+  /* Dashboard: acentos semânticos (mesma família cromática que os gráficos) */
+  --dashboard-positive: oklch(0.42 0.12 158);
+  --dashboard-negative: oklch(0.45 0.16 25);
+  --dashboard-balance: oklch(0.4 0.11 252);
+  --dashboard-flow: oklch(0.43 0.1 268);
   --radius: 0.625rem;
   --sidebar: #f8fafc;
   --sidebar-foreground: #1e3a5f;
@@ -42,40 +47,52 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  color-scheme: dark;
+  /* Fundo e superfícies: cartões um pouco mais claros que o canvas */
+  --background: oklch(0.16 0.02 260);
+  --foreground: oklch(0.96 0.01 260);
+  --card: oklch(0.20 0.022 260);
+  --card-foreground: oklch(0.96 0.01 260);
+  --popover: oklch(0.22 0.022 260);
+  --popover-foreground: oklch(0.96 0.01 260);
+  /* Primária alinhada à marca (azul), não branco puro — evita botões/links “estourados” */
+  --primary: oklch(0.58 0.11 250);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.26 0.03 260);
+  --secondary-foreground: oklch(0.94 0.01 260);
+  --muted: oklch(0.26 0.025 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+  --accent: oklch(0.28 0.04 260);
+  --accent-foreground: oklch(0.96 0.01 260);
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 0.12);
+  --input: oklch(1 0 0 / 0.14);
+  /* Estava herdando do :root claro — campos ficavam “manchados” claros no escuro */
+  --input-background: oklch(0.24 0.03 260);
+  --switch-background: oklch(0.38 0.03 260);
+  --ring: oklch(0.58 0.11 250);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --chart-1: oklch(0.55 0.12 264);
+  /* Linhas / série neutra: azul da marca (não ciano isolado) */
+  --chart-2: oklch(0.68 0.1 252);
+  /* Esmeralda e azul alinhados à marca (evita laranja/amarelo no escuro) */
+  --chart-3: oklch(0.7 0.11 158);
+  --chart-4: oklch(0.62 0.12 290);
+  --chart-5: oklch(0.65 0.13 24);
+  --dashboard-positive: oklch(0.78 0.085 158);
+  --dashboard-negative: oklch(0.76 0.095 24);
+  --dashboard-balance: oklch(0.78 0.08 252);
+  --dashboard-flow: oklch(0.74 0.07 268);
+  --sidebar: oklch(0.18 0.022 260);
+  --sidebar-foreground: oklch(0.96 0.01 260);
+  --sidebar-primary: oklch(0.58 0.11 250);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.26 0.03 260);
+  --sidebar-accent-foreground: oklch(0.96 0.01 260);
+  --sidebar-border: oklch(1 0 0 / 0.1);
+  --sidebar-ring: oklch(0.58 0.11 250);
 }
 
 @theme inline {
@@ -177,5 +194,122 @@
     font-size: var(--text-base);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+  }
+}
+
+/**
+ * Logo da marca: traço escuro em claro; no tema escuro passa a branco (ideal com PNG transparente).
+ */
+@layer components {
+  .dark .app-logo {
+    filter: brightness(0) invert(1);
+  }
+
+  .dash-title-positive {
+    color: var(--dashboard-positive);
+  }
+
+  .dash-title-negative {
+    color: var(--dashboard-negative);
+  }
+
+  .dash-title-balance {
+    color: var(--dashboard-balance);
+  }
+
+  .dash-title-flow {
+    color: var(--dashboard-flow);
+  }
+
+  .dash-text-positive {
+    color: var(--dashboard-positive);
+  }
+
+  .dash-text-negative {
+    color: var(--dashboard-negative);
+  }
+
+  .dash-text-balance {
+    color: var(--dashboard-balance);
+  }
+
+  .dash-chip-positive {
+    background: color-mix(in oklch, var(--dashboard-positive) 10%, var(--card));
+    border: 1px solid color-mix(in oklch, var(--dashboard-positive) 26%, var(--border));
+  }
+
+  .dash-chip-negative {
+    background: color-mix(in oklch, var(--dashboard-negative) 10%, var(--card));
+    border: 1px solid color-mix(in oklch, var(--dashboard-negative) 26%, var(--border));
+  }
+
+  .dash-chip-balance {
+    background: color-mix(in oklch, var(--dashboard-balance) 10%, var(--card));
+    border: 1px solid color-mix(in oklch, var(--dashboard-balance) 26%, var(--border));
+  }
+
+  .dash-chip-flow {
+    background: color-mix(in oklch, var(--dashboard-flow) 10%, var(--card));
+    border: 1px solid color-mix(in oklch, var(--dashboard-flow) 24%, var(--border));
+  }
+
+  .dash-inset-row {
+    background: color-mix(in oklch, var(--muted) 55%, var(--card));
+    border: 1px solid var(--border);
+  }
+}
+
+/**
+ * Tons dos cartões do dashboard: em utilities para vencer `bg-card` do shadcn Card.
+ */
+@layer utilities {
+  .dash-tone-positive {
+    background-color: color-mix(in oklch, var(--dashboard-positive) 13%, var(--card)) !important;
+    border-color: color-mix(in oklch, var(--dashboard-positive) 36%, var(--border)) !important;
+  }
+
+  .dash-tone-negative {
+    background-color: color-mix(in oklch, var(--dashboard-negative) 13%, var(--card)) !important;
+    border-color: color-mix(in oklch, var(--dashboard-negative) 36%, var(--border)) !important;
+  }
+
+  .dash-tone-balance {
+    background-color: color-mix(in oklch, var(--dashboard-balance) 13%, var(--card)) !important;
+    border-color: color-mix(in oklch, var(--dashboard-balance) 36%, var(--border)) !important;
+  }
+
+  .dash-tone-flow {
+    background-color: color-mix(in oklch, var(--dashboard-flow) 12%, var(--card)) !important;
+    border-color: color-mix(in oklch, var(--dashboard-flow) 34%, var(--border)) !important;
+  }
+}
+
+/**
+ * Precificação (planilha): colunas por função, misturadas com --card (claro/escuro coerentes).
+ */
+@layer components {
+  .preco-titulo-bloco {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  .preco-col-insumos {
+    background-color: color-mix(in oklch, var(--chart-2) 26%, var(--card));
+  }
+
+  .preco-col-venda-bruto {
+    background-color: color-mix(in oklch, oklch(0.74 0.1 55) 24%, var(--card));
+  }
+
+  .preco-col-final-uni {
+    background-color: color-mix(in oklch, oklch(0.78 0.09 88) 22%, var(--card));
+  }
+
+  .preco-col-lucro-rs {
+    background-color: color-mix(in oklch, var(--dashboard-positive) 26%, var(--card));
+  }
+
+  .preco-col-lucro-pct {
+    background-color: color-mix(in oklch, var(--dashboard-positive) 34%, var(--card));
   }
 }

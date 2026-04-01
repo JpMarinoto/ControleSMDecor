@@ -198,6 +198,27 @@ class PrecoClienteProduto(models.Model):
     def __str__(self):
         return f"{self.cliente.nome} — {self.produto.nome}: R$ {self.preco}"
 
+
+class PrecificacaoShopee(models.Model):
+    """Planilha de precificação Shopee (chefe); persiste no banco com o restante do sistema."""
+
+    nome = models.CharField(max_length=200, unique=True)
+    mes_referencia = models.CharField(max_length=7, blank=True, default="")
+    nf_percent = models.CharField(max_length=20, default="70")
+    imposto_percent = models.CharField(max_length=20, default="10")
+    linhas = models.JSONField(default=list)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-atualizado_em"]
+        verbose_name = "Precificação Shopee"
+        verbose_name_plural = "Precificações Shopee"
+
+    def __str__(self):
+        return self.nome
+
+
 # ==========================================
 # 4. TRANSAÇÕES DE COMPRA (FORNECEDORES)
 # ==========================================

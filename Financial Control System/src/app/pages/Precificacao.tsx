@@ -7,12 +7,15 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { cn } from "../components/ui/utils";
 import {
   SHOPEE_FAIXAS_CNPJ,
   calcularComissaoShopee,
 } from "../data/shopeeComissao";
 import { Tag, Plus, Trash2, ExternalLink, Copy, Pencil, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import { api, type PrecificacaoShopeeApiRow } from "../lib/api";
 
 /** Campos editáveis por linha (igual à planilha Shopee). */
 interface LinhaPrecificacao {
@@ -40,6 +43,25 @@ interface PrecificacaoSalva {
   nfPercent: string;
   impostoPercent: string;
   linhas: LinhaPrecificacao[];
+}
+
+function mapFromApi(row: PrecificacaoShopeeApiRow): PrecificacaoSalva {
+  const raw = row.linhas;
+  const linhasNorm: LinhaPrecificacao[] = Array.isArray(raw)
+    ? (raw as LinhaPrecificacao[]).map((l, i) => ({
+        ...l,
+        id: String(l?.id ?? `${row.id}-${i}`),
+      }))
+    : [];
+  return {
+    id: String(row.id),
+    nome: row.nome,
+    dataIso: row.dataIso,
+    mesReferencia: row.mesReferencia ?? "",
+    nfPercent: row.nfPercent ?? "70",
+    impostoPercent: row.impostoPercent ?? "10",
+    linhas: linhasNorm,
+  };
 }
 
 function parseNum(s: string): number {
@@ -77,6 +99,233 @@ const emptyLinha = (): LinhaPrecificacao => ({
   corLinha: "",
 });
 
+/** Planilha: colunas por tema (preco-col-* em theme.css) + células neutras */
+const XL = {
+  tituloBarra: "preco-titulo-bloco",
+  headBase:
+    "border border-border px-0.5 py-0 text-base font-bold leading-none tracking-tight text-foreground align-middle",
+  cellBorder: "border border-border",
+  branco: "bg-card",
+  ttInsumos: "preco-col-insumos",
+  vlrBruto: "preco-col-venda-bruto",
+  vlrFinalUni: "preco-col-final-uni",
+  lucroRs: "preco-col-lucro-rs",
+  lucroPct: "preco-col-lucro-pct",
+  /**
+   * Altura baixa: o Input base usa h-9 — forçar altura fixa pequena e anel de foco fino.
+   */
+  inputCell:
+    "!h-[28px] !min-h-[28px] !py-0 !px-1.5 border-border bg-input-background text-base leading-none tracking-tight tabular-nums shadow-none focus-visible:ring-1 focus-visible:ring-ring/40",
+  cellText: "text-base leading-none tracking-tight tabular-nums",
+};
+
+/** Planilha Shopee: células compactas + tipografia herdada na tabela. */
+const TABELA_PRECO_CLASS =
+  "w-full min-w-[1280px] border-collapse text-base leading-none [&_th]:!h-auto [&_th]:min-h-0 [&_th]:!p-px [&_td]:!p-px [&_td]:align-middle";
+
+const LINHA_PRECO_CLASS =
+  "border-border hover:bg-transparent [&_td]:transition-[filter] [&_td]:duration-150 hover:[&_td]:brightness-[0.94] dark:hover:[&_td]:brightness-[1.06]";
+
+/** `XL.headBase` já define `leading-none`. */
+const thPreco = `${XL.headBase} whitespace-normal`;
+
+const inpPreco = (...extra: string[]) => cn(XL.inputCell, "w-full min-w-0", ...extra);
+
+/** Marcador visual da linha + overlay de fundo nas células quando há cor. `value` persiste no JSON/banco. */
+const MARCACAO_CORES: { value: string; label: string; swatch: string; border: string; tintOverlay: string }[] = [
+  { value: "", label: "Nenhuma", swatch: "bg-card ring-1 ring-inset ring-border", border: "border-l-[3px] border-l-transparent", tintOverlay: "" },
+  { value: "amarelo", label: "Amarelo", swatch: "bg-yellow-400", border: "border-l-[3px] border-l-yellow-400", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(250,204,21,0.26)]" },
+  { value: "lima", label: "Lima", swatch: "bg-lime-500", border: "border-l-[3px] border-l-lime-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(132,204,22,0.26)]" },
+  { value: "verde", label: "Verde", swatch: "bg-green-600", border: "border-l-[3px] border-l-green-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(22,163,74,0.24)]" },
+  { value: "esmeralda", label: "Esmeralda", swatch: "bg-emerald-600", border: "border-l-[3px] border-l-emerald-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(5,150,105,0.24)]" },
+  { value: "teal", label: "Teal", swatch: "bg-teal-600", border: "border-l-[3px] border-l-teal-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(13,148,136,0.24)]" },
+  { value: "ciano", label: "Ciano", swatch: "bg-cyan-500", border: "border-l-[3px] border-l-cyan-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(6,182,212,0.24)]" },
+  { value: "azul", label: "Azul", swatch: "bg-blue-600", border: "border-l-[3px] border-l-blue-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(37,99,235,0.24)]" },
+  { value: "indigo", label: "Índigo", swatch: "bg-indigo-600", border: "border-l-[3px] border-l-indigo-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(79,70,229,0.24)]" },
+  { value: "violeta", label: "Violeta", swatch: "bg-violet-600", border: "border-l-[3px] border-l-violet-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(124,58,237,0.24)]" },
+  { value: "roxo", label: "Roxo", swatch: "bg-purple-600", border: "border-l-[3px] border-l-purple-600", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(147,51,234,0.24)]" },
+  { value: "fuchsia", label: "Fúcsia", swatch: "bg-fuchsia-500", border: "border-l-[3px] border-l-fuchsia-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(217,70,239,0.24)]" },
+  { value: "rosa", label: "Rosa", swatch: "bg-pink-500", border: "border-l-[3px] border-l-pink-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(236,72,153,0.24)]" },
+  { value: "vermelho", label: "Vermelho", swatch: "bg-red-500", border: "border-l-[3px] border-l-red-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(239,68,68,0.24)]" },
+  { value: "laranja", label: "Laranja", swatch: "bg-orange-500", border: "border-l-[3px] border-l-orange-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(249,115,22,0.24)]" },
+  { value: "amb", label: "Âmbar", swatch: "bg-amber-500", border: "border-l-[3px] border-l-amber-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(245,158,11,0.26)]" },
+  { value: "marrom", label: "Marrom", swatch: "bg-amber-900", border: "border-l-[3px] border-l-amber-900", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(120,53,15,0.22)]" },
+  { value: "cinza", label: "Cinza", swatch: "bg-slate-500", border: "border-l-[3px] border-l-slate-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(100,116,139,0.24)]" },
+  { value: "celeste", label: "Celeste", swatch: "bg-sky-500", border: "border-l-[3px] border-l-sky-500", tintOverlay: "shadow-[inset_0_0_0_9999px_rgba(14,165,233,0.24)]" },
+];
+
+function normalizarCorLinha(cor: string | undefined): string {
+  const s = (cor ?? "").trim();
+  if (s === "nenhuma") return "";
+  return s;
+}
+
+/** Borda esquerda + tom só nas células brancas (um único `.find` por linha). */
+function estiloMarcaLinha(cor: string | undefined): { bordaLinha: string; tintBranco: string } {
+  const hit = MARCACAO_CORES.find((c) => c.value === normalizarCorLinha(cor));
+  return {
+    bordaLinha: hit?.border ?? "border-l-[3px] border-l-transparent",
+    tintBranco: hit?.tintOverlay ?? "",
+  };
+}
+
+/** Cabeçalho da tabela Shopee (topo; repetido só após o usuário mudar a cor da linha, ver estado na página). */
+function CabecalhoTabelaPrecificacaoShopee({ repeticao = false }: { repeticao?: boolean }) {
+  return (
+    <TableRow
+      className={cn(
+        "border-0 hover:bg-transparent [&_th]:transition-[filter] [&_th]:duration-150 hover:[&_th]:brightness-[0.96]",
+        repeticao &&
+          "bg-neutral-200/90 shadow-[inset_0_1px_0_0_rgba(0,0,0,0.08)] dark:bg-muted/80 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
+      )}
+    >
+      <TableHead className={`w-[84px] min-w-[84px] max-w-[84px] bg-muted text-center ${thPreco}`}>Ações</TableHead>
+      <TableHead className={`w-[176px] min-w-[148px] max-w-[176px] bg-muted text-left ${thPreco}`}>
+        Descrição
+      </TableHead>
+      <TableHead className={`w-[3.5rem] min-w-[3.5rem] bg-muted text-center ${thPreco}`}>Unidade</TableHead>
+      <TableHead className={`min-w-[6rem] bg-muted text-center ${thPreco}`}>
+        Valor
+        <br />
+        unitário
+      </TableHead>
+      <TableHead className={`min-w-[7.5rem] ${XL.ttInsumos} text-center ${thPreco}`}>
+        Total
+        <br />
+        insumos
+      </TableHead>
+      <TableHead className={`min-w-[6rem] bg-muted text-center ${thPreco}`}>
+        Imposto
+        <br />
+        (R$)
+      </TableHead>
+      <TableHead className={`min-w-[6.5rem] bg-muted text-center ${thPreco}`}>
+        Gasto
+        <br />
+        total
+      </TableHead>
+      <TableHead className={`min-w-[7rem] ${XL.vlrBruto} text-center ${thPreco}`}>
+        Valor venda
+        <br />
+        bruto
+      </TableHead>
+      <TableHead className={`min-w-[7rem] bg-muted text-center ${thPreco}`}>
+        Valor venda
+        <br />
+        líquida
+      </TableHead>
+      <TableHead className={`min-w-[6.5rem] ${XL.vlrFinalUni} text-center ${thPreco}`}>
+        Valor final
+        <br />
+        unitário
+      </TableHead>
+      <TableHead className={`min-w-[6rem] ${XL.lucroRs} text-center ${thPreco}`}>
+        Lucro
+        <br />
+        (R$)
+      </TableHead>
+      <TableHead className={`min-w-[5.5rem] ${XL.lucroPct} text-center ${thPreco}`}>
+        Lucro
+        <br />
+        percentual
+      </TableHead>
+      <TableHead className={`min-w-[5.5rem] bg-muted text-center font-extrabold ${thPreco}`}>
+        Roas
+        <br />
+        mínimo
+      </TableHead>
+    </TableRow>
+  );
+}
+
+function CelulaAcoesPrecificacao({
+  linha,
+  tintClass,
+  onCopiar,
+  onRemover,
+  onDefinirCor,
+}: {
+  linha: LinhaPrecificacao;
+  tintClass: string;
+  onCopiar: () => void;
+  onRemover: () => void;
+  onDefinirCor: (cor: string) => void;
+}) {
+  const [corAberto, setCorAberto] = useState(false);
+  const atual =
+    MARCACAO_CORES.find((c) => c.value === normalizarCorLinha(linha.corLinha)) ??
+    MARCACAO_CORES[0];
+
+  return (
+    <TableCell
+      className={cn(
+        `w-[84px] min-w-[84px] max-w-[84px] ${XL.branco} ${XL.cellBorder} align-middle p-px`,
+        tintClass,
+      )}
+    >
+      <div className="mx-auto flex w-full flex-col items-stretch gap-px px-px py-0">
+        <div className="flex shrink-0 flex-row items-center justify-center gap-px">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+            onClick={onCopiar}
+            title="Copiar linha"
+          >
+            <Copy className="size-2.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 shrink-0 p-0 text-destructive hover:bg-destructive/10"
+            onClick={onRemover}
+            title="Remover linha"
+          >
+            <Trash2 className="size-2.5" />
+          </Button>
+        </div>
+        <Popover open={corAberto} onOpenChange={setCorAberto}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              title={`Cor da linha${atual.label ? `: ${atual.label}` : ""}`}
+              className="flex h-[28px] w-full min-w-0 shrink-0 items-center justify-center rounded border border-border bg-muted/50 px-0.5 hover:bg-muted"
+            >
+              <span className={cn("size-3 shrink-0 rounded-sm", atual.swatch)} aria-hidden />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[220px] p-2" align="center" side="right" sideOffset={6}>
+            <p className="mb-1.5 text-center text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Marca da linha
+            </p>
+            <div className="grid grid-cols-6 gap-1">
+              {MARCACAO_CORES.map((c) => (
+                <button
+                  key={c.value || "__sem"}
+                  type="button"
+                  aria-label={c.label}
+                  title={c.label}
+                  onClick={() => {
+                    onDefinirCor(c.value);
+                    setCorAberto(false);
+                  }}
+                  className={cn(
+                    "size-7 shrink-0 rounded border border-border shadow-sm outline-none transition-transform hover:z-10 hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring",
+                    c.swatch,
+                normalizarCorLinha(linha.corLinha) === c.value && "ring-2 ring-primary ring-offset-1",
+                  )}
+                />
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+    </TableCell>
+  );
+}
+
 export function Precificacao() {
   const [linhas, setLinhas] = useState<LinhaPrecificacao[]>([{ ...emptyLinha(), id: "1" }]);
   const [mesReferencia, setMesReferencia] = useState<string>(() => {
@@ -91,6 +340,12 @@ export function Precificacao() {
   const [nomePrecificacao, setNomePrecificacao] = useState<string>("");
   const [precificacoesSalvas, setPrecificacoesSalvas] = useState<PrecificacaoSalva[]>([]);
   const [idSelecionado, setIdSelecionado] = useState<string>("");
+  const [precificacoesCarregando, setPrecificacoesCarregando] = useState(true);
+  const [salvandoPrecificacao, setSalvandoPrecificacao] = useState(false);
+  /** Linhas em que o usuário acabou de escolher cor nesta sessão (repete cabeçalho acima, se não for a 1ª linha). */
+  const [linhaIdsSubcabecalhoAposCor, setLinhaIdsSubcabecalhoAposCor] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const addLinha = () => setLinhas((prev) => [...prev, emptyLinha()]);
 
@@ -100,6 +355,11 @@ export function Precificacao() {
       return;
     }
     setLinhas((prev) => prev.filter((l) => l.id !== id));
+    setLinhaIdsSubcabecalhoAposCor((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   const updateLinha = (id: string, field: keyof LinhaPrecificacao, value: string) => {
@@ -157,54 +417,73 @@ export function Precificacao() {
     return null;
   };
 
-  // Carrega precificações salvas do localStorage na montagem
   React.useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem("precificacoes_shopee");
-      if (raw) {
-        const parsed = JSON.parse(raw) as PrecificacaoSalva[];
-        setPrecificacoesSalvas(parsed);
+    let cancelled = false;
+    (async () => {
+      setPrecificacoesCarregando(true);
+      try {
+        let list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+        if (cancelled) return;
+        if (list.length === 0) {
+          const ls = window.localStorage.getItem("precificacoes_shopee");
+          if (ls) {
+            try {
+              const parsed = JSON.parse(ls) as PrecificacaoSalva[];
+              for (const p of parsed) {
+                if (!p?.nome?.trim()) continue;
+                await api.savePrecificacaoShopee({
+                  nome: p.nome.trim(),
+                  mesReferencia: p.mesReferencia || "",
+                  nfPercent: p.nfPercent || "70",
+                  impostoPercent: p.impostoPercent || "10",
+                  linhas: p.linhas || [],
+                });
+              }
+              window.localStorage.removeItem("precificacoes_shopee");
+              list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+            } catch {
+              /* mantém lista vazia se import falhar */
+            }
+          }
+        }
+        if (!cancelled) setPrecificacoesSalvas(list);
+      } catch (e) {
+        if (!cancelled) {
+          toast.error(e instanceof Error ? e.message : "Erro ao carregar precificações.");
+          setPrecificacoesSalvas([]);
+        }
+      } finally {
+        if (!cancelled) setPrecificacoesCarregando(false);
       }
-    } catch {
-      // ignora erro de parse
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const salvarPrecificacao = () => {
+  const salvarPrecificacao = async () => {
     if (!nomePrecificacao.trim()) {
       toast.error("Informe um nome para a precificação antes de salvar.");
       return;
     }
-    const agoraIso = new Date().toISOString();
-    setPrecificacoesSalvas((prev) => {
-      const existenteIdx = prev.findIndex((p) => p.nome === nomePrecificacao.trim());
-      const nova: PrecificacaoSalva = {
-        id: existenteIdx >= 0 ? prev[existenteIdx].id : String(Date.now()),
+    setSalvandoPrecificacao(true);
+    try {
+      await api.savePrecificacaoShopee({
         nome: nomePrecificacao.trim(),
-        dataIso: agoraIso,
         mesReferencia,
         nfPercent: nfPercentGlobal,
         impostoPercent: impostoPercentGlobal,
         linhas,
-      };
-      let lista: PrecificacaoSalva[];
-      if (existenteIdx >= 0) {
-        lista = [...prev];
-        lista[existenteIdx] = nova;
-      } else {
-        lista = [...prev, nova];
-      }
-      try {
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem("precificacoes_shopee", JSON.stringify(lista));
-        }
-      } catch {
-        toast.error("Não foi possível salvar no navegador (localStorage).");
-      }
-      toast.success("Precificação salva.");
-      return lista;
-    });
+      });
+      const list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+      setPrecificacoesSalvas(list);
+      toast.success("Precificação salva no banco de dados.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao salvar.");
+    } finally {
+      setSalvandoPrecificacao(false);
+    }
   };
 
   const carregarPrecificacao = (id: string) => {
@@ -216,6 +495,7 @@ export function Precificacao() {
     setNfPercentGlobal(p.nfPercent);
     setImpostoPercentGlobal(p.impostoPercent);
     setLinhas(p.linhas.length ? p.linhas : [{ ...emptyLinha(), id: "1" }]);
+    setLinhaIdsSubcabecalhoAposCor(new Set());
   };
 
   return (
@@ -223,8 +503,12 @@ export function Precificacao() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Precificação</h1>
-          <p className="text-[11px] sm:text-xs text-muted-foreground max-w-xl">
-            Planilha compacta por produto: custos, insumos, imposto, comissão e lucro.
+          <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
+            <span className="font-medium text-foreground">Precificação precisa para cálculo de lucros reais:</span>{" "}
+            some custo do produto, insumos, impostos sobre a nota, comissão do marketplace e mão de obra para obter o
+            gasto total; a partir do preço de venda você vê{" "}
+            <span className="font-medium text-foreground">lucro em reais, percentual sobre a venda e ROAS mínimo</span>{" "}
+            antes de anunciar — sem confundir margem com lucro líquido.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -258,7 +542,7 @@ export function Precificacao() {
 
       {/* Marketplaces tabs */}
       <Tabs defaultValue="shopee" className="w-full">
-        <TabsList className="w-full max-w-md grid grid-cols-4 mb-2">
+        <TabsList className="mb-2 grid w-full max-w-2xl grid-cols-4 sm:max-w-none bg-muted/50 p-1">
           <TabsTrigger value="shopee" className="text-xs sm:text-sm">
             Shopee
           </TabsTrigger>
@@ -275,19 +559,19 @@ export function Precificacao() {
 
         <TabsContent value="shopee" className="space-y-3">
           {/* Tabela de referência Shopee (compacta) */}
-          <Card className="border-dashed rounded-md border-orange-300 bg-orange-50/50">
+          <Card className="dash-tone-flow rounded-sm border-dashed">
             <CardHeader
               className="py-2 px-3 flex items-center justify-between gap-2 cursor-pointer"
               onClick={() => setMostrarTabelaComissao((v) => !v)}
             >
               <div className="flex items-center gap-2">
                 {mostrarTabelaComissao ? (
-                  <ChevronDown className="size-4 text-orange-500" />
+                  <ChevronDown className="size-4 text-[var(--dashboard-flow)]" />
                 ) : (
-                  <ChevronRight className="size-4 text-orange-500" />
+                  <ChevronRight className="size-4 text-[var(--dashboard-flow)]" />
                 )}
-                <CardTitle className="flex items-center gap-2 text-sm text-orange-700">
-                  <Tag className="size-4 text-orange-500" />
+                <CardTitle className="flex items-center gap-2 text-sm dash-title-flow">
+                  <Tag className="size-4 text-[var(--dashboard-flow)]" />
                   Comissão Shopee 2026 (CNPJ)
                 </CardTitle>
               </div>
@@ -295,7 +579,7 @@ export function Precificacao() {
                 href="https://seller.shopee.com.br/edu/article/26839/Comissao-para-vendedores-CNPJ-e-CPF-em-2026"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[11px] text-orange-700 hover:underline inline-flex items-center gap-1"
+                className="text-[11px] dash-title-flow hover:underline inline-flex items-center gap-1 opacity-90 hover:opacity-100"
                 onClick={(e) => e.stopPropagation()}
               >
                 Ver política <ExternalLink className="size-3" />
@@ -329,21 +613,21 @@ export function Precificacao() {
             )}
           </Card>
 
-          {/* Tabela de precificação — igual à planilha Excel Shopee */}
-          <Card className="rounded-md border-orange-200">
-            <CardHeader className="py-2 px-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-sm text-orange-700">Precificação Shopee</CardTitle>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-[11px] border-orange-300 text-orange-700 hover:bg-orange-50"
-                  onClick={() => setMostrarConfigImposto((v) => !v)}
-                >
-                  Configurar imposto
-                </Button>
-              </div>
+          {/* Tabela de precificação — layout visual tipo Excel */}
+          <Card className="overflow-hidden rounded-sm border border-border p-0 shadow-sm">
+            <div className={`${XL.tituloBarra} px-4 py-3 text-center sm:text-left`}>
+              <h2 className="text-lg font-bold tracking-tight text-primary-foreground">Precificação Shopee</h2>
+            </div>
+            <div className="flex flex-col gap-2 border-b border-border bg-muted/35 px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 w-fit text-[11px] border-border bg-background/80"
+                onClick={() => setMostrarConfigImposto((v) => !v)}
+              >
+                Configurar imposto
+              </Button>
               <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end">
                 <Input
                   className="h-8 w-40 text-xs"
@@ -354,10 +638,11 @@ export function Precificacao() {
                 <Button
                   type="button"
                   size="sm"
-                  className="h-8 px-3 text-[11px] bg-orange-500 hover:bg-orange-600 text-white"
-                  onClick={salvarPrecificacao}
+                  className="h-8 px-3 text-[11px]"
+                  onClick={() => void salvarPrecificacao()}
+                  disabled={salvandoPrecificacao}
                 >
-                  Salvar precificação
+                  {salvandoPrecificacao ? "Salvando..." : "Salvar precificação"}
                 </Button>
                 <Select
                   value={idSelecionado}
@@ -365,14 +650,15 @@ export function Precificacao() {
                     setIdSelecionado(v);
                     carregarPrecificacao(v);
                   }}
+                  disabled={precificacoesCarregando}
                 >
                   <SelectTrigger className="h-8 w-44 text-xs">
-                    <SelectValue placeholder="Consultar precificação" />
+                    <SelectValue placeholder={precificacoesCarregando ? "Carregando..." : "Consultar precificação"} />
                   </SelectTrigger>
                   <SelectContent>
                     {precificacoesSalvas.length === 0 && (
                       <SelectItem value="__none" disabled>
-                        Nenhuma salva
+                        {precificacoesCarregando ? "Carregando..." : "Nenhuma salva"}
                       </SelectItem>
                     )}
                     {precificacoesSalvas.map((p) => {
@@ -395,10 +681,10 @@ export function Precificacao() {
                   </SelectContent>
                 </Select>
               </div>
-            </CardHeader>
-            <CardContent className="pt-1 px-2 pb-3">
+            </div>
+            <CardContent className="space-y-2 px-2 pb-3 pt-2 sm:px-3">
               {mostrarConfigImposto && (
-                <div className="mb-2 grid gap-2 rounded-md border bg-muted/40 px-2 py-2 text-[11px] sm:text-xs sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="mb-2 grid gap-2 rounded-sm border bg-muted/40 px-2 py-2 text-[11px] sm:text-xs sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor="nfPercent" className="text-[11px]">
                       % do valor na NF
@@ -428,27 +714,13 @@ export function Precificacao() {
                   </p>
                 </div>
               )}
-              <div className="overflow-x-auto">
-                <Table>
+              <div className="overflow-x-auto rounded border border-border bg-card shadow-sm transition-[box-shadow,border-color] duration-200 hover:border-muted-foreground/30 hover:shadow-md">
+                <Table className={TABELA_PRECO_CLASS}>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-14"></TableHead>
-                      <TableHead className="min-w-[180px] text-xs">Descrição</TableHead>
-                      <TableHead className="w-20 text-right text-xs">Unidade</TableHead>
-                      <TableHead className="w-28 text-right text-xs">Vlr uni</TableHead>
-                      <TableHead className="w-28 text-right text-xs">Total insumos</TableHead>
-                      <TableHead className="w-24 text-right text-xs">Imp. R$</TableHead>
-                      <TableHead className="w-28 text-right text-xs">Gasto total</TableHead>
-                      <TableHead className="w-28 text-right text-xs">Vlr venda bruto</TableHead>
-                      <TableHead className="w-26 text-right text-xs">Vlr venda líquido</TableHead>
-                      <TableHead className="w-26 text-right text-xs">Vlr final uni</TableHead>
-                      <TableHead className="w-26 text-right text-xs">Lucro R$</TableHead>
-                      <TableHead className="w-24 text-right text-xs">Lucro %</TableHead>
-                      <TableHead className="w-24 text-right text-xs">Roas mínimo</TableHead>
-                    </TableRow>
+                    <CabecalhoTabelaPrecificacaoShopee />
                   </TableHeader>
                   <TableBody>
-                    {linhas.map((linha) => {
+                    {linhas.map((linha, indexLinha) => {
                   const unidade = Math.max(1, Math.floor(parseNum(linha.unidade)));
                   const vlrUnit = parseNum(linha.vlrUnitario);
                   const emb = parseNum(linha.embalagem);
@@ -472,89 +744,67 @@ export function Precificacao() {
                   const lucroRs = Math.round((vlrLiquido - gastoTotal) * 100) / 100;
                   const lucroPct = vlrBruto > 0 ? lucroRs / vlrBruto : 0;
                       const roasMinimo = lucroPct > 0 ? Math.round((1 / lucroPct) * 100) / 100 : 0;
-
-                      // Cor de fundo por linha
-                      const corClasse =
-                        linha.corLinha === "amarelo"
-                          ? "bg-yellow-50"
-                          : linha.corLinha === "verde"
-                          ? "bg-green-50"
-                          : linha.corLinha === "azul"
-                          ? "bg-blue-50"
-                          : linha.corLinha === "vermelho"
-                          ? "bg-red-50"
-                          : "";
+                      const repetirCabecalho =
+                        linhaIdsSubcabecalhoAposCor.has(linha.id) && indexLinha > 0;
+                      const { bordaLinha, tintBranco: tintClass } = estiloMarcaLinha(linha.corLinha);
 
                       return (
-                        <TableRow key={linha.id} className={corClasse}>
-                          <TableCell className="space-x-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                              onClick={() => copiarLinha(linha)}
-                              title="Copiar produto"
-                            >
-                              <Copy className="size-3.5" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                              onClick={() => removeLinha(linha.id)}
-                              title="Remover linha"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </Button>
-                            <Select
-                              value={linha.corLinha || ""}
-                              onValueChange={(v) =>
-                                updateLinha(linha.id, "corLinha", v === "nenhuma" ? "" : v)
-                              }
-                            >
-                              <SelectTrigger className="h-7 w-24 text-[11px] mt-1">
-                                <SelectValue placeholder="Cor" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="nenhuma">Sem cor</SelectItem>
-                                <SelectItem value="amarelo">Amarelo</SelectItem>
-                                <SelectItem value="verde">Verde</SelectItem>
-                                <SelectItem value="azul">Azul</SelectItem>
-                                <SelectItem value="vermelho">Vermelho</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell>
+                        <React.Fragment key={linha.id}>
+                          {repetirCabecalho && <CabecalhoTabelaPrecificacaoShopee repeticao />}
+                        <TableRow className={cn(bordaLinha, LINHA_PRECO_CLASS)}>
+                          <CelulaAcoesPrecificacao
+                            linha={linha}
+                            tintClass={tintClass}
+                            onCopiar={() => copiarLinha(linha)}
+                            onRemover={() => removeLinha(linha.id)}
+                            onDefinirCor={(v) => {
+                              updateLinha(linha.id, "corLinha", v);
+                              setLinhaIdsSubcabecalhoAposCor((prev) => {
+                                const next = new Set(prev);
+                                if (normalizarCorLinha(v)) next.add(linha.id);
+                                else next.delete(linha.id);
+                                return next;
+                              });
+                            }}
+                          />
+                          <TableCell
+                            className={cn(
+                              `${XL.branco} ${XL.cellBorder} align-top w-[176px] min-w-[148px] max-w-[176px] whitespace-normal`,
+                              tintClass,
+                            )}
+                          >
                             <Input
-                              className="h-10 text-sm min-w-[220px]"
+                              className={inpPreco("max-w-full", "text-left")}
                               placeholder="Produto"
                               value={linha.descricao}
                               onChange={(e) => updateLinha(linha.id, "descricao", e.target.value)}
                             />
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell
+                            className={cn(`min-w-[3.5rem] text-center ${XL.branco} ${XL.cellBorder}`, tintClass)}
+                          >
                             <Input
-                              className="h-10 text-right text-sm min-w-[90px]"
+                              className={inpPreco("text-center")}
                               inputMode="numeric"
                               placeholder="1"
                               value={linha.unidade}
                               onChange={(e) => updateLinha(linha.id, "unidade", e.target.value)}
                             />
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell
+                            className={cn(`min-w-[6rem] text-center ${XL.branco} ${XL.cellBorder}`, tintClass)}
+                          >
                             <Input
-                              className="h-10 text-right text-sm min-w-[120px]"
+                              className={inpPreco("text-right")}
                               inputMode="decimal"
                               placeholder="0,00"
                               value={linha.vlrUnitario}
                               onChange={(e) => updateLinha(linha.id, "vlrUnitario", e.target.value)}
                             />
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <span className="text-xs text-muted-foreground tabular-nums">
+                          <TableCell className={`min-w-[7.5rem] text-right ${XL.ttInsumos} ${XL.cellBorder}`}>
+                            <div className="flex min-w-0 items-center justify-end gap-0">
+                              <span className={`${XL.cellText} shrink-0 font-medium text-foreground`}>
                                 {ttInsumos > 0 ? formatCurrency(ttInsumos) : "—"}
                               </span>
                               <Dialog>
@@ -563,10 +813,10 @@ export function Precificacao() {
                                     type="button"
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                    className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
                                     title="Editar insumos"
                                   >
-                                    <Pencil className="size-3.5" />
+                                    <Pencil className="size-2.5" />
                                   </Button>
                                 </DialogTrigger>
                                 <DialogContent className="max-w-md">
@@ -644,30 +894,47 @@ export function Precificacao() {
                           </Dialog>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right text-muted-foreground tabular-nums text-xs">
+                          <TableCell
+                            className={cn(
+                              `min-w-[6rem] text-center ${XL.cellText} text-foreground ${XL.branco} ${XL.cellBorder}`,
+                              tintClass,
+                            )}
+                          >
                             {impostoValor > 0 ? formatCurrency(impostoValor) : "—"}
                           </TableCell>
-                          <TableCell className="text-right font-medium tabular-nums text-xs">
+                          <TableCell
+                            className={cn(
+                              `min-w-[6.5rem] text-center font-medium ${XL.cellText} ${XL.branco} ${XL.cellBorder}`,
+                              tintClass,
+                            )}
+                          >
                             {gastoTotal > 0 ? formatCurrency(gastoTotal) : "—"}
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className={`min-w-[7rem] text-center ${XL.vlrBruto} ${XL.cellBorder}`}>
                             <Input
-                              className="h-10 text-right text-sm min-w-[130px]"
+                              className={inpPreco("text-right")}
                               inputMode="decimal"
                               placeholder="0,00"
                               value={linha.vlrVendaBruto}
                               onChange={(e) => updateLinha(linha.id, "vlrVendaBruto", e.target.value)}
                             />
                           </TableCell>
-                          <TableCell className="text-right font-medium tabular-nums text-xs">
+                          <TableCell
+                            className={cn(
+                              `min-w-[7rem] text-center font-medium ${XL.cellText} ${XL.branco} ${XL.cellBorder}`,
+                              tintClass,
+                            )}
+                          >
                             {vlrBruto > 0 ? formatCurrency(vlrLiquido) : "—"}
                           </TableCell>
-                          <TableCell className="text-right text-muted-foreground tabular-nums text-xs">
+                          <TableCell
+                            className={`min-w-[6.5rem] text-center ${XL.cellText} text-foreground ${XL.vlrFinalUni} ${XL.cellBorder}`}
+                          >
                             {vlrBruto > 0 && unidade > 0 ? formatCurrency(vlrFinalUni) : "—"}
                           </TableCell>
-                          <TableCell className="text-right font-semibold tabular-nums text-xs">
+                          <TableCell className={`min-w-[6rem] text-center ${XL.lucroRs} ${XL.cellBorder}`}>
                             <Input
-                              className="h-8 text-right text-xs"
+                              className={inpPreco("text-right")}
                               inputMode="decimal"
                               placeholder="0,00"
                               value={
@@ -703,9 +970,9 @@ export function Precificacao() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-right font-medium tabular-nums text-xs">
+                          <TableCell className={`min-w-[5.5rem] text-center ${XL.lucroPct} ${XL.cellBorder}`}>
                             <Input
-                              className="h-8 text-right text-xs"
+                              className={inpPreco("text-right")}
                               inputMode="decimal"
                               placeholder="0"
                               value={
@@ -742,10 +1009,16 @@ export function Precificacao() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-right text-muted-foreground tabular-nums text-xs">
+                          <TableCell
+                            className={cn(
+                              `min-w-[5.5rem] text-center font-bold ${XL.cellText} text-foreground ${XL.branco} ${XL.cellBorder}`,
+                              tintClass,
+                            )}
+                          >
                             {vlrBruto > 0 && lucroPct > 0 ? roasMinimo.toFixed(2) : "—"}
                           </TableCell>
                         </TableRow>
+                        </React.Fragment>
                       );
                     })}
                   </TableBody>
@@ -761,21 +1034,21 @@ export function Precificacao() {
 
         {/* Placeholders para outros marketplaces */}
         <TabsContent value="mercado-livre">
-          <Card>
+          <Card className="dash-tone-balance border-dashed">
             <CardContent className="py-6 text-sm text-muted-foreground">
               Configuração de precificação para Mercado Livre será adicionada aqui no futuro.
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="shein">
-          <Card>
+          <Card className="dash-tone-balance border-dashed">
             <CardContent className="py-6 text-sm text-muted-foreground">
               Configuração de precificação para Shein será adicionada aqui no futuro.
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="outros">
-          <Card>
+          <Card className="dash-tone-balance border-dashed">
             <CardContent className="py-6 text-sm text-muted-foreground">
               Espaço reservado para outros marketplaces.
             </CardContent>

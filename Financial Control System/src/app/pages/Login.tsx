@@ -61,7 +61,7 @@ export function Login() {
               <img
                 src="/logo/logo.png"
                 alt="Controle S M Decor"
-                className="w-full h-full object-contain"
+                className="app-logo w-full h-full object-contain"
                 onError={(e) => {
                   (e.target as HTMLImageElement).style.display = "none";
                   const parent = (e.target as HTMLImageElement).parentElement;
