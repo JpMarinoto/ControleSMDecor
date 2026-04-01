@@ -797,6 +797,9 @@ export function Compra() {
                   value={quantidade}
                   onChange={(e) => setQuantidade(e.target.value)}
                   placeholder="0"
+                  min={1}
+                  max={999999999}
+                  step={1}
                 />
               </div>
 
