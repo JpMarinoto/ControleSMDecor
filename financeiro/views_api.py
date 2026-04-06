@@ -71,6 +71,23 @@ def _safe_float(x):
         return 0.0
 
 
+def _int_quantidade_item(qtd):
+    """
+    Quantidade inteira (compras/itens): JSON pode chegar como float com ruído binário
+    (ex.: 2999.9999999999995), onde int() trunca para 2999.
+    """
+    if qtd is None:
+        raise ValueError
+    if isinstance(qtd, bool):
+        raise ValueError
+    if isinstance(qtd, int):
+        return qtd
+    try:
+        return int(round(float(qtd)))
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError
+
+
 def _api_log(request, acao, tabela, detalhes=""):
     """Registra ação nos logs do sistema (usado pela API)."""
     user = None
@@ -829,8 +846,7 @@ class CompraListCreate(APIView):
             if qtd is None or preco is None:
                 continue
             try:
-                from decimal import Decimal
-                q = int(qtd)
+                q = _int_quantidade_item(qtd)
                 p = Decimal(str(preco).replace(',', '.'))
             except (ValueError, TypeError):
                 continue
@@ -1001,7 +1017,7 @@ class CompraDetail(APIView):
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         if request.data.get('quantidade') is not None:
             try:
-                obj.quantidade = int(request.data.get('quantidade'))
+                obj.quantidade = _int_quantidade_item(request.data.get('quantidade'))
             except (ValueError, TypeError):
                 pass
         if request.data.get('preco_no_dia') is not None:
@@ -1227,11 +1243,20 @@ class TransacaoListCreate(APIView):
                 'createdAt': date_str,
             })
         for m in MovimentoBanco.objects.select_related('conta').order_by('-data')[:200]:
+            # Movimentos bancários automáticos já estão representados nas transações de Pagamento/PagamentoFornecedor.
+            # Evita duplicar despesas/receitas no frontend (ex.: pagamento a fornecedor com conta_id cria MovimentoBanco).
+            desc = (m.descricao or '')
+            desc_low = desc.lower()
+            if (
+                ('pagamento fornecedor id' in desc_low)
+                or ('recebimento cliente id' in desc_low)
+            ):
+                continue
             dt = m.data
             date_str = dt.date().isoformat() if hasattr(dt, 'date') else str(dt)[:10]
             out.append({
                 'id': f'mb-{m.id}',
-                'description': m.descricao,
+                'description': desc,
                 'amount': float(m.valor),
                 'type': 'income' if m.tipo == 'entrada' else 'expense',
                 'date': date_str,
@@ -1521,7 +1546,8 @@ class EstoqueList(APIView):
         out_produtos = []
         for p in produtos_qs:
             cat = p.categoria
-            preco = float(p.preco_venda or 0)
+            # Estoque deve refletir custo (investimento), não preço de venda.
+            preco = float(p.preco_custo or 0)
             qtd = p.estoque_atual or 0
             out_produtos.append({
                 'id': p.id,

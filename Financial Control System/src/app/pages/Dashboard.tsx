@@ -138,6 +138,8 @@ function DashboardChefe() {
   const [compras, setCompras] = useState<any[]>([]);
   const [contas, setContas] = useState<any[]>([]);
   const [materiais, setMateriais] = useState<any[]>([]);
+  const [estoqueMateriais, setEstoqueMateriais] = useState<any[]>([]);
+  const [estoqueProdutos, setEstoqueProdutos] = useState<any[]>([]);
   const [dividasGerais, setDividasGerais] = useState<any[]>([]);
   const [valoresVisiveis, setValoresVisiveis] = useState(() => {
     try {
@@ -159,7 +161,7 @@ function DashboardChefe() {
 
   const loadFromApi = async () => {
     try {
-      const [txRes, clientesRes, fornRes, vendasRes, comprasRes, contasRes, materiaisRes, dividasRes] = await Promise.all([
+      const [txRes, clientesRes, fornRes, vendasRes, comprasRes, contasRes, materiaisRes, dividasRes, estoqueRes] = await Promise.all([
         api.getTransactions().catch(() => []),
         api.getClientes().catch(() => []),
         api.getFornecedores().catch(() => []),
@@ -168,6 +170,7 @@ function DashboardChefe() {
         api.getContas().catch(() => []),
         api.getMateriais().catch(() => []),
         api.getDividasGerais().catch(() => []),
+        api.getEstoque().catch(() => ({ materiais: [], produtos: [] })),
       ]);
       setTransactions(Array.isArray(txRes) ? txRes : []);
       setClientes(Array.isArray(clientesRes) ? clientesRes : []);
@@ -177,6 +180,8 @@ function DashboardChefe() {
       setContas(normalizarContas(contasRes));
       setMateriais(Array.isArray(materiaisRes) ? materiaisRes : []);
       setDividasGerais(Array.isArray(dividasRes) ? dividasRes : []);
+      setEstoqueMateriais(Array.isArray((estoqueRes as any)?.materiais) ? (estoqueRes as any).materiais : []);
+      setEstoqueProdutos(Array.isArray((estoqueRes as any)?.produtos) ? (estoqueRes as any).produtos : []);
     } catch {
       // Fallback para localStorage (ex.: backend offline)
       setTransactions(storage.getTransactions());
@@ -193,6 +198,8 @@ function DashboardChefe() {
       setContas(normalizarContas(load('sm_decor_contas')));
       setMateriais(load('sm_decor_materiais'));
       setDividasGerais([]);
+      setEstoqueMateriais([]);
+      setEstoqueProdutos([]);
     }
   };
 
@@ -401,11 +408,11 @@ function DashboardChefe() {
     .sort((a, b) => parseDateOnlyToTime(b.date) - parseDateOnlyToTime(a.date))
     .slice(0, 5);
 
-  // Total stock value (preço unitário × quantidade em estoque)
-  const faltqueTotal = materiais.reduce(
-    (sum, m) => sum + safeNum(m.precoUnitarioBase ?? m.preco_unitario_base) * safeNum(m.estoque_atual),
-    0
-  );
+  // Total do estoque (investimento): materiais + produtos (custo) via /api/estoque/
+  const estoqueTotal = React.useMemo(() => {
+    const soma = (arr: any[]) => arr.reduce((s, i) => s + safeNum(i.total), 0);
+    return soma(estoqueMateriais) + soma(estoqueProdutos);
+  }, [estoqueMateriais, estoqueProdutos]);
 
   const totalSaldoContas = contas.reduce(
     (sum, c) => sum + safeNum(c.saldo_atual ?? c.saldo),
@@ -856,13 +863,13 @@ function DashboardChefe() {
                     <span className="font-semibold dash-text-balance">{formatCurrency(totalSaldoContas)}</span>
                   </div>
                   <div className="flex items-center justify-between p-2 rounded-lg dash-chip-flow">
-                    <span className="text-sm font-medium dash-title-flow">Estoque (investimento)</span>
-                    <span className="font-semibold dash-text-balance">{formatCurrency(faltqueTotal)}</span>
+                    <span className="text-sm font-medium dash-title-flow">Estoque Produtos + Materiais</span>
+                    <span className="font-semibold dash-text-balance">{formatCurrency(estoqueTotal)}</span>
                   </div>
                   <div className="flex items-center justify-between p-2 rounded-lg bg-primary/10 border border-primary/20 mt-auto">
                     <span className="font-semibold">Saldo</span>
-                    <span className={`text-lg font-bold ${(aReceber - aPagar + totalSaldoContas + faltqueTotal) >= 0 ? "dash-text-positive" : "dash-text-negative"}`}>
-                      {formatCurrency(safeNum(aReceber - aPagar + totalSaldoContas + faltqueTotal))}
+                    <span className={`text-lg font-bold ${(aReceber - aPagar + totalSaldoContas + estoqueTotal) >= 0 ? "dash-text-positive" : "dash-text-negative"}`}>
+                      {formatCurrency(safeNum(aReceber - aPagar + totalSaldoContas + estoqueTotal))}
                     </span>
                   </div>
                 </CardContent>
@@ -870,7 +877,7 @@ function DashboardChefe() {
             </TooltipTrigger>
             <TooltipContent>
               <p>
-                Total = A Receber ({formatCurrency(aReceber)}) + Caixa/Contas ({formatCurrency(totalSaldoContas)}) + Estoque ({formatCurrency(faltqueTotal)}) - Dívidas (Fornecedores + Gerais) ({formatCurrency(aPagar)}).
+                Total = A Receber ({formatCurrency(aReceber)}) + Caixa/Contas ({formatCurrency(totalSaldoContas)}) + Estoque ({formatCurrency(estoqueTotal)}) - Dívidas (Fornecedores + Gerais) ({formatCurrency(aPagar)}).
               </p>
             </TooltipContent>
           </Tooltip>
@@ -990,34 +997,30 @@ function DashboardChefe() {
             <CardContent className="flex-1">
               <div className="space-y-2">
                 <div className="flex items-center justify-between p-3 rounded-lg bg-primary/5 border border-primary/20">
-                  <span className="font-medium">Total em Materiais</span>
-                  <span className="text-xl font-bold text-primary">{formatCurrency(faltqueTotal)}</span>
+                  <span className="font-medium">Total (materiais + produtos)</span>
+                  <span className="text-xl font-bold text-primary">{formatCurrency(estoqueTotal)}</span>
                 </div>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Material</TableHead>
+                      <TableHead>Item</TableHead>
                       <TableHead className="text-right">Qnt</TableHead>
                       <TableHead className="text-right">Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {materiais.length > 0 ? (
-                      materiais.slice(0, 3).map((material) => {
-                        const qty = safeNum(material.estoque_atual);
-                        const preco = safeNum(material.precoUnitarioBase ?? material.preco_unitario_base);
-                        return (
-                          <TableRow key={material.id}>
-                            <TableCell className="text-sm">{material.nome}</TableCell>
-                            <TableCell className="text-sm text-right">{qty}</TableCell>
-                            <TableCell className="text-sm text-right">{formatCurrency(preco * qty)}</TableCell>
-                          </TableRow>
-                        );
-                      })
+                    {estoqueMateriais.length > 0 || estoqueProdutos.length > 0 ? (
+                      [...estoqueMateriais.slice(0, 2), ...estoqueProdutos.slice(0, 1)].map((item: any) => (
+                        <TableRow key={`${item.id}-${item.nome}`}>
+                          <TableCell className="text-sm">{item.nome}</TableCell>
+                          <TableCell className="text-sm text-right">{safeNum(item.estoque_atual)}</TableCell>
+                          <TableCell className="text-sm text-right">{formatCurrency(safeNum(item.total))}</TableCell>
+                        </TableRow>
+                      ))
                     ) : (
                       <TableRow>
                         <TableCell colSpan={3} className="text-center text-muted-foreground">
-                          Nenhum material cadastrado
+                          Estoque indisponível
                         </TableCell>
                       </TableRow>
                     )}

@@ -79,6 +79,9 @@ Depois, com o Django a correr (`python manage.py runserver`), abre **http://127.
 
 
 VPS
+
+Produção: **https://santosmarinoto.com** e **https://www.santosmarinoto.com** (se o DNS e o Nginx tiverem os dois).
+
 ssh deploy@129.121.53.239
 
 cd "/home/deploy/ControleSMDecor"
@@ -95,3 +98,53 @@ npm install
 npm run build
 cd ..
 sudo systemctl restart financeiro
+
+---
+
+## VPS: apontar o domínio para a zona do WHM (nameservers)
+
+Se o site abre pelo **IP da VPS** mas **não pelo domínio**, ou o `nslookup` mostra **outro IP**, quase sempre o domínio ainda usa **dns3/dns4.hostgator.com.br** em vez dos **NS da VPS**. A zona correta está no **WHM → DNS Zone Manager**; o registo do domínio tem de **perguntar a esses NS**.
+
+### 1) Anotar os nameservers da VPS (no WHM)
+
+1. Entra no **WHM** (`https://IP-DA-VPS:2087`).
+2. **DNS Functions** → **DNS Zone Manager** → escolhe **santosmarinoto.com**.
+3. No topo da zona vês os **NS**, por exemplo:
+   - `ns1.vps-XXXXX.vpsbr-XXXXX.vpshostgator.com.br`
+   - `ns2.vps-XXXXX.vpsbr-XXXXX.vpshostgator.com.br`  
+   Copia **exatamente** estes dois nomes (os teus podem diferir do exemplo).
+
+### 2) Alterar os DNS no sítio onde o domínio está gerido
+
+**A) Domínio na área de cliente HostGator (Brasil)**
+
+1. Login em **https://financeiro.hostgator.com.br** (ou portal que usas).
+2. **Domínios** → seleciona **santosmarinoto.com** → **Gerenciar** / **Configurar domínio**.
+3. Procura **Servidores DNS** / **Nameservers** / **Alterar DNS**.
+4. Escolhe opção do tipo **Personalizado** / **Outro** / **Usar meus próprios nameservers** (não uses só “padrão HostGator” se isso voltar a dns3/dns4).
+5. Cola o **Servidor 1** = `ns1.vps-....vpshostgator.com.br` e **Servidor 2** = `ns2.vps-....vpshostgator.com.br`.
+6. Guarda / confirma.
+
+**B) Domínio no Registro.br (titularidade .br)**
+
+1. **https://registro.br** → login → **Meus domínios** → **santosmarinoto.com**.
+2. **DNS** ou **Alterar servidores DNS**.
+3. Marca **usar DNS dos servidores** (ou equivalente) e indica os **dois** hostnames do passo 1.
+4. Confirma; a alteração no .br pode levar algum tempo a propagar.
+
+### 3) Cloudflare (se aparecer “domínio na Cloudflare”)
+
+- No painel **Cloudflare** do domínio, em **DNS**, o tipo **A** de `@` (e `www` se for A ou CNAME adequado) deve apontar para **`129.121.53.239`** (ou desativa proxy “nuvem laranja” temporariamente para testar, **DNS only**).
+- Se **não** usares Cloudflare à frente, garante que a alteração de **nameservers** no passo 2 não fica a mandar tudo para dns3/dns4 enquanto queres usar só a VPS.
+
+### 4) Esperar e testar
+
+- Propagação: de **minutos a 48 h** (TTL e caches).
+- No Windows: `ipconfig /flushdns` e `nslookup santosmarinoto.com`.
+- Teste direto aos NS da VPS: `nslookup santosmarinoto.com ns1.vps-....vpshostgator.com.br` → deve responder **129.121.53.239**.
+
+### 5) Na VPS (depois do DNS certo)
+
+- Nginx com `server_name santosmarinoto.com www.santosmarinoto.com`.
+- `.env`: `DJANGO_ALLOWED_HOSTS` inclui os dois hostnames e o IP.
+- `sudo systemctl reload nginx` e `sudo systemctl restart financeiro` se mudaste `.env`.

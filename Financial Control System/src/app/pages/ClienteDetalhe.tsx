@@ -72,6 +72,20 @@ function parseData(s: string): number {
   return parseDateOnlyToTime(s);
 }
 
+function slugForFileName(s: string): string {
+  try {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase()
+      .slice(0, 60);
+  } catch {
+    return String(s || "").replace(/\s+/g, "-").slice(0, 60);
+  }
+}
+
 export function ClienteDetalhe() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -453,7 +467,7 @@ export function ClienteDetalhe() {
     setPrintPreview({
       html: htmlFech,
       titulo: tituloPrev,
-      downloadBaseName: `fechamento-cliente-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}`,
+      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}`,
     });
   };
 
@@ -669,7 +683,7 @@ export function ClienteDetalhe() {
     setPrintPreview({
       html: htmlSel,
       titulo: tituloSel,
-      downloadBaseName: `fechamento-cliente-${id}-selecao`,
+      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-selecao`,
     });
   };
 

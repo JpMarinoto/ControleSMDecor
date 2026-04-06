@@ -49,7 +49,7 @@ export function Estoque() {
   const [open, setOpen] = useState(false);
   const [tipoAjusteItem, setTipoAjusteItem] = useState<"material" | "produto">("material");
   const [modoAjuste, setModoAjuste] = useState<"entrada_saida" | "valor_fixo">(
-    isChefe ? "entrada_saida" : "valor_fixo"
+    "valor_fixo"
   );
   const [materialId, setMaterialId] = useState("");
   const [produtoId, setProdutoId] = useState("");
@@ -267,6 +267,8 @@ export function Estoque() {
   }, [produtos]);
 
   const colCount = isChefe ? 4 : 2;
+  const colCountCatMateriais = isChefe ? 6 : 4;
+  const colCountCatProdutos = isChefe ? 6 : 4;
 
   return (
     <div className="space-y-6">
@@ -498,8 +500,8 @@ export function Estoque() {
                       <TableRow>
                         <TableHead>Material</TableHead>
                         <TableHead className="text-right">Qtd</TableHead>
-                        {isChefe && <TableHead className="text-right">Preço unit.</TableHead>}
-                        {isChefe && <TableHead className="text-right">Total</TableHead>}
+                          {isChefe && <TableHead className="text-right">Custo unit.</TableHead>}
+                          {isChefe && <TableHead className="text-right">Total (custo)</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -557,8 +559,8 @@ export function Estoque() {
                       <TableRow>
                         <TableHead>Produto</TableHead>
                         <TableHead className="text-right">Qtd</TableHead>
-                        {isChefe && <TableHead className="text-right">Preço unit.</TableHead>}
-                        {isChefe && <TableHead className="text-right">Total</TableHead>}
+                        {isChefe && <TableHead className="text-right">Custo unit.</TableHead>}
+                        {isChefe && <TableHead className="text-right">Total (custo)</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -632,16 +634,14 @@ export function Estoque() {
                         <TableRow>
                           <TableHead>Material</TableHead>
                           <TableHead className="text-right w-24">Qtd no sistema</TableHead>
-                          {!isChefe && (
-                            <>
-                              <TableHead className="text-right w-36">Qtd contada</TableHead>
-                              <TableHead className="w-28"></TableHead>
-                            </>
-                          )}
+                          <>
+                            <TableHead className="text-right w-36">Qtd contada</TableHead>
+                            <TableHead className="w-28"></TableHead>
+                          </>
                           {isChefe && (
                             <>
-                              <TableHead className="text-right">Preço unit.</TableHead>
-                              <TableHead className="text-right">Total</TableHead>
+                              <TableHead className="text-right">Custo unit.</TableHead>
+                              <TableHead className="text-right">Total (custo)</TableHead>
                             </>
                           )}
                         </TableRow>
@@ -658,32 +658,30 @@ export function Estoque() {
                               </span>
                             </TableCell>
                             <TableCell className="text-right">{item.estoque_atual}</TableCell>
-                            {!isChefe && (
-                              <>
-                                <TableCell className="text-right">
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    className="h-9 w-full max-w-28 text-right"
-                                    placeholder="Contou"
-                                    value={contagem[item.id] ?? ""}
-                                    onChange={(e) =>
-                                      setContagem((prev) => ({ ...prev, [item.id]: e.target.value }))
-                                    }
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={aplicandoContagem === item.id}
-                                    onClick={() => aplicarContagem(item.id)}
-                                  >
-                                    {aplicandoContagem === item.id ? "..." : "Atualizar"}
-                                  </Button>
-                                </TableCell>
-                              </>
-                            )}
+                            <>
+                              <TableCell className="text-right">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  className="h-9 w-full max-w-28 text-right"
+                                  placeholder="Contou"
+                                  value={contagem[item.id] ?? ""}
+                                  onChange={(e) =>
+                                    setContagem((prev) => ({ ...prev, [item.id]: e.target.value }))
+                                  }
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={aplicandoContagem === item.id}
+                                  onClick={() => aplicarContagem(item.id)}
+                                >
+                                  {aplicandoContagem === item.id ? "..." : "Atualizar"}
+                                </Button>
+                              </TableCell>
+                            </>
                             {isChefe && (
                               <>
                                 <TableCell className="text-right text-muted-foreground">
@@ -723,16 +721,14 @@ export function Estoque() {
                           <TableRow>
                             <TableHead>Produto</TableHead>
                             <TableHead className="text-right w-24">Qtd no sistema</TableHead>
-                            {!isChefe && (
-                              <>
-                                <TableHead className="text-right w-36">Qtd contada</TableHead>
-                                <TableHead className="w-28"></TableHead>
-                              </>
-                            )}
+                            <>
+                              <TableHead className="text-right w-36">Qtd contada</TableHead>
+                              <TableHead className="w-28"></TableHead>
+                            </>
                             {isChefe && (
                               <>
-                                <TableHead className="text-right">Preço unit.</TableHead>
-                                <TableHead className="text-right">Total</TableHead>
+                                <TableHead className="text-right">Custo unit.</TableHead>
+                                <TableHead className="text-right">Total (custo)</TableHead>
                               </>
                             )}
                           </TableRow>
@@ -755,32 +751,30 @@ export function Estoque() {
                                 </span>
                               </TableCell>
                               <TableCell className="text-right">{item.estoque_atual}</TableCell>
-                              {!isChefe && (
-                                <>
-                                  <TableCell className="text-right">
-                                    <Input
-                                      type="number"
-                                      min={0}
-                                      className="h-9 w-full max-w-28 text-right"
-                                      placeholder="Contou"
-                                      value={contagemProdutos[item.id] ?? ""}
-                                      onChange={(e) =>
-                                        setContagemProdutos((prev) => ({ ...prev, [item.id]: e.target.value }))
-                                      }
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      disabled={aplicandoContagemProduto === item.id}
-                                      onClick={() => aplicarContagemProduto(item.id)}
-                                    >
-                                      {aplicandoContagemProduto === item.id ? "..." : "Atualizar"}
-                                    </Button>
-                                  </TableCell>
-                                </>
-                              )}
+                              <>
+                                <TableCell className="text-right">
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    className="h-9 w-full max-w-28 text-right"
+                                    placeholder="Contou"
+                                    value={contagemProdutos[item.id] ?? ""}
+                                    onChange={(e) =>
+                                      setContagemProdutos((prev) => ({ ...prev, [item.id]: e.target.value }))
+                                    }
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={aplicandoContagemProduto === item.id}
+                                    onClick={() => aplicarContagemProduto(item.id)}
+                                  >
+                                    {aplicandoContagemProduto === item.id ? "..." : "Atualizar"}
+                                  </Button>
+                                </TableCell>
+                              </>
                               {isChefe && (
                                 <>
                                   <TableCell className="text-right text-muted-foreground">

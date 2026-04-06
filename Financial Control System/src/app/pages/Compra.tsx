@@ -72,6 +72,27 @@ function produtoElegivelCompraPronta(p: any) {
   return fid != null && fid !== "" && String(fid) !== "null" && String(fid) !== "undefined";
 }
 
+/**
+ * Quantidade inteira na compra: parseInt("2999.999…", 10) vira 2999 (input number / float em texto).
+ * Aceita milhar pt-BR (ex.: 30.000).
+ */
+function parseQtdInteira(raw: string | number): number | null {
+  if (raw === "" || raw === null || raw === undefined) return null;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) return null;
+    const r = Math.round(raw);
+    return r > 0 ? r : null;
+  }
+  const s = String(raw).trim().replace(/\s/g, "");
+  if (!s) return null;
+  const milharOpcDecimal = /^(\d{1,3}(?:\.\d{3})+)(?:,\d+)?$/;
+  const norm = milharOpcDecimal.test(s) ? s.replace(/\./g, "").replace(",", ".") : s.replace(",", ".");
+  const n = parseFloat(norm);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const r = Math.round(n);
+  return r > 0 ? r : null;
+}
+
 export function Compra() {
   const [ordens, setOrdens] = useState<OrdemCompra[]>([]);
   const [materiais, setMateriais] = useState<any[]>([]);
@@ -196,7 +217,7 @@ export function Compra() {
                 material_nome: i.material_nome || "",
                 produto: i.produto,
                 produto_nome: i.produto_nome || "",
-                quantidade: Number(i.quantidade) || 0,
+                quantidade: parseQtdInteira(i.quantidade) ?? 0,
                 preco_no_dia: Number(i.preco_no_dia) || 0,
                 total: Number(i.total) || 0,
               })),
@@ -338,8 +359,8 @@ export function Compra() {
 
   const salvarEdicaoItem = () => {
     if (!editingItemId) return;
-    const qtd = parseFloat(editQtd.replace(",", "."));
-    if (isNaN(qtd) || qtd <= 0) {
+    const qtd = parseQtdInteira(editQtd);
+    if (qtd === null) {
       toast.error("Quantidade deve ser válida");
       return;
     }
@@ -353,7 +374,7 @@ export function Compra() {
     setItensForm((prev) =>
       prev.map((i) =>
         i.id === editingItemId
-          ? { ...i, quantidade: editQtd, ...(isChefe ? { precoUnitario: editPreco } : {}) }
+          ? { ...i, quantidade: String(qtd), ...(isChefe ? { precoUnitario: editPreco } : {}) }
           : i
       )
     );
@@ -377,8 +398,8 @@ export function Compra() {
 
   const salvarEdicaoItemCompra = () => {
     if (!editingItem) return;
-    const qtd = parseInt(editCompraQtd, 10);
-    if (isNaN(qtd) || qtd <= 0) {
+    const qtd = parseQtdInteira(editCompraQtd);
+    if (qtd === null) {
       toast.error("Quantidade deve ser válida");
       return;
     }
@@ -590,13 +611,13 @@ export function Compra() {
 
     const itensPayload = itensForm
       .filter((item) => {
-        const qtd = parseInt(item.quantidade, 10);
+        const qtd = parseQtdInteira(item.quantidade);
         const preco = parseFloat(item.precoUnitario.replace(',', '.'));
-        return item.materialId && !isNaN(qtd) && qtd > 0 && !isNaN(preco) && preco > 0;
+        return item.materialId && qtd !== null && qtd > 0 && !isNaN(preco) && preco > 0;
       })
       .map((item) => ({
         ...(item.materialId.startsWith("prod:") ? { tipo: "produto", produto: Number(item.materialId.replace("prod:", "")) } : { tipo: "material", material: Number(item.materialId.replace("mat:", "")) }),
-        quantidade: parseInt(item.quantidade, 10),
+        quantidade: parseQtdInteira(item.quantidade) as number,
         preco_no_dia: parseFloat(item.precoUnitario.replace(',', '.')),
       }));
     if (itensPayload.length === 0) {
@@ -847,8 +868,8 @@ export function Compra() {
                         toast.error(`Selecione ${tipoItem === "produto" ? "produto" : "material"} e quantidade`);
                         return;
                       }
-                      const qtd = parseInt(quantidade, 10);
-                      if (isNaN(qtd) || qtd <= 0) {
+                      const qtd = parseQtdInteira(quantidade);
+                      if (qtd === null) {
                         toast.error('Quantidade inválida');
                         return;
                       }
@@ -874,7 +895,7 @@ export function Compra() {
                         {
                           id: `${Date.now()}-${prev.length}`,
                           materialId: tipoItem === "produto" ? `prod:${selectedId}` : `mat:${selectedId}`,
-                          quantidade,
+                          quantidade: String(qtd),
                           precoUnitario: String(precoParaItem),
                         },
                       ]);
@@ -906,7 +927,7 @@ export function Compra() {
                         const label = isProd
                           ? (produtosRevenda.find((p: any) => String(p.id) === refId)?.nome ?? `Produto #${refId}`)
                           : (materiais.find((m: any) => String(m.id) === refId)?.nome ?? `Material #${refId}`);
-                        const qtdItem = parseFloat(item.quantidade.replace(',', '.') || '0');
+                        const qtdItem = parseQtdInteira(item.quantidade) ?? 0;
                         const precoItem = parseFloat(item.precoUnitario.replace(',', '.') || '0');
                         const isEditing = editingItemId === item.id;
                         return (
