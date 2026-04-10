@@ -31,7 +31,13 @@ python manage.py migrate --noinput
 
 
 DA PASTA POR FORA DE BACKUP
-copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMEDOBANCO.sqlite3" db.sqlite3
+copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-04-08_193912.sqlite3" db.sqlite3
+python manage.py migrate --noinput
+
+
+
+
+
 
 
 se quiser pegar o banco local e mandar para VPS

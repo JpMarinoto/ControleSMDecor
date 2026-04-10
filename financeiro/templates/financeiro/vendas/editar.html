@@ -37,7 +37,7 @@
                         </thead>
                         <tbody id="corpo-itens">
                             {% for item in venda.itens.all %}
-                            <tr class="item-row">
+                            <tr class="item-row" data-existing-item="1" data-original-produto-id="{{ item.produto_id }}">
                                 <td>
                                     <select class="form-select form-select-sm row-categoria">
                                         <option value="">Selecione a categoria</option>
@@ -121,11 +121,29 @@
         });
     }
 
+    function parsePrecoInput(val) {
+        if (val == null || val === '') return 0;
+        return parseFloat(String(val).replace(',', '.')) || 0;
+    }
+
     function atualizarTotalRow(row) {
         var qtd = parseFloat(row.querySelector('.row-qtd').value) || 0;
-        var preco = parseFloat(row.querySelector('.row-preco').value) || 0;
+        var preco = parsePrecoInput(row.querySelector('.row-preco').value);
         var el = row.querySelector('.row-total');
         if (el) el.textContent = 'R$ ' + (qtd * preco).toFixed(2).replace('.', ',');
+    }
+
+    /** Preço da nota é congelado no banco; não sobrescrever com preço atual do cadastro ao reabrir/editar. */
+    function aplicarPrecoAoTrocarProduto(row, opt) {
+        var precoEl = row.querySelector('.row-preco');
+        if (!opt || !opt.value || !precoEl) return;
+        if (row.dataset.existingItem === '1' && String(opt.value) === String(row.dataset.originalProdutoId)) {
+            precoEl.value = (row.dataset.savedPreco != null && row.dataset.savedPreco !== '')
+                ? String(row.dataset.savedPreco).replace('.', ',')
+                : precoEl.value;
+            return;
+        }
+        precoEl.value = opt.dataset.preco || '';
     }
 
     function novaLinha() {
@@ -136,12 +154,11 @@
         var prod = tr.querySelector('.row-produto');
         cat.addEventListener('change', function() {
             carregarProdutos(prod, this.value || null, null);
-            tr.querySelector('.row-preco').value = '';
+            if (!tr.dataset.existingItem) tr.querySelector('.row-preco').value = '';
             atualizarTotalRow(tr);
         });
         prod.addEventListener('change', function() {
-            var opt = this.options[this.selectedIndex];
-            if (opt && opt.value) tr.querySelector('.row-preco').value = opt.dataset.preco || '';
+            aplicarPrecoAoTrocarProduto(tr, this.options[this.selectedIndex]);
             atualizarTotalRow(tr);
         });
         tr.querySelector('.row-qtd').addEventListener('input', function() { atualizarTotalRow(tr); });
@@ -175,19 +192,26 @@
     corpo.querySelectorAll('.item-row').forEach(function(row) {
         var cat = row.querySelector('.row-categoria');
         var prod = row.querySelector('.row-produto');
+        var precoEl = row.querySelector('.row-preco');
+        if (row.dataset.existingItem === '1' && precoEl) {
+            row.dataset.savedPreco = String(precoEl.value).replace(',', '.');
+        }
         if (cat.value) carregarProdutos(prod, cat.value, prod.value);
         cat.addEventListener('change', function() {
-            carregarProdutos(prod, this.value || null, null);
-            row.querySelector('.row-preco').value = '';
+            var keepPid = row.dataset.existingItem === '1' ? (row.dataset.originalProdutoId || prod.value) : null;
+            carregarProdutos(prod, this.value || null, keepPid);
+            if (!row.dataset.existingItem) row.querySelector('.row-preco').value = '';
             atualizarTotalRow(row);
         });
         prod.addEventListener('change', function() {
-            var opt = this.options[this.selectedIndex];
-            if (opt && opt.value) row.querySelector('.row-preco').value = opt.dataset.preco || '';
+            aplicarPrecoAoTrocarProduto(row, this.options[this.selectedIndex]);
             atualizarTotalRow(row);
         });
         row.querySelector('.row-qtd').addEventListener('input', function() { atualizarTotalRow(row); });
-        row.querySelector('.row-preco').addEventListener('input', function() { atualizarTotalRow(row); });
+        row.querySelector('.row-preco').addEventListener('input', function() {
+            row.dataset.savedPreco = String(this.value).replace(',', '.');
+            atualizarTotalRow(row);
+        });
         row.querySelector('.btn-copiar').addEventListener('click', function() {
             var nova = novaLinha();
             corpo.appendChild(nova);

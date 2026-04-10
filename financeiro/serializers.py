@@ -120,7 +120,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
     def get_insumos(self, obj):
         itens = []
         for i in obj.insumos.select_related('material').all():
-            preco_base = Decimal(str(i.material.preco_unitario_base or 0))
+            preco_ins = Decimal(str(i.material.preco_para_insumo() or 0))
             qtd = Decimal(str(i.quantidade or 0))
             itens.append(
                 {
@@ -128,8 +128,8 @@ class ProdutoSerializer(serializers.ModelSerializer):
                     'material': i.material_id,
                     'material_nome': i.material.nome,
                     'quantidade': float(qtd),
-                    'preco_unitario_base': float(preco_base),
-                    'total_insumo': float(qtd * preco_base),
+                    'preco_unitario_base': float(preco_ins),
+                    'total_insumo': float(qtd * preco_ins),
                 }
             )
         return itens
@@ -137,7 +137,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
     def get_custo_materiais(self, obj):
         total = Decimal('0')
         for i in obj.insumos.select_related('material').all():
-            total += Decimal(str(i.quantidade or 0)) * Decimal(str(i.material.preco_unitario_base or 0))
+            total += Decimal(str(i.quantidade or 0)) * Decimal(str(i.material.preco_para_insumo() or 0))
         return float(total)
 
     def get_custo_total_fabricacao(self, obj):
@@ -149,10 +149,13 @@ class ProdutoSerializer(serializers.ModelSerializer):
 class MaterialSerializer(serializers.ModelSerializer):
     nome = serializers.CharField()
     precoUnitarioBase = serializers.DecimalField(source='preco_unitario_base', max_digits=12, decimal_places=4)
+    precoFabricacao = serializers.DecimalField(
+        source='preco_fabricacao', max_digits=12, decimal_places=4, required=False, allow_null=True
+    )
 
     class Meta:
         model = Material
-        fields = ['id', 'nome', 'precoUnitarioBase', 'estoque_atual', 'categoria', 'fornecedor_padrao']
+        fields = ['id', 'nome', 'precoUnitarioBase', 'precoFabricacao', 'estoque_atual', 'categoria', 'fornecedor_padrao']
 
 
 class ContaBancoSerializer(serializers.ModelSerializer):
@@ -184,7 +187,7 @@ class VendaSerializer(serializers.ModelSerializer):
         model = Venda
         fields = [
             'id', 'cliente', 'clienteNome', 'data_venda', 'data', 'data_lancamento',
-            'total', 'cancelada', 'observacao', 'itens',
+            'total', 'cancelada', 'observacao', 'marcada_paga', 'itens',
         ]
 
     def get_data_lancamento(self, obj):
@@ -276,7 +279,10 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrdemCompra
-        fields = ['id', 'fornecedor_id', 'fornecedor', 'data', 'data_lancamento', 'cancelada', 'itens', 'total']
+        fields = [
+            'id', 'fornecedor_id', 'fornecedor', 'data', 'data_lancamento', 'cancelada',
+            'marcada_paga', 'itens', 'total',
+        ]
 
     def get_data(self, obj):
         return _data_compra_iso_br(obj.data_compra)

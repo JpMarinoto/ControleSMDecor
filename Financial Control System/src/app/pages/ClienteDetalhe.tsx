@@ -4,12 +4,13 @@ import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime, parseLancamentoToTime } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { cn } from "../components/ui/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { ArrowLeft, User, Receipt, CreditCard, Printer, Calendar, FileCheck, Wallet, Tag, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, User, Receipt, CreditCard, Printer, Calendar, FileCheck, Wallet, Tag, Trash2, Pencil, CheckCircle2 } from "lucide-react";
 import { motion } from "motion/react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
@@ -33,6 +34,7 @@ interface VendaCliente {
   data_lancamento?: string;
   total: number;
   itens?: ItemVenda[];
+  marcada_paga?: boolean;
 }
 
 /** Ordem: data da nota (mais recente primeiro); no mesmo dia, último lançamento primeiro. */
@@ -67,6 +69,12 @@ type Periodo = "todos" | "semana" | "mes" | "personalizado";
 
 /** Alinhado ao backend METODO_PAGAMENTO_CHOICES */
 const METODOS_PAGAMENTO_API = ["Pix", "Dinheiro", "Cartão crédito", "Cartão débito", "Cheque"] as const;
+
+const rowVendaMarcadaPaga =
+  "border-l-[3px] border-l-emerald-500 bg-emerald-50/90 dark:border-l-emerald-400 dark:bg-emerald-950/35";
+const rowVendaSelecionada = "bg-primary/[0.07] dark:bg-primary/12 ring-1 ring-inset ring-primary/25";
+const rowVendaPagaSelecionada =
+  "border-l-[3px] border-l-emerald-600 bg-emerald-100/95 dark:border-l-emerald-300 dark:bg-emerald-950/45 ring-2 ring-inset ring-emerald-500/30 dark:ring-emerald-400/25";
 
 function parseData(s: string): number {
   return parseDateOnlyToTime(s);
@@ -112,6 +120,7 @@ export function ClienteDetalhe() {
   const [editPagObs, setEditPagObs] = useState("");
   const [editPagSaving, setEditPagSaving] = useState(false);
   const [pagamentoExcluir, setPagamentoExcluir] = useState<ClienteDetalheData["pagamentos"][0] | null>(null);
+  const [marcacaoVendaSaving, setMarcacaoVendaSaving] = useState<number | null>(null);
   const [printPreview, setPrintPreview] = useState<{
     html: string;
     titulo: string;
@@ -130,6 +139,8 @@ export function ClienteDetalhe() {
   const [selectedPrecoBulkIds, setSelectedPrecoBulkIds] = useState<Set<number>>(new Set());
   const [bulkPrecoComum, setBulkPrecoComum] = useState("");
   const [bulkPrecoLoading, setBulkPrecoLoading] = useState(false);
+  /** Só chefe: impressão do fechamento com valores em R$; desmarcado = apenas quantidades (como funcionário). */
+  const [fechamentoImpressaoComValores, setFechamentoImpressaoComValores] = useState(true);
 
   const loadDetalhe = () => {
     if (!id) return;
@@ -344,9 +355,6 @@ export function ClienteDetalhe() {
     : [];
 
   const totalVendasPeriodo = vendasFiltradas.reduce((s, v) => s + safeNum(v.total), 0);
-  const totalPagoPeriodo = pagamentosFiltrados.reduce((s, p) => s + safeNum(p.valor), 0);
-  const saldoNoPeriodo = totalVendasPeriodo - totalPagoPeriodo;
-  const totalPagoGeral = safeNum(data?.total_pago);
   const saldoDevedorGeral = safeNum(data?.saldo_devedor);
 
   const formatCurrency = (n: number) =>
@@ -376,6 +384,7 @@ export function ClienteDetalhe() {
 
   const imprimirFechamento = () => {
     if (!printRef.current || !data) return;
+    const comValores = isChefe && fechamentoImpressaoComValores;
     const periodoLabel =
       periodo === "semana"
         ? "Última semana"
@@ -384,6 +393,44 @@ export function ClienteDetalhe() {
           : periodo === "personalizado" && dataInicio && dataFim
             ? `${formatDateOnly(dataInicio)} a ${formatDateOnly(dataFim)}`
             : "Todo o período";
+    const resumoBlock = comValores
+      ? `<div class="resumo">
+            <div class="linha"><span>Valor das vendas neste período (soma das notas)</span><strong>${formatCurrency(totalVendasPeriodo)}</strong></div>
+            ${
+              isChefe
+                ? `<div class="linha total-a-pagar"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrency(saldoDevedorGeral)}</strong></div>`
+                : ""
+            }
+            <div style="margin-top:10px;color:#64748b;font-size:11px;">
+              Este documento não discrimina pagamentos: um pagamento pode referir-se a fechamentos anteriores. Use o saldo no sistema para conferência financeira.
+            </div>
+          </div>`
+      : `<div class="resumo">
+            <div class="linha"><span>Notas no período</span><strong>${vendasFiltradas.length}</strong></div>
+            <div style="margin-top:10px;color:#64748b;font-size:11px;">
+              Listagem apenas com quantidades e produtos, sem valores em R$.
+            </div>
+          </div>`;
+    const vendasThead = comValores
+      ? `<tr><th>Data</th><th>Itens (quantidade × produto)</th><th>Total</th></tr>`
+      : `<tr><th>Data</th><th>Itens (quantidade × produto)</th></tr>`;
+    const vendasTbody = vendasFiltradas
+      .map((v) => {
+        const itensHtml =
+          v.itens && v.itens.length > 0
+            ? v.itens
+                .map((i) =>
+                  comValores
+                    ? `${i.quantidade}× ${i.produto} (${formatCurrency(i.preco_unitario)} un.)`
+                    : `${i.quantidade}× ${i.produto}`
+                )
+                .join("<br/>")
+            : "—";
+        return comValores
+          ? `<tr><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td><td>${formatCurrency(v.total)}</td></tr>`
+          : `<tr><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td></tr>`;
+      })
+      .join("");
     const htmlFech = `
       <!DOCTYPE html>
       <html>
@@ -422,52 +469,33 @@ export function ClienteDetalhe() {
         <body>
           ${getEmpresaHeaderHtml()}
           <h1>Fechamento – ${data.cliente.nome}</h1>
-          <p class="meta">Período: ${periodoLabel}</p>
-          <div class="resumo">
-            <div class="linha"><span>Valor deste fechamento (total de vendas no período)</span><strong>${formatCurrency(totalVendasPeriodo)}</strong></div>
-            <div class="linha"><span>Valor pago já pelo cliente (total registrado no sistema)</span><strong>${formatCurrency(totalPagoGeral)}</strong></div>
-            ${isChefe ? `<div class="linha total-a-pagar"><span>Valor pendente a pagar (saldo atual do cliente)</span><strong>${formatCurrency(saldoDevedorGeral)}</strong></div>` : ""}
-            <div style="margin-top:10px;color:#64748b;font-size:11px;">
-              Observação: pagamentos “no período” podem não coincidir com as vendas do período. Por isso o sistema destaca o total pago geral e o saldo pendente atual.
-            </div>
-          </div>
-          <p class="meta"><strong>Vendas no período:</strong> ${vendasFiltradas.length} &nbsp;|&nbsp; <strong>Pagamentos no período:</strong> ${pagamentosFiltrados.length}</p>
+          <p class="meta">Período: ${periodoLabel}${comValores ? "" : " · sem valores (R$)"}</p>
+          ${resumoBlock}
+          <p class="meta"><strong>Vendas no período:</strong> ${vendasFiltradas.length}</p>
           <h3 style="font-size:14px;margin:20px 0 8px;">Vendas</h3>
           <table>
-            <thead><tr><th>Data</th><th>Itens (quantidade × produto)</th><th>Total</th></tr></thead>
+            <thead>${vendasThead}</thead>
             <tbody>
-              ${vendasFiltradas.map((v) => {
-                const itensHtml = (v.itens && v.itens.length > 0)
-                  ? v.itens.map((i) => `${i.quantidade}× ${i.produto} (${formatCurrency(i.preco_unitario)} un.)`).join("<br/>")
-                  : "—";
-                return `<tr><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td><td>${formatCurrency(v.total)}</td></tr>`;
-              }).join("")}
-            </tbody>
-          </table>
-          <h3 style="font-size:14px;margin:20px 0 8px;">Pagamentos</h3>
-          <table>
-            <thead><tr><th>Data</th><th>Valor</th></tr></thead>
-            <tbody>
-              ${pagamentosFiltrados.map((p) => `<tr><td>${formatDateOnly(p.data)}</td><td>${formatCurrency(p.valor)}</td></tr>`).join("")}
+              ${vendasTbody}
             </tbody>
           </table>
           <p class="muted">${empresa.nome || "Empresa"} — Impresso em ${new Date().toLocaleString("pt-BR")}</p>
         </body>
       </html>
     `;
-    const tituloPrev = `Fechamento — ${data.cliente.nome} (${periodoLabel})`;
+    const tituloPrev = `Fechamento — ${data.cliente.nome} (${periodoLabel})${comValores ? "" : " · só quantidades"}`;
     void api
       .registrarImpressao({
         tipo: "fechamento_cliente",
         titulo: tituloPrev,
         html: htmlFech,
-        meta: { cliente_id: Number(id), periodo: periodoLabel },
+        meta: { cliente_id: Number(id), periodo: periodoLabel, com_valores: comValores },
       })
       .catch(() => {});
     setPrintPreview({
       html: htmlFech,
       titulo: tituloPrev,
-      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}`,
+      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}${comValores ? "" : "-sem-valores"}`,
     });
   };
 
@@ -482,8 +510,7 @@ export function ClienteDetalhe() {
 
   const imprimirFechamentoSelecionadas = (
     vendasSelecionadas: VendaCliente[],
-    totalSelecionado: number,
-    restanteBrutoForaSelecao: number
+    totalSelecionado: number
   ) => {
     if (vendasSelecionadas.length === 0) {
       toast.error("Selecione pelo menos uma venda para gerar o fechamento.");
@@ -491,18 +518,21 @@ export function ClienteDetalhe() {
     }
     if (!data) return;
 
+    const comValores = isChefe && fechamentoImpressaoComValores;
     const porData = [...vendasSelecionadas].sort((a, b) => parseData(a.data) - parseData(b.data));
     const notasHtml = porData
-      .map((v, index) => {
+      .map((v) => {
         const itens = Array.isArray(v.itens) ? v.itens : [];
-        const itensRows =
-          itens.length > 0
+        const itensRows = comValores
+          ? itens.length > 0
             ? itens
                 .map((i) => {
                   const totalItem =
                     (typeof (i as any).total_item === "number" ? (i as any).total_item : null) ??
                     (typeof (i as any).total === "number" ? (i as any).total : null) ??
-                    (typeof i.preco_unitario === "number" && typeof i.quantidade === "number" ? i.preco_unitario * i.quantidade : 0);
+                    (typeof i.preco_unitario === "number" && typeof i.quantidade === "number"
+                      ? i.preco_unitario * i.quantidade
+                      : 0);
                   return `<tr>
                       <td>${i.produto}</td>
                       <td class="num">${i.quantidade}</td>
@@ -511,7 +541,42 @@ export function ClienteDetalhe() {
                     </tr>`;
                 })
                 .join("")
-            : `<tr><td colspan="4" style="text-align:center;">Nenhum item registrado</td></tr>`;
+            : `<tr><td colspan="4" style="text-align:center;">Nenhum item registrado</td></tr>`
+          : itens.length > 0
+            ? itens
+                .map(
+                  (i) =>
+                    `<tr><td>${i.produto}</td><td class="num">${i.quantidade}</td></tr>`
+                )
+                .join("")
+            : `<tr><td colspan="2" style="text-align:center;">Nenhum item registrado</td></tr>`;
+
+        const dataVenda = formatDateOnly(v.data);
+
+        if (!comValores) {
+          return `
+          <div class="nota">
+            <div class="nota-header">
+              <div><strong>Nota #${v.id}</strong></div>
+              <div><strong>Data:</strong> ${dataVenda}</div>
+              <div><strong>Cliente:</strong> ${data.cliente.nome}</div>
+            </div>
+            <div class="nota-items">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 72%;">Produto</th>
+                    <th class="num" style="width: 28%;">Qtd</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${itensRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+        }
 
         const totalCalculado = itens.reduce((s, i) => {
           const t =
@@ -522,8 +587,6 @@ export function ClienteDetalhe() {
         }, 0);
         const totalNota =
           typeof (v as any).total === "number" && (v as any).total > 0 ? (v as any).total : totalCalculado;
-
-        const dataVenda = formatDateOnly(v.data);
 
         return `
           <div class="nota">
@@ -556,21 +619,25 @@ export function ClienteDetalhe() {
     const hojeStr = new Date().toLocaleString("pt-BR");
     const saldoTotal = safeNum(data.saldo_devedor);
     const totalSelNum = safeNum(totalSelecionado);
-    const restanteForaBruto = safeNum(restanteBrutoForaSelecao);
 
-    // Pagamentos no intervalo das notas selecionadas (min/max data)
-    const times = porData.map((v) => parseData(v.data)).filter((t) => typeof t === "number" && !isNaN(t));
-    const inicioSel = times.length ? Math.min(...times) : null;
-    const fimSel = times.length ? Math.max(...times) : null;
-    const pagoNoIntervalo = inicioSel != null && fimSel != null
-      ? (data.pagamentos || []).reduce((s, p) => {
-          const t = parseData(p.data);
-          if (t < inicioSel || t > fimSel) return s;
-          return s + safeNum(p.valor);
-        }, 0)
-      : 0;
-
-    const totalAPagarFech = Math.max(0, totalSelNum - pagoNoIntervalo);
+    const resumoSelecaoHtml = comValores
+      ? `<div class="resumo-box">
+            <div class="linha"><span>Valor deste fechamento (soma das notas selecionadas)</span><strong>${formatCurrency(totalSelNum)}</strong></div>
+            ${
+              isChefe
+                ? `<div class="linha"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrency(saldoTotal)}</strong></div>`
+                : ""
+            }
+            <div style="margin-top:10px;color:#64748b;font-size:11px;">
+              Pagamentos não aparecem neste documento: podem referir-se a outros fechamentos. Use o saldo no sistema para conferência.
+            </div>
+          </div>`
+      : `<div class="resumo-box">
+            <div class="linha"><span>Notas neste fechamento</span><strong>${vendasSelecionadas.length}</strong></div>
+            <div style="margin-top:10px;color:#64748b;font-size:11px;">
+              Documento apenas com quantidades e produtos, sem valores em R$.
+            </div>
+          </div>`;
 
     const htmlSel = `
       <!DOCTYPE html>
@@ -641,16 +708,7 @@ export function ClienteDetalhe() {
             <div><strong>Notas neste fechamento:</strong> ${vendasSelecionadas.length}</div>
           </div>
 
-          <div class="resumo-box">
-            <div class="linha"><span>Valor deste fechamento (selecionado)</span><strong>${formatCurrency(totalSelecionado)}</strong></div>
-            <div class="linha"><span>Valor pago no intervalo das notas selecionadas</span><strong>${formatCurrency(pagoNoIntervalo)}</strong></div>
-            <div class="linha total-fech"><span>Total a pagar nesta seleção</span><span>${formatCurrency(totalAPagarFech)}</span></div>
-            <div class="linha"><span>Restante a pagar (fora da seleção) — total bruto das notas não selecionadas</span><strong>${formatCurrency(restanteForaBruto)}</strong></div>
-            <div class="linha"><span>Saldo devedor total do cliente (atual)</span><strong>${formatCurrency(saldoTotal)}</strong></div>
-            <div style="margin-top:10px;color:#64748b;font-size:11px;">
-              “Restante fora da seleção” é a soma dos totais das notas exibidas que não entraram na seleção (valor de face). O “total a pagar nesta seleção” é o total selecionado menos os pagamentos registrados no intervalo de datas das notas selecionadas.
-            </div>
-          </div>
+          ${resumoSelecaoHtml}
 
           ${notasHtml}
 
@@ -667,7 +725,7 @@ export function ClienteDetalhe() {
         </body>
       </html>
     `;
-    const tituloSel = `Fechamento (seleção) — ${data.cliente.nome} · ${vendasSelecionadas.length} nota(s)`;
+    const tituloSel = `Fechamento (seleção) — ${data.cliente.nome} · ${vendasSelecionadas.length} nota(s)${comValores ? "" : " · só quantidades"}`;
     void api
       .registrarImpressao({
         tipo: "fechamento_cliente_selecao",
@@ -677,13 +735,15 @@ export function ClienteDetalhe() {
           cliente_id: Number(id),
           venda_ids: vendasSelecionadas.map((v) => v.id),
           total_selecionado: totalSelecionado,
+          com_valores: comValores,
+          saldo_devedor_atual: saldoTotal,
         },
       })
       .catch(() => {});
     setPrintPreview({
       html: htmlSel,
       titulo: tituloSel,
-      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-selecao`,
+      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-selecao${comValores ? "" : "-sem-valores"}`,
     });
   };
 
@@ -814,36 +874,27 @@ export function ClienteDetalhe() {
         .reduce((s, v) => s + safeNum(v.total), 0),
     [exibirVendas, selectedVendaIds]
   );
-  // Intervalo real da seleção (min/max datas das vendas selecionadas)
-  const rangeSelecao = useMemo(() => {
-    if (vendasSelecionadas.length === 0) return null;
-    const times = vendasSelecionadas
-      .map((v) => parseData(v.data))
-      .filter((t) => typeof t === "number" && !isNaN(t));
-    if (times.length === 0) return null;
-    return { inicio: Math.min(...times), fim: Math.max(...times) };
-  }, [vendasSelecionadas]);
-
-  const totalPagoNoIntervaloSelecao = useMemo(() => {
-    if (!rangeSelecao) return 0;
-    const { inicio, fim } = rangeSelecao;
-    return pagamentosRaw.reduce((s, p) => {
-      const t = parseData(p.data);
-      if (t < inicio || t > fim) return s;
-      return s + safeNum(p.valor);
-    }, 0);
-  }, [pagamentosRaw, rangeSelecao]);
-
   if (!id) return null;
   if (loading && !data) return <p className="text-muted-foreground">Carregando...</p>;
   if (!data) return <p className="text-muted-foreground">Cliente não encontrado.</p>;
 
   const { cliente, total_vendas, total_pago, saldo_devedor } = data;
 
-  /** Pagamentos entre a menor e a maior data da seleção abatem diretamente o total selecionado (valor das notas do fechamento). */
-  const aPagarDaSelecao = Math.max(0, totalSelecionado - totalPagoNoIntervaloSelecao);
   const selecionarTodasExibidas = () => setSelectedVendaIds(new Set(exibirVendas.map((v) => v.id)));
   const limparSelecao = () => setSelectedVendaIds(new Set());
+
+  const aplicarMarcacaoVenda = async (vendaId: number, valor: boolean) => {
+    setMarcacaoVendaSaving(vendaId);
+    try {
+      await api.patchVenda(String(vendaId), { marcada_paga: valor });
+      toast.success(valor ? "Venda marcada como paga." : "Marcação de paga removida.");
+      loadDetalhe();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar.");
+    } finally {
+      setMarcacaoVendaSaving(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -880,6 +931,18 @@ export function ClienteDetalhe() {
               <Input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="w-36" />
             </div>
           )}
+          {isChefe && (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
+              <Checkbox
+                id="fechamento-impressao-valores"
+                checked={fechamentoImpressaoComValores}
+                onCheckedChange={(c) => setFechamentoImpressaoComValores(c === true)}
+              />
+              <Label htmlFor="fechamento-impressao-valores" className="cursor-pointer text-xs font-normal leading-snug">
+                Incluir valores (R$) na impressão do fechamento
+              </Label>
+            </div>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -895,7 +958,7 @@ export function ClienteDetalhe() {
             size="sm"
             disabled={vendasSelecionadas.length === 0}
             onClick={() =>
-              imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado, restanteBrutoNotasForaSelecao)
+              imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado)
             }
             title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas as vendas selecionadas"}
           >
@@ -1049,6 +1112,85 @@ export function ClienteDetalhe() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Card className={vendasSelecionadas.length > 0 ? "border-primary/30 bg-primary/[0.03]" : ""}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <Receipt className="size-5 text-muted-foreground" />
+            Fechamento (seleção)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Selecione vendas na tabela ou use &quot;Imprimir fechamento do período&quot; no cabeçalho. A coluna{" "}
+            <strong>Marcada paga</strong> é só controle visual (não lança pagamento).
+            {isChefe && (
+              <>
+                {" "}
+                Como chefe, use a opção <strong>Incluir valores (R$) na impressão</strong> ao lado dos botões de
+                impressão: desmarcada, a impressão fica só com quantidades (como para funcionários).
+              </>
+            )}
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={selecionarTodasExibidas} disabled={exibirVendas.length === 0}>
+                Selecionar todas ({exibirVendas.length})
+              </Button>
+              <Button variant="outline" size="sm" onClick={limparSelecao} disabled={selectedVendaIds.size === 0}>
+                Limpar seleção
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Selecionadas: <span className="font-medium tabular-nums text-foreground">{vendasSelecionadas.length}</span>
+            </div>
+          </div>
+
+          {isChefe && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Total selecionado (soma das notas)</p>
+                <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionado)}</p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Saldo atual do cliente</p>
+                <p className={`text-xl font-bold ${(data?.saldo_devedor ?? 0) > 0 ? "text-destructive" : ""}`}>
+                  {formatCurrency(data?.saldo_devedor ?? 0)}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Conferência geral no sistema; não vincula pagamentos a este fechamento.
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Restante bruto (fora da seleção)
+                </p>
+                <p
+                  className={`text-xl font-bold ${restanteBrutoNotasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"}`}
+                >
+                  {formatCurrency(restanteBrutoNotasForaSelecao)}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Soma das notas listadas que não estão selecionadas (sem descontar pagamentos).
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() =>
+                imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado)
+              }
+              disabled={vendasSelecionadas.length === 0}
+              title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas a seleção"}
+            >
+              <Printer className="size-4 mr-2" />
+              Imprimir seleção
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {isChefe && (
       <div className="grid gap-4 md:grid-cols-3">
@@ -1297,90 +1439,6 @@ export function ClienteDetalhe() {
       </Collapsible>
       )}
 
-      <Card className={vendasSelecionadas.length > 0 ? "border-primary/30 bg-primary/[0.03]" : ""}>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2">
-            <Receipt className="size-5 text-muted-foreground" />
-            Fechamento (seleção)
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Selecione as vendas na lista abaixo para montar um fechamento “sob medida”. Se não selecionar nada, use “Imprimir fechamento do período”.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={selecionarTodasExibidas} disabled={exibirVendas.length === 0}>
-                Selecionar todas ({exibirVendas.length})
-              </Button>
-              <Button variant="outline" size="sm" onClick={limparSelecao} disabled={selectedVendaIds.size === 0}>
-                Limpar seleção
-              </Button>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Selecionadas: <span className="font-medium tabular-nums text-foreground">{vendasSelecionadas.length}</span>
-            </div>
-          </div>
-
-          {isChefe && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-lg border bg-background p-4">
-                <p className="text-xs font-medium text-muted-foreground">Total selecionado</p>
-                <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionado)}</p>
-              </div>
-              <div className="rounded-lg border bg-background p-4">
-                <p className="text-xs font-medium text-muted-foreground">Saldo atual do cliente</p>
-                <p className={`text-xl font-bold ${(data?.saldo_devedor ?? 0) > 0 ? "text-destructive" : ""}`}>
-                  {formatCurrency(data?.saldo_devedor ?? 0)}
-                </p>
-              </div>
-              <div className="rounded-lg border bg-background p-4">
-                <p className="text-xs font-medium text-muted-foreground">Valor pago no intervalo das vendas selecionadas</p>
-                <p className="text-xl font-bold text-green-600">{formatCurrency(totalPagoNoIntervaloSelecao)}</p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Considera pagamentos entre a menor e a maior data das vendas selecionadas.
-                </p>
-              </div>
-              <div className="rounded-lg border bg-background p-4">
-                <p className="text-xs font-medium text-muted-foreground">Total a pagar desta seleção</p>
-                <p className={`text-xl font-bold ${aPagarDaSelecao > 0 ? "text-primary" : "text-muted-foreground"}`}>
-                  {formatCurrency(aPagarDaSelecao)}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Abate direto no total selecionado; não desconta antes o valor bruto das notas fora da seleção.
-                </p>
-              </div>
-              <div className="rounded-lg border bg-background p-4">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Restante a pagar (fora da seleção)
-                </p>
-                <p
-                  className={`text-xl font-bold ${restanteBrutoNotasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"}`}
-                >
-                  {formatCurrency(restanteBrutoNotasForaSelecao)}
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Total bruto das notas listadas que não estão selecionadas (sem descontar pagamentos).
-                </p>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              onClick={() =>
-                imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado, restanteBrutoNotasForaSelecao)
-              }
-              disabled={vendasSelecionadas.length === 0}
-              title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas a seleção"}
-            >
-              <Printer className="size-4 mr-2" />
-              Imprimir seleção
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
       {limites && isChefe && (
         <Card ref={printRef}>
           <CardHeader>
@@ -1391,11 +1449,12 @@ export function ClienteDetalhe() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              Total vendas no período: {formatCurrency(totalVendasPeriodo)} &nbsp;|&nbsp; Total pago no período:{" "}
-              {formatCurrency(totalPagoPeriodo)}
+              Total das vendas no período: <strong className="text-foreground">{formatCurrency(totalVendasPeriodo)}</strong>
             </p>
-            <p className={`text-lg font-bold ${saldoNoPeriodo > 0 ? "text-destructive" : ""}`}>
-              Saldo a receber no período: {formatCurrency(saldoNoPeriodo)}
+            <p className="text-sm text-muted-foreground mt-2">
+              Pagamentos por período não são mostrados aqui: costumam misturar fechamentos. Use os cards{" "}
+              <span className="font-medium text-foreground">Total pago</span> e{" "}
+              <span className="font-medium text-foreground">Saldo devedor</span> acima para o saldo geral do cliente.
             </p>
           </CardContent>
         </Card>
@@ -1411,6 +1470,7 @@ export function ClienteDetalhe() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10">Selecionar</TableHead>
+                  {isChefe && <TableHead className="w-[120px]">Marcada paga</TableHead>}
                   <TableHead>Data</TableHead>
                   <TableHead>Itens (quantidade × produto)</TableHead>
                   {isChefe && <TableHead className="text-right">Total</TableHead>}
@@ -1419,19 +1479,50 @@ export function ClienteDetalhe() {
               <TableBody>
                 {exibirVendas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 4 : 3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={isChefe ? 5 : 3} className="text-center text-muted-foreground">
                       Nenhuma venda{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  exibirVendas.map((v) => (
-                    <TableRow key={v.id}>
+                  exibirVendas.map((v) => {
+                    const sel = selectedVendaIds.has(v.id);
+                    const paga = v.marcada_paga === true;
+                    return (
+                    <TableRow
+                      key={v.id}
+                      className={cn(
+                        "transition-[background-color,box-shadow,border-color] duration-150",
+                        paga && rowVendaMarcadaPaga,
+                        sel && !paga && rowVendaSelecionada,
+                        sel && paga && rowVendaPagaSelecionada,
+                      )}
+                    >
                       <TableCell>
                         <Checkbox
-                          checked={selectedVendaIds.has(v.id)}
+                          checked={sel}
                           onCheckedChange={() => toggleVendaSelection(v.id)}
                         />
                       </TableCell>
+                      {isChefe && (
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {paga ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/12 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                                <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                                Paga
+                              </span>
+                            ) : null}
+                            <Checkbox
+                              checked={paga}
+                              disabled={marcacaoVendaSaving === v.id}
+                              onCheckedChange={(checked) =>
+                                void aplicarMarcacaoVenda(v.id, checked === true)
+                              }
+                              aria-label={`Marcar venda ${v.id} como paga`}
+                            />
+                          </div>
+                        </TableCell>
+                      )}
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {formatDateOnly(v.data)}
                       </TableCell>
@@ -1453,7 +1544,8 @@ export function ClienteDetalhe() {
                       </TableCell>
                       {isChefe && <TableCell className="text-right font-medium">{formatCurrency(v.total)}</TableCell>}
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>

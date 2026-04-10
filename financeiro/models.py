@@ -121,7 +121,20 @@ class Material(models.Model):
     )
     fornecedor_padrao = models.ForeignKey(Fornecedor, on_delete=models.SET_NULL, null=True, blank=True)
     preco_unitario_base = models.DecimalField(max_digits=12, decimal_places=4)
+    preco_fabricacao = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Opcional: preço usado só no custo de insumos. Compras e estoque usam preco_unitario_base.",
+    )
     estoque_atual = models.PositiveIntegerField(default=0)
+
+    def preco_para_insumo(self):
+        """Custo unitário do material na composição de produtos fabricados."""
+        if self.preco_fabricacao is not None:
+            return self.preco_fabricacao
+        return self.preco_unitario_base
 
     def __str__(self):
         return self.nome
@@ -157,6 +170,11 @@ class Venda(models.Model):
     )
     cancelada = models.BooleanField(default=False, verbose_name="Cancelada")
     observacao = models.TextField(blank=True, verbose_name="Observação")
+    marcada_paga = models.BooleanField(
+        default=False,
+        verbose_name="Marcada como paga",
+        help_text="Controle manual no detalhe do cliente; não substitui pagamentos lançados.",
+    )
 
     def __str__(self):
         return f"Venda {self.id} - {self.cliente.nome}"
@@ -166,6 +184,7 @@ class Venda(models.Model):
         return sum(item.total_item for item in self.itens.all())
 
 class ItemVenda(models.Model):
+    """Item da venda: preço e quantidade são snapshot no momento da venda (alterar Produto.preco_venda depois não muda linhas antigas)."""
     venda = models.ForeignKey(Venda, on_delete=models.CASCADE, related_name='itens')
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT)
     quantidade = models.PositiveIntegerField(default=1)
@@ -237,6 +256,11 @@ class OrdemCompra(models.Model):
         help_text='Data da operação de compra (pode ser ajustada após salvar).',
     )
     cancelada = models.BooleanField(default=False, verbose_name='Cancelada')
+    marcada_paga = models.BooleanField(
+        default=False,
+        verbose_name='Marcada como paga',
+        help_text='Controle manual no detalhe do fornecedor.',
+    )
 
     class Meta:
         ordering = ['-data_compra']
@@ -250,6 +274,7 @@ class OrdemCompra(models.Model):
 
 
 class CompraMaterial(models.Model):
+    """Compra: preco_no_dia é o valor negociado na nota; mudança no cadastro do material não altera compras antigas."""
     material = models.ForeignKey(Material, on_delete=models.CASCADE)
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras')
     quantidade = models.PositiveIntegerField()
@@ -262,6 +287,11 @@ class CompraMaterial(models.Model):
         null=True,
         blank=True,
         related_name='itens',
+    )
+    marcada_paga = models.BooleanField(
+        default=False,
+        verbose_name='Marcada como paga (avulsa)',
+        help_text='Só para linha sem ordem; com ordem, usa a marcação da ordem.',
     )
 
     @property
@@ -283,6 +313,11 @@ class CompraProduto(models.Model):
         null=True,
         blank=True,
         related_name='itens_produtos',
+    )
+    marcada_paga = models.BooleanField(
+        default=False,
+        verbose_name='Marcada como paga (avulsa)',
+        help_text='Só para linha sem ordem; com ordem, usa a marcação da ordem.',
     )
 
     @property

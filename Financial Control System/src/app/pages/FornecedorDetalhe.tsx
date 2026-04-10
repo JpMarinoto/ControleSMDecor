@@ -4,11 +4,12 @@ import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { cn } from "../components/ui/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight, Ban, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight, Ban, Pencil, Trash2, CheckCircle2 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
@@ -32,9 +33,12 @@ type CompraLinhaFornecedor = {
   data: string;
   material: string;
   quantidade?: number;
+  /** Preço unitário registrado na compra (preco_no_dia no banco). */
+  preco_unitario?: number;
   total: number;
   ordem_id?: number | null;
   ordem_cancelada?: boolean;
+  marcada_paga?: boolean;
 };
 
 function escapeHtml(s: string): string {
@@ -67,6 +71,15 @@ function agruparComprasPorOrdem(
 }
 
 const METODOS_PAGAMENTO_API = ["Pix", "Dinheiro", "Cartão crédito", "Cartão débito", "Cheque"] as const;
+
+const rowCompraMarcadaPaga =
+  "border-l-[3px] border-l-emerald-500 bg-emerald-50/90 dark:border-l-emerald-400 dark:bg-emerald-950/35";
+const rowCompraMarcadaPagaFilha = "bg-emerald-50/55 dark:bg-emerald-950/25";
+const rowCompraSelecionada = "bg-primary/[0.07] dark:bg-primary/12 ring-1 ring-inset ring-primary/25";
+const rowCompraPagaSelecionada =
+  "border-l-[3px] border-l-emerald-600 bg-emerald-100/95 dark:border-l-emerald-300 dark:bg-emerald-950/45 ring-2 ring-inset ring-emerald-500/30 dark:ring-emerald-400/25";
+const rowCompraPagaFilhaSelecionada =
+  "bg-emerald-100/75 dark:bg-emerald-950/35 ring-1 ring-inset ring-emerald-400/25 dark:ring-emerald-500/20";
 
 interface FornecedorDetalheData {
   fornecedor: { id: number; nome: string; telefone: string };
@@ -108,6 +121,7 @@ export function FornecedorDetalhe() {
   const [editingMaterialPreco, setEditingMaterialPreco] = useState("");
   const [savingMaterialId, setSavingMaterialId] = useState<number | null>(null);
   const [selectedCompraIds, setSelectedCompraIds] = useState<Set<string>>(new Set());
+  const [marcacaoSaving, setMarcacaoSaving] = useState<string | null>(null);
   const [editPagamentoOpen, setEditPagamentoOpen] = useState(false);
   const [editPagamentoId, setEditPagamentoId] = useState<number | null>(null);
   const [editPagValor, setEditPagValor] = useState("");
@@ -357,6 +371,10 @@ export function FornecedorDetalhe() {
     const gruposImpressao = agruparComprasPorOrdem(comprasParaImprimir, parseData);
     const linhaQtd = (q: number | undefined) =>
       q != null && !Number.isNaN(Number(q)) ? String(q) : "—";
+    const linhaPU = (linha: CompraLinhaFornecedor) =>
+      linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+        ? formatCurrency(linha.preco_unitario)
+        : "—";
     const comprasRows = gruposImpressao
       .map((g) => {
         if (g.ordemId != null) {
@@ -364,14 +382,16 @@ export function FornecedorDetalhe() {
           const itens = g.lines
             .map((linha) => {
               const q = linhaQtd(linha.quantidade);
-              return `<tr class="row-item-ordem"><td></td><td>${escapeHtml(linha.material)}</td><td class="num">${q}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
+              const pu = linhaPU(linha);
+              return `<tr class="row-item-ordem"><td></td><td>${escapeHtml(linha.material)}</td><td class="num">${q}</td><td class="num">${pu}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
             })
             .join("");
-          return `<tr class="row-ordem-cabecalho"><td colspan="4">${escapeHtml(cabecalho)}</td></tr>${itens}`;
+          return `<tr class="row-ordem-cabecalho"><td colspan="5">${escapeHtml(cabecalho)}</td></tr>${itens}`;
         }
         const linha = g.lines[0];
         const qtd = linhaQtd(linha.quantidade);
-        return `<tr><td>${formatDateOnly(linha.data)}</td><td>${escapeHtml(linha.material)}</td><td class="num">${qtd}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
+        const pu = linhaPU(linha);
+        return `<tr><td>${formatDateOnly(linha.data)}</td><td>${escapeHtml(linha.material)}</td><td class="num">${qtd}</td><td class="num">${pu}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
       })
       .join("");
     const pagRows = (limites ? pagamentosFiltrados : data.pagamentos)
@@ -446,7 +466,7 @@ export function FornecedorDetalhe() {
           </div>
           <h3 style="font-size:14px;margin:16px 0 8px;">Compras</h3>
           <table>
-            <thead><tr><th>Data</th><th>Item</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead>
+            <thead><tr><th>Data</th><th>Item</th><th class="num">Qtd</th><th class="num">V. unit.</th><th class="num">Total</th></tr></thead>
             <tbody>${comprasRows}</tbody>
           </table>
           <h3 style="font-size:14px;margin:20px 0 8px;">Pagamentos</h3>
@@ -506,6 +526,53 @@ export function FornecedorDetalhe() {
     return ids.length > 0 && ids.every((id) => selectedCompraIds.has(id));
   }).length;
 
+  const pagamentosRaw = data.pagamentos;
+  const safeNumFn = (v: unknown) => {
+    const n = typeof v === "number" ? v : parseFloat(String(v));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const rangeSelecaoCompras =
+    comprasSelecionadas.length === 0
+      ? null
+      : (() => {
+          const times = comprasSelecionadas
+            .map((c) => parseData(c.data))
+            .filter((t) => typeof t === "number" && !isNaN(t));
+          if (times.length === 0) return null;
+          return { inicio: Math.min(...times), fim: Math.max(...times) };
+        })();
+  const totalPagoNoIntervaloSelecao =
+    rangeSelecaoCompras == null
+      ? 0
+      : pagamentosRaw.reduce((s, p) => {
+          const t = parseData(p.data);
+          if (t < rangeSelecaoCompras.inicio || t > rangeSelecaoCompras.fim) return s;
+          return s + safeNumFn(p.valor);
+        }, 0);
+  const aPagarDaSelecaoCompras = Math.max(0, totalSelecionadoCompras - totalPagoNoIntervaloSelecao);
+  const restanteBrutoComprasForaSelecao = exibirCompras
+    .filter((c) => !selectedCompraIds.has(c.id))
+    .reduce((s, c) => s + safeNumFn(c.total), 0);
+
+  const aplicarMarcacaoCompra = async (opts: { ordemId?: number; linhaId?: string; valor: boolean }) => {
+    if (!id) return;
+    const key = opts.ordemId != null ? `ordem-${opts.ordemId}` : opts.linhaId ?? "";
+    setMarcacaoSaving(key);
+    try {
+      await api.patchFornecedorCompraMarcacaoPaga(id, {
+        marcada_paga: opts.valor,
+        ...(opts.ordemId != null ? { ordem_id: opts.ordemId } : {}),
+        ...(opts.linhaId != null ? { linha_id: opts.linhaId } : {}),
+      });
+      toast.success(opts.valor ? "Marcada como paga." : "Marcação de paga removida.");
+      load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar.");
+    } finally {
+      setMarcacaoSaving(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -563,6 +630,16 @@ export function FornecedorDetalhe() {
           <Button variant="outline" size="sm" onClick={() => imprimirFechamento(false)}>
             <Printer className="size-4 mr-2" />
             Imprimir fechamento (período)
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            disabled={comprasSelecionadas.length === 0}
+            onClick={() => imprimirFechamento(true)}
+            title={comprasSelecionadas.length === 0 ? "Selecione itens na tabela abaixo" : "Imprimir só a seleção"}
+          >
+            <Printer className="size-4 mr-2" />
+            Imprimir selecionadas
           </Button>
           {isChefe && (
           <Dialog open={openPagamento} onOpenChange={(open) => { setOpenPagamento(open); if (open) { setDataPagamento(getTodayLocalISO()); loadContas(); } }}>
@@ -719,6 +796,83 @@ export function FornecedorDetalhe() {
         </div>
       </div>
 
+      <Card className={comprasSelecionadas.length > 0 ? "border-primary/30 bg-primary/[0.03]" : ""}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <Receipt className="size-5 text-muted-foreground" />
+            Fechamento (seleção)
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Selecione ordens ou compras avulsas na tabela abaixo. O resumo segue o mesmo critério do detalhe do
+            cliente: total selecionado, pagamentos no intervalo das datas marcadas e saldo do fornecedor.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              {isChefe && exibirCompras.length > 0 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedCompraIds(new Set(exibirCompras.map((c) => c.id)))}
+                >
+                  Selecionar todas ({exibirCompras.length})
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" size="sm" onClick={() => setSelectedCompraIds(new Set())} disabled={selectedCompraIds.size === 0}>
+                Limpar seleção
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {ordensTotalmenteSelecionadas} ordem(ns) completa(s) · {comprasSelecionadas.length} linha(s) · Total{" "}
+              <span className="font-medium tabular-nums text-foreground">{formatCurrency(totalSelecionadoCompras)}</span>
+            </div>
+          </div>
+
+          {isChefe && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Total selecionado</p>
+                <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionadoCompras)}</p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Saldo atual do fornecedor</p>
+                <p className={`text-xl font-bold ${saldo_devedor > 0 ? "text-destructive" : ""}`}>
+                  {formatCurrency(saldo_devedor)}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">Pago no intervalo da seleção</p>
+                <p className="text-xl font-bold text-green-600">{formatCurrency(totalPagoNoIntervaloSelecao)}</p>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Pagamentos entre a menor e a maior data das linhas selecionadas.
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4">
+                <p className="text-xs font-medium text-muted-foreground">A pagar desta seleção</p>
+                <p className={`text-xl font-bold ${aPagarDaSelecaoCompras > 0 ? "text-primary" : "text-muted-foreground"}`}>
+                  {formatCurrency(aPagarDaSelecaoCompras)}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-background p-4 sm:col-span-2 lg:col-span-4">
+                <p className="text-xs font-medium text-muted-foreground">Compras listadas fora da seleção (bruto)</p>
+                <p className={`text-xl font-bold ${restanteBrutoComprasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"}`}>
+                  {formatCurrency(restanteBrutoComprasForaSelecao)}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => imprimirFechamento(true)} disabled={comprasSelecionadas.length === 0}>
+              <Printer className="size-4 mr-2" />
+              Imprimir seleção
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {limites && isChefe && (
         <Card>
           <CardContent className="pt-4">
@@ -760,30 +914,6 @@ export function FornecedorDetalhe() {
           </CardContent>
         </Card>
       </div>
-      )}
-
-      {comprasSelecionadas.length > 0 && (
-        <Card className="border-primary/30 bg-primary/[0.03]">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Receipt className="size-5 text-primary" />
-              Fechamento selecionado
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {ordensTotalmenteSelecionadas} ordem(ns) de compra · {comprasSelecionadas.length} item(ns). Total:{" "}
-              {formatCurrency(totalSelecionadoCompras)}. Use &quot;Imprimir fechamento selecionado&quot; para o comprovante.
-            </p>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => imprimirFechamento(true)}>
-              <Printer className="size-4 mr-2" />
-              Imprimir fechamento selecionado
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setSelectedCompraIds(new Set())}>
-              Limpar seleção
-            </Button>
-          </CardContent>
-        </Card>
       )}
 
       {isChefe && (
@@ -886,35 +1016,32 @@ export function FornecedorDetalhe() {
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader className="space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
-                <p className="text-sm text-muted-foreground">
-                  Ordens canceladas não aparecem aqui — ficam em <strong>Histórico</strong> abaixo. Marque por ordem (um checkbox agrupa os itens). Registos antigos sem ordem são uma linha isolada.
-                </p>
-              </div>
-              {isChefe && exibirCompras.length > 0 ? (
-                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setSelectedCompraIds(new Set(exibirCompras.map((c) => c.id)))}>
-                  Selecionar tudo
-                </Button>
-              ) : null}
+            <div className="space-y-1">
+              <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Ordens canceladas não aparecem aqui — ficam em <strong>Histórico</strong> abaixo. Use o resumo{" "}
+                <strong>Fechamento (seleção)</strong> acima para selecionar tudo e ver totais. A coluna{" "}
+                <strong>Marcada paga</strong> é só controle visual (não registra pagamento no caixa).
+              </p>
             </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  {isChefe && <TableHead className="w-10">Ordem</TableHead>}
+                  {isChefe && <TableHead className="w-10">Sel.</TableHead>}
+                  {isChefe && <TableHead className="w-[120px]">Marcada paga</TableHead>}
                   <TableHead>Data</TableHead>
                   <TableHead>Detalhe</TableHead>
                   <TableHead className="text-right w-20 tabular-nums">Qtd</TableHead>
+                  <TableHead className="text-right w-28 tabular-nums">V. unit.</TableHead>
                   {isChefe && <TableHead className="text-right">Total</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {exibirCompras.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 5 : 3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={isChefe ? 7 : 4} className="text-center text-muted-foreground">
                       Nenhuma compra ativa{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
@@ -924,13 +1051,44 @@ export function FornecedorDetalhe() {
                     const allSel = ids.length > 0 && ids.every((id) => selectedCompraIds.has(id));
                     const someSel = ids.some((id) => selectedCompraIds.has(id)) && !allSel;
                     const checkState = allSel ? true : someSel ? ("indeterminate" as const) : false;
+                    const linhaRef = g.lines[0];
+                    const mp = linhaRef?.marcada_paga === true;
+                    const saveKey = g.ordemId != null ? `ordem-${g.ordemId}` : linhaRef?.id ?? "";
+                    const ordemSel = allSel || someSel;
                     if (g.ordemId != null) {
                       return (
                         <Fragment key={g.key}>
-                          <TableRow>
+                          <TableRow
+                            className={cn(
+                              "transition-[background-color,box-shadow,border-color] duration-150",
+                              mp && rowCompraMarcadaPaga,
+                              ordemSel && !mp && rowCompraSelecionada,
+                              ordemSel && mp && rowCompraPagaSelecionada,
+                            )}
+                          >
                             {isChefe && (
                               <TableCell className="align-top">
                                 <Checkbox checked={checkState} onCheckedChange={() => toggleOrdemGrupo(ids)} />
+                              </TableCell>
+                            )}
+                            {isChefe && (
+                              <TableCell className="align-top">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {mp ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/12 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                                      <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                                      Paga
+                                    </span>
+                                  ) : null}
+                                  <Checkbox
+                                    checked={mp}
+                                    disabled={marcacaoSaving === saveKey}
+                                    onCheckedChange={(v) =>
+                                      void aplicarMarcacaoCompra({ ordemId: g.ordemId!, valor: v === true })
+                                    }
+                                    aria-label={`Marcar ordem ${g.ordemId} como paga`}
+                                  />
+                                </div>
                               </TableCell>
                             )}
                             <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
@@ -939,39 +1097,93 @@ export function FornecedorDetalhe() {
                               <span className="text-muted-foreground text-sm block">{g.lines.length} item(ns) nesta compra</span>
                             </TableCell>
                             <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
+                            <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
                             {isChefe && (
                               <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
                             )}
                           </TableRow>
-                          {g.lines.map((linha) => (
-                            <TableRow key={linha.id} className="bg-muted/25">
+                          {g.lines.map((linha) => {
+                            const linhaSel = selectedCompraIds.has(linha.id);
+                            return (
+                            <TableRow
+                              key={linha.id}
+                              className={cn(
+                                "transition-[background-color,box-shadow] duration-150",
+                                mp ? rowCompraMarcadaPagaFilha : "bg-muted/25",
+                                linhaSel && !mp && rowCompraSelecionada,
+                                linhaSel && mp && rowCompraPagaFilhaSelecionada,
+                              )}
+                            >
+                              {isChefe && <TableCell />}
                               {isChefe && <TableCell />}
                               <TableCell />
                               <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
                               <TableCell className="text-right text-sm tabular-nums">
                                 {linha.quantidade != null ? linha.quantidade : "—"}
                               </TableCell>
+                              <TableCell className="text-right text-sm tabular-nums">
+                                {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                                  ? formatCurrency(linha.preco_unitario)
+                                  : "—"}
+                              </TableCell>
                               {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
                             </TableRow>
-                          ))}
+                            );
+                          })}
                         </Fragment>
                       );
                     }
                     const linha = g.lines[0];
+                    const mpAv = linha.marcada_paga === true;
+                    const skAv = linha.id;
+                    const selAv = selectedCompraIds.has(linha.id);
                     return (
-                      <TableRow key={g.key}>
+                      <TableRow
+                        key={g.key}
+                        className={cn(
+                          "transition-[background-color,box-shadow,border-color] duration-150",
+                          mpAv && rowCompraMarcadaPaga,
+                          selAv && !mpAv && rowCompraSelecionada,
+                          selAv && mpAv && rowCompraPagaSelecionada,
+                        )}
+                      >
                         {isChefe && (
                           <TableCell>
                             <Checkbox
-                              checked={selectedCompraIds.has(linha.id)}
+                              checked={selAv}
                               onCheckedChange={() => toggleOrdemGrupo(ids)}
                             />
+                          </TableCell>
+                        )}
+                        {isChefe && (
+                          <TableCell>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {mpAv ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/12 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                                  <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                                  Paga
+                                </span>
+                              ) : null}
+                              <Checkbox
+                                checked={mpAv}
+                                disabled={marcacaoSaving === skAv}
+                                onCheckedChange={(v) =>
+                                  void aplicarMarcacaoCompra({ linhaId: linha.id, valor: v === true })
+                                }
+                                aria-label="Marcar compra avulsa como paga"
+                              />
+                            </div>
                           </TableCell>
                         )}
                         <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
                         <TableCell>{linha.material}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {linha.quantidade != null ? linha.quantidade : "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                            ? formatCurrency(linha.preco_unitario)
+                            : "—"}
                         </TableCell>
                         {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
                       </TableRow>
@@ -1001,6 +1213,7 @@ export function FornecedorDetalhe() {
                         <TableHead>Data</TableHead>
                         <TableHead>Detalhe</TableHead>
                         <TableHead className="text-right w-20 tabular-nums">Qtd</TableHead>
+                        <TableHead className="text-right w-28 tabular-nums">V. unit.</TableHead>
                         {isChefe && <TableHead className="text-right">Total</TableHead>}
                       </TableRow>
                     </TableHeader>
@@ -1022,6 +1235,7 @@ export function FornecedorDetalhe() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
+                                <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
                                 {isChefe && (
                                   <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
                                 )}
@@ -1033,6 +1247,11 @@ export function FornecedorDetalhe() {
                                   <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
                                   <TableCell className="text-right text-sm tabular-nums">
                                     {linha.quantidade != null ? linha.quantidade : "—"}
+                                  </TableCell>
+                                  <TableCell className="text-right text-sm tabular-nums">
+                                    {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                                      ? formatCurrency(linha.preco_unitario)
+                                      : "—"}
                                   </TableCell>
                                   {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
                                 </TableRow>
@@ -1047,6 +1266,11 @@ export function FornecedorDetalhe() {
                             <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
                             <TableCell>{linha.material}</TableCell>
                             <TableCell className="text-right tabular-nums">{linha.quantidade != null ? linha.quantidade : "—"}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                                ? formatCurrency(linha.preco_unitario)
+                                : "—"}
+                            </TableCell>
                             {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
                           </TableRow>
                         );

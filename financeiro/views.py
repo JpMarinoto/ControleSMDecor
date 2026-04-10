@@ -1,7 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.db.models import Sum
-from django.db.models.deletion import ProtectedError
 from django.contrib import messages
 from django.utils import timezone
 from datetime import timedelta, datetime
@@ -473,7 +472,7 @@ def excluir_categoria(request, id):
 
 # --- PRODUTOS ---
 def lista_produtos(request):
-    produtos = Produto.objects.select_related('categoria').all()
+    produtos = Produto.objects.select_related('categoria').filter(ativo=True).order_by('nome')
     return render(request, 'financeiro/produtos/lista.html', {'produtos': produtos})
 
 
@@ -515,17 +514,19 @@ def editar_produto(request, id):
 
 def excluir_produto(request, id):
     produto = get_object_or_404(Produto, id=id)
-    try:
-        nome = produto.nome
-        produto.delete()
-        _registrar_log(request, 'Excluir', 'Produto', f'Produto excluído: {nome} (ID {id})')
-        messages.success(request, 'Produto excluído com sucesso.')
-    except ProtectedError:
-        messages.error(
-            request,
-            f'Não é possível excluir o produto "{produto.nome}" porque ele foi usado em vendas. '
-            'Edite o produto se precisar alterar dados.'
-        )
+    nome = produto.nome
+    produto.ativo = False
+    produto.save(update_fields=['ativo'])
+    _registrar_log(
+        request,
+        'Excluir',
+        'Produto',
+        f'Produto removido do cadastro (inativado): {nome} (ID {id})',
+    )
+    messages.success(
+        request,
+        'Produto removido do cadastro. Vendas e ordens antigas continuam com o histórico preservado.',
+    )
     return redirect('lista_produtos')
 
 def buscar_produto_por_id(request):
@@ -533,6 +534,8 @@ def buscar_produto_por_id(request):
     prod_id = request.GET.get('id')
     try:
         p = Produto.objects.select_related('categoria').get(id=prod_id)
+        if not p.ativo:
+            return JsonResponse({'sucesso': False, 'erro': 'Produto inativo no cadastro.'})
         return JsonResponse({
             'sucesso': True,
             'nome': p.nome,

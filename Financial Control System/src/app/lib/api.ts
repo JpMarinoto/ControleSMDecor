@@ -354,6 +354,46 @@ export const api = {
     return res.json();
   },
 
+  /**
+   * Apenas chefe. Pelo menos um de: preco_venda, preco_custo, margem_lucro_percent.
+   * Com margem_lucro_percent: venda = custo × (1 + margem/100) por produto (custo em massa ou atual).
+   * Sem margem no body: preco_venda e preco_custo atualizam e a margem cadastral é recalculada no servidor quando fizer sentido.
+   */
+  bulkUpdateProdutosPrecos: async (body: {
+    ids: (string | number)[];
+    preco_venda?: number | null;
+    preco_custo?: number | null;
+    margem_lucro_percent?: number | null;
+  }) => {
+    const payload: Record<string, unknown> = { ids: body.ids };
+    if (body.preco_venda != null) payload.preco_venda = body.preco_venda;
+    if (body.preco_custo != null) payload.preco_custo = body.preco_custo;
+    if (body.margem_lucro_percent != null) payload.margem_lucro_percent = body.margem_lucro_percent;
+    const response = await fetch(`${API_BASE_URL}/produtos/bulk-precos/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    return readJsonOrThrow(response) as Promise<{ ok: number; failed: number; errors: { id: number; error: string }[] }>;
+  },
+
+  /** Apenas chefe. Envie preco_unitario_base e/ou preco_fabricacao (null zera o override de fabricação). */
+  bulkUpdateMateriaisPrecos: async (body: {
+    ids: (string | number)[];
+    preco_unitario_base?: number;
+    preco_fabricacao?: number | null;
+  }) => {
+    const payload: Record<string, unknown> = { ids: body.ids };
+    if ('preco_unitario_base' in body) payload.preco_unitario_base = body.preco_unitario_base;
+    if ('preco_fabricacao' in body) payload.preco_fabricacao = body.preco_fabricacao;
+    const response = await fetch(`${API_BASE_URL}/materiais/bulk-precos/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    return readJsonOrThrow(response) as Promise<{ ok: number; failed: number; errors: { id: number; error: string }[] }>;
+  },
+
   // Vendas (backend retorna todas por padrão)
   getVendas: async () => {
     const response = await fetch(`${API_BASE_URL}/vendas/`, { headers: authHeaders() });
@@ -367,7 +407,10 @@ export const api = {
     return response.json();
   },
 
-  patchVenda: async (id: string, body: { data?: string; data_venda?: string }) => {
+  patchVenda: async (
+    id: string,
+    body: { data?: string; data_venda?: string; marcada_paga?: boolean }
+  ) => {
     const response = await fetch(`${API_BASE_URL}/vendas/${id}/`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -984,6 +1027,20 @@ export const api = {
       throw new Error("Resposta inválida (JSON) do servidor");
     }
   },
+
+  /** Só chefe. Body: { marcada_paga, ordem_id? } ou { marcada_paga, linha_id?: "mat-1"|"prod-2" } */
+  patchFornecedorCompraMarcacaoPaga: async (
+    fornecedorId: string,
+    body: { marcada_paga: boolean; ordem_id?: number; linha_id?: string }
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/fornecedores/${fornecedorId}/compra-marcacao-paga/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response);
+  },
+
   getFornecedorMateriais: async (id: string): Promise<{ id: number; nome: string; preco_unitario_base: number }[]> => {
     const response = await fetch(`${API_BASE_URL}/fornecedores/${id}/materiais/`, { headers: authHeaders() });
     const data = await response.json();

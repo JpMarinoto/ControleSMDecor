@@ -112,6 +112,8 @@ def _exigir_motivo_exclusao(request):
 
 def _produto_elegivel_compra_pronta(produto):
     """Linha de ordem de compra como produto pronto: não fabricado e (revenda ou fornecedor cadastrado)."""
+    if not produto.ativo:
+        return False
     if produto.fabricado:
         return False
     if produto.revenda:
@@ -346,29 +348,257 @@ class ProdutoDetail(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
+        """Remove o produto só da lista de cadastro (inativa). Vendas e ordens mantêm o histórico."""
         obj = self.get_object(pk)
-        if ItemVenda.objects.filter(produto=obj).exists():
-            return Response(
-                {
-                    "error": "Não é possível excluir: este produto foi usado em vendas.",
-                    "code": "tem_vendas",
-                    "hint": "Use 'Inativar' para ocultar o produto da lista sem apagar os dados.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         nome = obj.nome
-        obj.delete()
-        _api_log(request, "Excluir", "Produto", f"Produto excluído: {nome} (ID {pk})")
+        obj.ativo = False
+        obj.save(update_fields=['ativo'])
+        _api_log(
+            request,
+            "Excluir",
+            "Produto",
+            f"Produto removido do cadastro (inativado): {nome} (ID {pk})",
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def patch(self, request, pk):
         obj = self.get_object(pk)
         if request.data.get('ativo') is False:
             obj.ativo = False
-            obj.save()
+            obj.save(update_fields=['ativo'])
             _api_log(request, "Inativar", "Produto", f"Produto inativado: {obj.nome} (ID {pk})")
+        elif request.data.get('ativo') is True:
+            obj.ativo = True
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Reativar", "Produto", f"Produto reativado: {obj.nome} (ID {pk})")
         serializer = ProdutoSerializer(obj)
         return Response(serializer.data)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class ProdutoBulkPrecos(APIView):
+    """Atualiza preco_venda, preco_custo e/ou margem_lucro_percent de vários produtos (apenas chefe)."""
+
+    def post(self, request):
+        try:
+            from .views_auth import _is_chefe
+
+            if not _is_chefe(request):
+                return Response(
+                    {'error': 'Apenas o chefe pode atualizar preços em massa.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except Exception:
+            return Response(
+                {'error': 'Apenas o chefe pode atualizar preços em massa.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = getattr(request, 'data', None) or {}
+        if not isinstance(data, dict) and hasattr(request, 'body'):
+            try:
+                data = json.loads(request.body.decode('utf-8')) if request.body else {}
+            except Exception:
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        ids = data.get('ids')
+        if not isinstance(ids, list) or len(ids) == 0:
+            return Response({'error': 'Envie ids: lista de IDs de produtos.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(ids) > 500:
+            return Response({'error': 'No máximo 500 produtos por requisição.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        pv = data.get('preco_venda')
+        pc = data.get('preco_custo')
+        pm = data.get('margem_lucro_percent')
+        preco_venda_val = None
+        preco_custo_val = None
+        margem_val = None
+        if pv is not None:
+            try:
+                preco_venda_val = Decimal(str(pv).replace(',', '.'))
+                if preco_venda_val < 0:
+                    return Response({'error': 'preco_venda deve ser >= 0'}, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError, InvalidOperation):
+                return Response({'error': 'preco_venda inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        if pc is not None:
+            try:
+                preco_custo_val = Decimal(str(pc).replace(',', '.'))
+                if preco_custo_val < 0:
+                    return Response({'error': 'preco_custo deve ser >= 0'}, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError, InvalidOperation):
+                return Response({'error': 'preco_custo inválido'}, status=status.HTTP_400_BAD_REQUEST)
+        if pm is not None:
+            try:
+                margem_val = Decimal(str(pm).replace(',', '.'))
+            except (ValueError, TypeError, InvalidOperation):
+                return Response({'error': 'margem_lucro_percent inválida'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if preco_venda_val is None and preco_custo_val is None and margem_val is None:
+            return Response(
+                {'error': 'Informe pelo menos preco_venda, preco_custo ou margem_lucro_percent.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        id_ints = []
+        for x in ids:
+            try:
+                id_ints.append(int(x))
+            except (ValueError, TypeError):
+                continue
+        if not id_ints:
+            return Response({'error': 'Nenhum id válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ok = 0
+        errors = []
+        for pid in id_ints:
+            prod = Produto.objects.filter(pk=pid).first()
+            if not prod:
+                errors.append({'id': pid, 'error': 'Produto não encontrado'})
+                continue
+            if not prod.ativo:
+                errors.append({'id': pid, 'error': 'Produto inativo no cadastro'})
+                continue
+            fields = []
+            if preco_custo_val is not None:
+                prod.preco_custo = preco_custo_val
+                fields.append('preco_custo')
+
+            q4 = Decimal('0.0001')
+            if margem_val is not None:
+                c = prod.preco_custo
+                if c is None or c <= 0:
+                    errors.append(
+                        {
+                            'id': pid,
+                            'error': 'Preço de custo deve ser > 0 para aplicar margem %. Ajuste o custo do produto ou informe custo em massa.',
+                        }
+                    )
+                    continue
+                fator = Decimal('1') + (margem_val / Decimal('100'))
+                prod.preco_venda = (c * fator).quantize(q4)
+                prod.margem_lucro_percent = margem_val
+                fields.extend(['preco_venda', 'margem_lucro_percent'])
+            elif preco_venda_val is not None:
+                prod.preco_venda = preco_venda_val
+                fields.append('preco_venda')
+                c = prod.preco_custo
+                if c is not None and c > 0:
+                    prod.margem_lucro_percent = ((prod.preco_venda / c - Decimal('1')) * Decimal('100')).quantize(
+                        Decimal('0.0001')
+                    )
+                    fields.append('margem_lucro_percent')
+            elif preco_custo_val is not None:
+                c = prod.preco_custo
+                if c is not None and c > 0:
+                    prod.margem_lucro_percent = ((prod.preco_venda / c - Decimal('1')) * Decimal('100')).quantize(
+                        Decimal('0.0001')
+                    )
+                    fields.append('margem_lucro_percent')
+
+            prod.save(update_fields=list(dict.fromkeys(fields)))
+            ok += 1
+
+        _api_log(request, 'Editar', 'Produto', f'Preços em massa: {ok} produto(s) atualizado(s)')
+        return Response({'ok': ok, 'failed': len(errors), 'errors': errors}, status=status.HTTP_200_OK)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class MaterialBulkPrecos(APIView):
+    """Atualiza preco_unitario_base e/ou preco_fabricacao de vários materiais (apenas chefe)."""
+
+    def post(self, request):
+        try:
+            from .views_auth import _is_chefe
+
+            if not _is_chefe(request):
+                return Response(
+                    {'error': 'Apenas o chefe pode atualizar preços em massa.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except Exception:
+            return Response(
+                {'error': 'Apenas o chefe pode atualizar preços em massa.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = getattr(request, 'data', None) or {}
+        if not isinstance(data, dict) and hasattr(request, 'body'):
+            try:
+                data = json.loads(request.body.decode('utf-8')) if request.body else {}
+            except Exception:
+                data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        ids = data.get('ids')
+        if not isinstance(ids, list) or len(ids) == 0:
+            return Response({'error': 'Envie ids: lista de IDs de materiais.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(ids) > 500:
+            return Response({'error': 'No máximo 500 materiais por requisição.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        has_base = 'preco_unitario_base' in data or 'precoUnitarioBase' in data
+        has_fab = 'preco_fabricacao' in data or 'precoFabricacao' in data
+        if not has_base and not has_fab:
+            return Response(
+                {
+                    'error': 'Informe preco_unitario_base e/ou preco_fabricacao (null zera o preço de fabricação).',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        preco_base_val = None
+        if has_base:
+            raw = data.get('preco_unitario_base', data.get('precoUnitarioBase'))
+            try:
+                preco_base_val = Decimal(str(raw).replace(',', '.'))
+                if preco_base_val < 0:
+                    return Response({'error': 'preço base deve ser >= 0'}, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError, InvalidOperation):
+                return Response({'error': 'preço base inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        preco_fab_val = None
+        if has_fab:
+            rawf = data.get('preco_fabricacao', data.get('precoFabricacao'))
+            if rawf is None:
+                preco_fab_val = None
+            else:
+                try:
+                    preco_fab_val = Decimal(str(rawf).replace(',', '.'))
+                    if preco_fab_val < 0:
+                        return Response({'error': 'preço fabricação deve ser >= 0'}, status=status.HTTP_400_BAD_REQUEST)
+                except (ValueError, TypeError, InvalidOperation):
+                    return Response({'error': 'preço fabricação inválido'}, status=status.HTTP_400_BAD_REQUEST)
+
+        id_ints = []
+        for x in ids:
+            try:
+                id_ints.append(int(x))
+            except (ValueError, TypeError):
+                continue
+        if not id_ints:
+            return Response({'error': 'Nenhum id válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ok = 0
+        errors = []
+        for mid in id_ints:
+            mat = Material.objects.filter(pk=mid).first()
+            if not mat:
+                errors.append({'id': mid, 'error': 'Material não encontrado'})
+                continue
+            fields = []
+            if has_base:
+                mat.preco_unitario_base = preco_base_val
+                fields.append('preco_unitario_base')
+            if has_fab:
+                mat.preco_fabricacao = preco_fab_val
+                fields.append('preco_fabricacao')
+            mat.save(update_fields=fields)
+            ok += 1
+
+        _api_log(request, 'Editar', 'Material', f'Preços em massa: {ok} material(is) atualizado(s)')
+        return Response({'ok': ok, 'failed': len(errors), 'errors': errors}, status=status.HTTP_200_OK)
 
 
 # --- Materiais ---
@@ -549,11 +779,31 @@ class VendaListCreate(APIView):
         obs_txt = (data.get('observacao') or '').strip() if isinstance(data.get('observacao'), str) else ''
         if not obs_txt and data.get('observacao'):
             obs_txt = str(data.get('observacao')).strip()
+        for item in itens:
+            prod_id = item.get('produto') or item.get('produto_id')
+            if prod_id:
+                try:
+                    prod_chk = Produto.objects.get(pk=prod_id)
+                except Produto.DoesNotExist:
+                    return Response(
+                        {'itens': [f'Produto id {prod_id} não encontrado.']},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if not prod_chk.ativo:
+                    return Response(
+                        {
+                            'itens': [
+                                f'Produto "{prod_chk.nome}" foi removido do cadastro e não pode ser incluído em novas vendas.'
+                            ]
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
         venda = Venda.objects.create(cliente=cliente, data_venda=data_hora_venda, observacao=obs_txt)
         for item in itens:
             prod_id = item.get('produto') or item.get('produto_id')
             qty = item.get('quantidade', 1)
             preco = item.get('preco_unitario')
+            # Snapshot: só usa preço do cadastro se o cliente não enviou preco_unitario (notas antigas nunca são atualizadas pelo PUT do produto).
             if preco is None and prod_id:
                 preco = Produto.objects.get(pk=prod_id).preco_venda
             ItemVenda.objects.create(venda=venda, produto_id=prod_id, quantidade=qty, preco_unitario=preco)
@@ -580,6 +830,29 @@ class VendaDetail(APIView):
             venda.cancelada = True
             venda.save(update_fields=['cancelada'])
             _api_log(request, "Cancelar", "Venda", f"Venda #{pk} cancelada (permanece no banco para histórico)")
+            return Response(VendaSerializer(venda).data)
+
+        if 'marcada_paga' in data:
+            try:
+                from .views_auth import _is_chefe
+                if not _is_chefe(request):
+                    return Response(
+                        {'error': 'Apenas o chefe pode marcar vendas como pagas.'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+            except Exception:
+                return Response(
+                    {'error': 'Apenas o chefe pode marcar vendas como pagas.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            venda.marcada_paga = bool(data.get('marcada_paga'))
+            venda.save(update_fields=['marcada_paga'])
+            _api_log(
+                request,
+                'Editar',
+                'Venda',
+                f"Venda #{pk} — marcada_paga={'sim' if venda.marcada_paga else 'não'}",
+            )
             return Response(VendaSerializer(venda).data)
 
         data_raw = data.get('data') or data.get('data_venda')
@@ -629,8 +902,23 @@ class VendaAddItem(APIView):
         prod_id = request.data.get('produto') or request.data.get('produto_id')
         qty = request.data.get('quantidade', 1)
         preco = request.data.get('preco_unitario')
+        if prod_id:
+            try:
+                prod_add = Produto.objects.get(pk=prod_id)
+            except Produto.DoesNotExist:
+                return Response({'produto': ['Produto não encontrado.']}, status=status.HTTP_400_BAD_REQUEST)
+            if not prod_add.ativo:
+                return Response(
+                    {
+                        'produto': [
+                            f'Produto "{prod_add.nome}" foi removido do cadastro e não pode ser adicionado à venda.'
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         if preco is None and prod_id:
             preco = Produto.objects.get(pk=prod_id).preco_venda
+        # preco_unitario gravado na linha; alterar Produto.preco_venda depois não mexe neste registro.
         ItemVenda.objects.create(venda=venda, produto_id=prod_id, quantidade=qty, preco_unitario=preco)
         _api_log(request, "Editar", "Venda", f"Venda #{pk} - item adicionado (produto {prod_id}, qtd {qty})")
         venda = Venda.objects.select_related('cliente').prefetch_related('itens__produto').get(pk=pk)
@@ -732,9 +1020,9 @@ class UltimoPrecoClienteProduto(APIView):
         )
         if item:
             return Response({'preco': float(item['preco_unitario'])})
-        # 3) Preço padrão do produto
+        # 3) Preço padrão do produto (só se ainda ativo no cadastro)
         prod = Produto.objects.filter(pk=produto_id).first()
-        if prod:
+        if prod and prod.ativo:
             return Response({'preco': float(prod.preco_venda)})
         return Response({'preco': None})
 
@@ -1033,7 +1321,16 @@ class CompraDetail(APIView):
                 pass
         if kind == 'produto' and request.data.get('produto') is not None:
             try:
-                obj.produto_id = int(request.data.get('produto'))
+                new_pid = int(request.data.get('produto'))
+                np = Produto.objects.filter(pk=new_pid).first()
+                if not np:
+                    return Response({'produto': ['Produto não encontrado.']}, status=status.HTTP_400_BAD_REQUEST)
+                if not np.ativo:
+                    return Response(
+                        {'produto': ['Produto inativo no cadastro; escolha um produto ativo.']},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                obj.produto_id = new_pid
             except (ValueError, TypeError):
                 pass
         if request.data.get('fornecedor') is not None:
@@ -2233,6 +2530,7 @@ class ClienteDetalhe(APIView):
                 'data_lancamento': _lancamento_iso_datetime_br(getattr(v, 'data_lancamento', None)),
                 'total': _safe_float(v.total_venda),
                 'itens': itens,
+                'marcada_paga': bool(getattr(v, 'marcada_paga', False)),
             })
         pagamentos_data = [
             {
@@ -2317,6 +2615,11 @@ class ClientePrecosProdutos(APIView):
                 if not prod:
                     errors.append({'index': idx, 'produto_id': produto_id, 'error': 'Produto não encontrado'})
                     continue
+                if not prod.ativo:
+                    errors.append(
+                        {'index': idx, 'produto_id': produto_id, 'error': 'Produto inativo no cadastro'}
+                    )
+                    continue
                 try:
                     obj, created = PrecoClienteProduto.objects.update_or_create(
                         cliente=cliente,
@@ -2367,6 +2670,11 @@ class ClientePrecosProdutos(APIView):
         prod = Produto.objects.filter(pk=produto_id).first()
         if not prod:
             return Response({'produto_id': ['Produto não encontrado']}, status=status.HTTP_400_BAD_REQUEST)
+        if not prod.ativo:
+            return Response(
+                {'produto_id': ['Produto inativo no cadastro; reative-o em Cadastro se precisar definir preço.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             obj, created = PrecoClienteProduto.objects.update_or_create(
                 cliente=cliente, produto_id=produto_id,
@@ -2415,7 +2723,7 @@ class FornecedorMateriais(APIView):
 class FornecedorProdutos(APIView):
     """Lista produtos cujo fornecedor é este (para consulta rápida no detalhe do fornecedor)."""
     def get(self, request, pk):
-        produtos = Produto.objects.filter(fornecedor_id=pk).order_by('nome')
+        produtos = Produto.objects.filter(fornecedor_id=pk, ativo=True).order_by('nome')
         data = [
             {
                 'id': p.id,
@@ -2477,6 +2785,10 @@ class FornecedorDetalhe(APIView):
             saldo = _safe_float(total_compras - total_pago)
             linhas = []
             for c in compras_mat:
+                if c.ordem_id and c.ordem:
+                    linha_mp = bool(c.ordem.marcada_paga)
+                else:
+                    linha_mp = bool(getattr(c, 'marcada_paga', False))
                 linhas.append(
                     {
                         'sort_dt': c.data_compra,
@@ -2486,10 +2798,16 @@ class FornecedorDetalhe(APIView):
                         'data': c.data_compra.date().isoformat() if c.data_compra else '',
                         'material': c.material.nome,
                         'quantidade': int(c.quantidade),
+                        'preco_unitario': _safe_float(c.preco_no_dia),
                         'total': _safe_float(c.total_compra),
+                        'marcada_paga': linha_mp,
                     }
                 )
             for c in compras_prod:
+                if c.ordem_id and c.ordem:
+                    linha_mp = bool(c.ordem.marcada_paga)
+                else:
+                    linha_mp = bool(getattr(c, 'marcada_paga', False))
                 linhas.append(
                     {
                         'sort_dt': c.data_compra,
@@ -2499,7 +2817,9 @@ class FornecedorDetalhe(APIView):
                         'data': c.data_compra.date().isoformat() if c.data_compra else '',
                         'material': c.produto.nome,
                         'quantidade': int(c.quantidade),
+                        'preco_unitario': _safe_float(c.preco_no_dia),
                         'total': _safe_float(c.total_compra),
+                        'marcada_paga': linha_mp,
                     }
                 )
             linhas.sort(
@@ -2546,6 +2866,90 @@ class FornecedorDetalhe(APIView):
             return Response({'success': True}, status=status.HTTP_201_CREATED)
         except (ValueError, TypeError):
             return Response({'valor': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class FornecedorCompraMarcacaoPaga(APIView):
+    """Marca ordem ou linha avulsa como paga (controle manual; não substitui pagamento lançado)."""
+
+    def patch(self, request, pk):
+        try:
+            from .views_auth import _is_chefe
+
+            if not _is_chefe(request):
+                return Response({'error': 'Apenas o chefe pode alterar.'}, status=status.HTTP_403_FORBIDDEN)
+        except Exception:
+            return Response({'error': 'Apenas o chefe pode alterar.'}, status=status.HTTP_403_FORBIDDEN)
+        if not Fornecedor.objects.filter(pk=pk).exists():
+            return Response({'error': 'Fornecedor não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        body = getattr(request, 'data', None) or {}
+        if not isinstance(body, dict) and hasattr(request, 'body'):
+            try:
+                body = json.loads(request.body.decode('utf-8')) if request.body else {}
+            except Exception:
+                body = {}
+        if not isinstance(body, dict):
+            body = {}
+        if 'marcada_paga' not in body:
+            return Response({'error': 'marcada_paga é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+        mp = bool(body.get('marcada_paga'))
+        ordem_id = body.get('ordem_id')
+        linha_id = body.get('linha_id')
+        if ordem_id is not None and linha_id is not None:
+            return Response(
+                {'error': 'Use ordem_id ou linha_id, não os dois'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ordem_id is not None:
+            try:
+                oid = int(ordem_id)
+            except (ValueError, TypeError):
+                return Response({'error': 'ordem_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
+            o = OrdemCompra.objects.filter(pk=oid, fornecedor_id=pk).first()
+            if not o:
+                return Response({'error': 'Ordem não encontrada neste fornecedor'}, status=status.HTTP_404_NOT_FOUND)
+            o.marcada_paga = mp
+            o.save(update_fields=['marcada_paga'])
+            _api_log(request, 'Editar', 'OrdemCompra', f'Ordem #{oid} fornecedor {pk} marcada_paga={mp}')
+            return Response({'ok': True, 'ordem_id': oid, 'marcada_paga': mp})
+        if linha_id is not None:
+            s = str(linha_id).strip()
+            if s.startswith('mat-'):
+                try:
+                    cid = int(s[4:])
+                except ValueError:
+                    return Response({'error': 'linha_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
+                c = CompraMaterial.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem').first()
+                if not c:
+                    return Response({'error': 'Linha não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+                if c.ordem_id and c.ordem:
+                    c.ordem.marcada_paga = mp
+                    c.ordem.save(update_fields=['marcada_paga'])
+                else:
+                    c.marcada_paga = mp
+                    c.save(update_fields=['marcada_paga'])
+            elif s.startswith('prod-'):
+                try:
+                    cid = int(s[5:])
+                except ValueError:
+                    return Response({'error': 'linha_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
+                c = CompraProduto.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem').first()
+                if not c:
+                    return Response({'error': 'Linha não encontrada'}, status=status.HTTP_404_NOT_FOUND)
+                if c.ordem_id and c.ordem:
+                    c.ordem.marcada_paga = mp
+                    c.ordem.save(update_fields=['marcada_paga'])
+                else:
+                    c.marcada_paga = mp
+                    c.save(update_fields=['marcada_paga'])
+            else:
+                return Response(
+                    {'error': 'linha_id deve ser mat-<id> ou prod-<id>'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            _api_log(request, 'Editar', 'Compra', f'Linha {s} fornecedor {pk} marcada_paga={mp}')
+            return Response({'ok': True, 'linha_id': s, 'marcada_paga': mp})
+        return Response({'error': 'Informe ordem_id ou linha_id'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # --- Funcionários ---

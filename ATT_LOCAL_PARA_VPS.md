@@ -16,7 +16,6 @@ python manage.py migrate
 python manage.py collectstatic --noinput
 cd "Financial Control System" && npm install && npm run build && cd ..
 sudo systemctl restart financeiro
-sudo systemctl reload nginx
+sudo systemctl restart nginx
+sudo systemctl status nginx --no-pager
 
-
-db-local-2026-03-28_114945 esse é o arquivo ele esta em C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle, quero mandar ele para vps junto as alt

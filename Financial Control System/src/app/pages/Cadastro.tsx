@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -88,6 +88,8 @@ interface Material {
   categoria: string;
   fornecedor: string;
   precoUnitarioBase: number;
+  /** Se definido, usado no custo de insumos; compras/estoque usam precoUnitarioBase. */
+  precoFabricacao?: number | null;
   estoque_atual?: number;
   createdAt: string;
 }
@@ -110,6 +112,27 @@ const roundDecimalPlaces = (n: number, places: number) => {
   return Math.round((n + Number.EPSILON) * f) / f;
 };
 
+function parseDecimalInput(raw: string): number | null {
+  const t = String(raw ?? "").trim();
+  if (!t) return null;
+  const n = parseFloat(t.replace(",", "."));
+  return Number.isNaN(n) ? null : n;
+}
+
+function fmtPercentBr(n: number) {
+  return roundDecimalPlaces(n, 2).toLocaleString("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Preço unitário do material na composição (fabricação): override opcional ou base. */
+function precoUnitarioInsumoMaterial(m: Material): number {
+  const fab = m.precoFabricacao;
+  if (fab != null && !Number.isNaN(Number(fab))) return Number(fab);
+  return Number(m.precoUnitarioBase) || 0;
+}
+
 export function Cadastro() {
   // States
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -123,8 +146,6 @@ export function Cadastro() {
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null);
   const [verDadosCliente, setVerDadosCliente] = useState<Cliente | null>(null);
   const [verDadosFornecedor, setVerDadosFornecedor] = useState<Fornecedor | null>(null);
-  const [precoRapidoMaterial, setPrecoRapidoMaterial] = useState<Record<string, string>>({});
-  const [savingPrecoMaterialId, setSavingPrecoMaterialId] = useState<string | null>(null);
   const [editingCategoria, setEditingCategoria] = useState<Categoria | null>(null);
   const [editingProduto, setEditingProduto] = useState<Produto | null>(null);
   const [editingProdutoId, setEditingProdutoId] = useState<string | null>(null);
@@ -188,6 +209,26 @@ export function Cadastro() {
   const [categoriaMaterial, setCategoriaMaterial] = useState('');
   const [fornecedorMaterial, setFornecedorMaterial] = useState('');
   const [precoMaterial, setPrecoMaterial] = useState('');
+  const [precoMaterialFabricacao, setPrecoMaterialFabricacao] = useState('');
+
+  const [idsProdutosSelecionados, setIdsProdutosSelecionados] = useState<Set<string>>(new Set());
+  const [bulkPrecosOpen, setBulkPrecosOpen] = useState(false);
+  const [bulkPrecoVenda, setBulkPrecoVenda] = useState('');
+  const [bulkPrecoCusto, setBulkPrecoCusto] = useState('');
+  const [bulkMargemLucro, setBulkMargemLucro] = useState('');
+  const [savingBulkPrecos, setSavingBulkPrecos] = useState(false);
+
+  /** Seleção na aba Fornecedores (preços em massa por vínculo). */
+  const [idsFornecTabProdutos, setIdsFornecTabProdutos] = useState<Set<string>>(new Set());
+  const [idsFornecTabMateriais, setIdsFornecTabMateriais] = useState<Set<string>>(new Set());
+  const [bulkFornecPrecosOpen, setBulkFornecPrecosOpen] = useState(false);
+  const [bulkFornecPrecoVenda, setBulkFornecPrecoVenda] = useState("");
+  const [bulkFornecPrecoCusto, setBulkFornecPrecoCusto] = useState("");
+  const [bulkFornecMargemLucro, setBulkFornecMargemLucro] = useState("");
+  const [bulkFornecMatBase, setBulkFornecMatBase] = useState("");
+  const [bulkFornecMatFab, setBulkFornecMatFab] = useState("");
+  const [bulkFornecLimparFab, setBulkFornecLimparFab] = useState(false);
+  const [savingBulkFornec, setSavingBulkFornec] = useState(false);
 
   // Form states - Contas
   const [nomeConta, setNomeConta] = useState('');
@@ -202,8 +243,7 @@ export function Cadastro() {
       const [clientesRes, categoriasRes, produtosRes, fornecedoresRes, materiaisRes, contasRes] = await Promise.all([
         api.getClientes().catch(() => []),
         api.getCategorias().catch(() => []),
-        // Em cadastro, mostrar também produtos inativos para não "sumirem" da lista
-        api.getProdutos({ incluir_inativos: true }).catch(() => []),
+        api.getProdutos().catch(() => []),
         api.getFornecedores().catch(() => []),
         api.getMateriais().catch(() => []),
         api.getContas().catch(() => []),
@@ -260,15 +300,19 @@ export function Cadastro() {
         estado: f.estado || "",
         createdAt: "",
       })));
-      setMateriais((Array.isArray(materiaisRes) ? materiaisRes : []).map((m: any) => ({
-        id: sid(m.id),
-        nome: m.nome || "",
-        categoria: sid(m.categoria),
-        fornecedor: sid(m.fornecedor_padrao),
-        precoUnitarioBase: Number(m.precoUnitarioBase ?? m.preco_unitario_base) || 0,
-        estoque_atual: Number(m.estoque_atual) || 0,
-        createdAt: "",
-      })));
+      setMateriais((Array.isArray(materiaisRes) ? materiaisRes : []).map((m: any) => {
+        const pf = m.precoFabricacao ?? m.preco_fabricacao;
+        return {
+          id: sid(m.id),
+          nome: m.nome || "",
+          categoria: sid(m.categoria),
+          fornecedor: sid(m.fornecedor_padrao),
+          precoUnitarioBase: Number(m.precoUnitarioBase ?? m.preco_unitario_base) || 0,
+          precoFabricacao: pf != null && pf !== "" ? Number(pf) : null,
+          estoque_atual: Number(m.estoque_atual) || 0,
+          createdAt: "",
+        };
+      }));
       setContas((Array.isArray(contasRes) ? contasRes : []).map((c: any) => ({
         id: sid(c.id),
         nome: c.nome || c.nomeConta || "",
@@ -456,11 +500,26 @@ export function Cadastro() {
     } else {
       preco = editingMaterial ? Number(editingMaterial.precoUnitarioBase) || 0 : 0;
     }
-    const payload: any = {
+    const payload: Record<string, unknown> = {
       nome: nomeMaterial.trim(),
       preco_unitario_base: preco,
       precoUnitarioBase: preco,
     };
+    if (isChefe) {
+      const fabRaw = String(precoMaterialFabricacao ?? "").trim();
+      if (fabRaw) {
+        const pf = roundDecimalPlaces(parseFloat(fabRaw.replace(",", ".")), 4);
+        if (Number.isNaN(pf) || pf < 0) {
+          toast.error("Preço de fabricação inválido");
+          return;
+        }
+        payload.preco_fabricacao = pf;
+        payload.precoFabricacao = pf;
+      } else if (editingMaterial) {
+        payload.preco_fabricacao = null;
+        payload.precoFabricacao = null;
+      }
+    }
     if (categoriaMaterial) payload.categoria = Number(categoriaMaterial);
     if (fornecedorMaterial) payload.fornecedor_padrao = Number(fornecedorMaterial);
     try {
@@ -565,6 +624,7 @@ export function Cadastro() {
     setCategoriaMaterial('');
     setFornecedorMaterial('');
     setPrecoMaterial('');
+    setPrecoMaterialFabricacao('');
   };
 
   const resetContaForm = () => {
@@ -664,6 +724,8 @@ export function Cadastro() {
     setCategoriaMaterial(material.categoria);
     setFornecedorMaterial(material.fornecedor);
     setPrecoMaterial(fmtDecimalPt(Number(material.precoUnitarioBase)));
+    const pf = material.precoFabricacao;
+    setPrecoMaterialFabricacao(pf != null && !Number.isNaN(Number(pf)) ? fmtDecimalPt(Number(pf)) : "");
   };
 
   const handleEditConta = (conta: ContaBancaria) => {
@@ -751,22 +813,10 @@ export function Cadastro() {
   const handleDeleteProduto = async (id: string) => {
     try {
       await api.deleteProduto(id);
-      toast.success('Produto excluído');
+      toast.success('Produto removido do cadastro. Histórico em vendas e ordens foi preservado.');
       await loadData();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      const podeInativar = /vendas|inativar/i.test(msg);
-      if (podeInativar) {
-        try {
-          await api.inativarProduto(id);
-          toast.success('Produto inativado (removido da lista, dados preservados).');
-          await loadData();
-        } catch {
-          toast.error(msg || 'Erro ao excluir produto');
-        }
-      } else {
-        toast.error(msg || 'Erro ao excluir produto');
-      }
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir produto');
     }
   };
 
@@ -866,6 +916,73 @@ export function Cadastro() {
     out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
     return out;
   }, [materiais, categoriasMaterial]);
+
+  const handleBulkProdCustoChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBulkPrecoCusto(val);
+    const c = parseDecimalInput(val);
+    const m = parseDecimalInput(bulkMargemLucro);
+    const v = parseDecimalInput(bulkPrecoVenda);
+    if (c != null && c > 0 && m != null) {
+      setBulkPrecoVenda(fmtDecimalPt(roundDecimalPlaces(c * (1 + m / 100), 4)));
+    } else if (c != null && c > 0 && v != null) {
+      setBulkMargemLucro(fmtPercentBr((v / c - 1) * 100));
+    }
+  }, [bulkMargemLucro, bulkPrecoVenda]);
+
+  const handleBulkProdVendaChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBulkPrecoVenda(val);
+    const c = parseDecimalInput(bulkPrecoCusto);
+    const v = parseDecimalInput(val);
+    if (c != null && c > 0 && v != null) {
+      setBulkMargemLucro(fmtPercentBr((v / c - 1) * 100));
+    }
+  }, [bulkPrecoCusto]);
+
+  const handleBulkProdMargemChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBulkMargemLucro(val);
+    const c = parseDecimalInput(bulkPrecoCusto);
+    const m = parseDecimalInput(val);
+    if (c != null && c > 0 && m != null) {
+      setBulkPrecoVenda(fmtDecimalPt(roundDecimalPlaces(c * (1 + m / 100), 4)));
+    }
+  }, [bulkPrecoCusto]);
+
+  const handleBulkFornecCustoChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBulkFornecPrecoCusto(val);
+    const c = parseDecimalInput(val);
+    const m = parseDecimalInput(bulkFornecMargemLucro);
+    const v = parseDecimalInput(bulkFornecPrecoVenda);
+    if (c != null && c > 0 && m != null) {
+      setBulkFornecPrecoVenda(fmtDecimalPt(roundDecimalPlaces(c * (1 + m / 100), 4)));
+    } else if (c != null && c > 0 && v != null) {
+      setBulkFornecMargemLucro(fmtPercentBr((v / c - 1) * 100));
+    }
+  }, [bulkFornecMargemLucro, bulkFornecPrecoVenda]);
+
+  const handleBulkFornecVendaChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBulkFornecPrecoVenda(val);
+    const c = parseDecimalInput(bulkFornecPrecoCusto);
+    const v = parseDecimalInput(val);
+    if (c != null && c > 0 && v != null) {
+      setBulkFornecMargemLucro(fmtPercentBr((v / c - 1) * 100));
+    }
+  }, [bulkFornecPrecoCusto]);
+
+  const handleBulkFornecMargemChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setBulkFornecMargemLucro(val);
+    const c = parseDecimalInput(bulkFornecPrecoCusto);
+    const m = parseDecimalInput(val);
+    if (c != null && c > 0 && m != null) {
+      setBulkFornecPrecoVenda(fmtDecimalPt(roundDecimalPlaces(c * (1 + m / 100), 4)));
+    }
+  }, [bulkFornecPrecoCusto]);
+
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
 
@@ -1313,16 +1430,18 @@ export function Cadastro() {
                               toast.error("Selecione material e quantidade válida");
                               return;
                             }
-                            const precoBase = Number(mat.precoUnitarioBase ?? 0) || 0;
+                            const precoBase = precoUnitarioInsumoMaterial(mat);
                             const total = precoBase * qtd;
                             setInsumosProduto((prev) => {
                               const idx = prev.findIndex((i) => i.material === Number(mat.id));
                               if (idx >= 0) {
                                 const clone = [...prev];
+                                const newQtd = clone[idx].quantidade + qtd;
                                 clone[idx] = {
                                   ...clone[idx],
-                                  quantidade: clone[idx].quantidade + qtd,
-                                  total_insumo: (clone[idx].quantidade + qtd) * clone[idx].preco_unitario_base,
+                                  quantidade: newQtd,
+                                  preco_unitario_base: precoBase,
+                                  total_insumo: newQtd * precoBase,
                                 };
                                 return clone;
                               }
@@ -1392,6 +1511,31 @@ export function Cadastro() {
             </CardContent>
           </Card>
 
+          {isChefe && produtos.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+              <span className="text-sm text-muted-foreground tabular-nums">
+                {idsProdutosSelecionados.size} produto(s) selecionado(s)
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={idsProdutosSelecionados.size === 0}
+                onClick={() => setBulkPrecosOpen(true)}
+              >
+                Atualizar preços em massa
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIdsProdutosSelecionados(new Set())}
+              >
+                Limpar seleção
+              </Button>
+            </div>
+          )}
+
           <div className="space-y-3">
             {produtos.length > 0 ? (
               produtosAgrupados.map((grupo, gi) => (
@@ -1402,9 +1546,34 @@ export function Cadastro() {
                         <div className="h-5 w-1.5 rounded-full bg-primary/70 shrink-0" />
                         <div className="font-semibold truncate">{grupo.categoriaNome}</div>
                       </div>
-                      <Badge variant="outline" className="tabular-nums shrink-0">
-                        {grupo.itens.length}
-                      </Badge>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isChefe && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              const ids = new Set(grupo.itens.map((p) => p.id));
+                              setIdsProdutosSelecionados((prev) => {
+                                const allSel = grupo.itens.every((p) => prev.has(p.id));
+                                const next = new Set(prev);
+                                if (allSel) {
+                                  ids.forEach((id) => next.delete(id));
+                                } else {
+                                  ids.forEach((id) => next.add(id));
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            {grupo.itens.every((p) => idsProdutosSelecionados.has(p.id)) ? "Desmarcar grupo" : "Selecionar grupo"}
+                          </Button>
+                        )}
+                        <Badge variant="outline" className="tabular-nums shrink-0">
+                          {grupo.itens.length}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
 
@@ -1418,8 +1587,24 @@ export function Cadastro() {
                       >
                         <Card>
                           <CardContent className="p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              {isChefe && (
+                                <div className="pt-1 shrink-0">
+                                  <Checkbox
+                                    checked={idsProdutosSelecionados.has(produto.id)}
+                                    onCheckedChange={(v) => {
+                                      setIdsProdutosSelecionados((prev) => {
+                                        const next = new Set(prev);
+                                        if (v === true) next.add(produto.id);
+                                        else next.delete(produto.id);
+                                        return next;
+                                      });
+                                    }}
+                                    aria-label={`Selecionar ${produto.nome}`}
+                                  />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-2">
                                   {produto.fabricado && <Badge variant="secondary">Fabricado</Badge>}
                                   <h3 className="font-medium">{produto.nome}</h3>
@@ -1477,6 +1662,150 @@ export function Cadastro() {
               </Card>
             )}
           </div>
+
+          <Dialog
+            open={bulkPrecosOpen}
+            onOpenChange={(open) => {
+              setBulkPrecosOpen(open);
+              if (!open) {
+                setBulkPrecoVenda("");
+                setBulkPrecoCusto("");
+                setBulkMargemLucro("");
+              }
+            }}
+          >
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Atualizar preços em massa</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                {idsProdutosSelecionados.size} produto(s) selecionado(s). Alterar venda atualiza a %; alterar % atualiza a
+                venda (com custo maior que zero).
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="bulkPrecoCusto">Preço de custo</Label>
+                <Input
+                  id="bulkPrecoCusto"
+                  type="text"
+                  inputMode="decimal"
+                  className="tabular-nums"
+                  value={bulkPrecoCusto}
+                  onChange={handleBulkProdCustoChange}
+                  placeholder="Manter atual"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bulkPrecoVenda">Preço de venda</Label>
+                <Input
+                  id="bulkPrecoVenda"
+                  type="text"
+                  inputMode="decimal"
+                  className="tabular-nums"
+                  value={bulkPrecoVenda}
+                  onChange={handleBulkProdVendaChange}
+                  placeholder="Manter atual"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bulkMargemLucro">Percentual sobre o custo (%)</Label>
+                <Input
+                  id="bulkMargemLucro"
+                  type="text"
+                  inputMode="decimal"
+                  className="tabular-nums"
+                  value={bulkMargemLucro}
+                  onChange={handleBulkProdMargemChange}
+                  placeholder="Ex.: 30"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setBulkPrecosOpen(false)} disabled={savingBulkPrecos}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={savingBulkPrecos}
+                  onClick={async () => {
+                    const rawV = bulkPrecoVenda.trim();
+                    const rawC = bulkPrecoCusto.trim();
+                    const rawM = bulkMargemLucro.trim();
+                    let preco_venda: number | undefined;
+                    let preco_custo: number | undefined;
+                    let margem_lucro_percent: number | undefined;
+                    if (rawC) {
+                      const c = roundDecimalPlaces(parseFloat(rawC.replace(",", ".")), 4);
+                      if (Number.isNaN(c) || c < 0) {
+                        toast.error("Preço de custo inválido");
+                        return;
+                      }
+                      preco_custo = c;
+                    }
+                    if (rawV) {
+                      const v = roundDecimalPlaces(parseFloat(rawV.replace(",", ".")), 4);
+                      if (Number.isNaN(v) || v < 0) {
+                        toast.error("Preço de venda inválido");
+                        return;
+                      }
+                      preco_venda = v;
+                    }
+                    if (rawM) {
+                      const m = roundDecimalPlaces(parseFloat(rawM.replace(",", ".")), 4);
+                      if (Number.isNaN(m)) {
+                        toast.error("Percentual inválido");
+                        return;
+                      }
+                      margem_lucro_percent = m;
+                    }
+                    if (preco_venda === undefined && preco_custo === undefined && margem_lucro_percent === undefined) {
+                      toast.error("Informe pelo menos custo, venda ou %");
+                      return;
+                    }
+                    try {
+                      setSavingBulkPrecos(true);
+                      const res =
+                        preco_custo !== undefined && preco_venda !== undefined
+                          ? await api.bulkUpdateProdutosPrecos({
+                              ids: [...idsProdutosSelecionados],
+                              preco_custo,
+                              preco_venda,
+                              margem_lucro_percent: null,
+                            })
+                          : preco_custo !== undefined && margem_lucro_percent !== undefined
+                            ? await api.bulkUpdateProdutosPrecos({
+                                ids: [...idsProdutosSelecionados],
+                                preco_custo,
+                                preco_venda: null,
+                                margem_lucro_percent,
+                              })
+                            : await api.bulkUpdateProdutosPrecos({
+                                ids: [...idsProdutosSelecionados],
+                                preco_custo: preco_custo ?? null,
+                                preco_venda: preco_venda ?? null,
+                                margem_lucro_percent: margem_lucro_percent ?? null,
+                              });
+                      if (res.failed > 0) {
+                        toast.warning(`Atualizados ${res.ok}; ${res.failed} com erro.`);
+                      } else {
+                        toast.success(`${res.ok} produto(s) atualizado(s).`);
+                      }
+                      setBulkPrecosOpen(false);
+                      setBulkPrecoVenda("");
+                      setBulkPrecoCusto("");
+                      setBulkMargemLucro("");
+                      setIdsProdutosSelecionados(new Set());
+                      await loadData();
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Erro ao atualizar preços");
+                    } finally {
+                      setSavingBulkPrecos(false);
+                    }
+                  }}
+                >
+                  {savingBulkPrecos ? "Aplicando…" : "Aplicar"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* CATEGORIAS */}
@@ -1742,6 +2071,29 @@ export function Cadastro() {
             </CardContent>
           </Card>
 
+          {isChefe &&
+            (idsFornecTabProdutos.size > 0 || idsFornecTabMateriais.size > 0) && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  {idsFornecTabProdutos.size} produto(s) · {idsFornecTabMateriais.size} material(is)
+                </span>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setBulkFornecPrecosOpen(true)}>
+                  Atualizar preços em massa
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIdsFornecTabProdutos(new Set());
+                    setIdsFornecTabMateriais(new Set());
+                  }}
+                >
+                  Limpar seleção
+                </Button>
+              </div>
+            )}
+
           <div className="space-y-3">
             {fornecedores.length > 0 ? (
               fornecedores.map((fornecedor, index) => (
@@ -1811,10 +2163,36 @@ export function Cadastro() {
                           <div className="border-t mt-4 pt-4">
                             {produtosDoFornecedor.length > 0 && (
                               <div className="space-y-2">
-                                <h4 className="font-medium text-sm">Produtos deste fornecedor</h4>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <h4 className="font-medium text-sm">Produtos deste fornecedor</h4>
+                                  {isChefe && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() => {
+                                        const pids = produtosDoFornecedor.map((p) => p.id);
+                                        setIdsFornecTabProdutos((prev) => {
+                                          const allOn =
+                                            pids.length > 0 && pids.every((id) => prev.has(id));
+                                          const next = new Set(prev);
+                                          if (allOn) pids.forEach((id) => next.delete(id));
+                                          else pids.forEach((id) => next.add(id));
+                                          return next;
+                                        });
+                                      }}
+                                    >
+                                      {produtosDoFornecedor.every((p) => idsFornecTabProdutos.has(p.id))
+                                        ? "Desmarcar produtos"
+                                        : "Selecionar produtos"}
+                                    </Button>
+                                  )}
+                                </div>
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
+                                      {isChefe && <TableHead className="w-10" />}
                                       <TableHead>Produto</TableHead>
                                       <TableHead className="text-right w-32">Preço venda</TableHead>
                                     </TableRow>
@@ -1822,6 +2200,22 @@ export function Cadastro() {
                                   <TableBody>
                                     {produtosDoFornecedor.map((p) => (
                                       <TableRow key={p.id}>
+                                        {isChefe && (
+                                          <TableCell className="w-10">
+                                            <Checkbox
+                                              checked={idsFornecTabProdutos.has(p.id)}
+                                              onCheckedChange={(v) => {
+                                                setIdsFornecTabProdutos((prev) => {
+                                                  const next = new Set(prev);
+                                                  if (v === true) next.add(p.id);
+                                                  else next.delete(p.id);
+                                                  return next;
+                                                });
+                                              }}
+                                              aria-label={`Selecionar produto ${p.nome}`}
+                                            />
+                                          </TableCell>
+                                        )}
                                         <TableCell className="font-medium">{p.nome}</TableCell>
                                         <TableCell className="text-right tabular-nums">
                                           {formatCurrency(Number(p.precoInicial ?? 0))}
@@ -1835,10 +2229,36 @@ export function Cadastro() {
 
                             {materiaisDoFornecedor.length > 0 && (
                               <div className={produtosDoFornecedor.length > 0 ? "mt-4 space-y-2" : "space-y-2"}>
-                                <h4 className="font-medium text-sm">Materiais deste fornecedor</h4>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <h4 className="font-medium text-sm">Materiais deste fornecedor</h4>
+                                  {isChefe && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs"
+                                      onClick={() => {
+                                        const mids = materiaisDoFornecedor.map((m) => m.id);
+                                        setIdsFornecTabMateriais((prev) => {
+                                          const allOn =
+                                            mids.length > 0 && mids.every((id) => prev.has(id));
+                                          const next = new Set(prev);
+                                          if (allOn) mids.forEach((id) => next.delete(id));
+                                          else mids.forEach((id) => next.add(id));
+                                          return next;
+                                        });
+                                      }}
+                                    >
+                                      {materiaisDoFornecedor.every((m) => idsFornecTabMateriais.has(m.id))
+                                        ? "Desmarcar materiais"
+                                        : "Selecionar materiais"}
+                                    </Button>
+                                  )}
+                                </div>
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
+                                      {isChefe && <TableHead className="w-10" />}
                                       <TableHead>Material</TableHead>
                                       {isChefe && <TableHead className="text-right w-32">Preço base</TableHead>}
                                       <TableHead className="text-right w-24">Estoque</TableHead>
@@ -1847,6 +2267,22 @@ export function Cadastro() {
                                   <TableBody>
                                     {materiaisDoFornecedor.map((m) => (
                                       <TableRow key={m.id}>
+                                        {isChefe && (
+                                          <TableCell className="w-10">
+                                            <Checkbox
+                                              checked={idsFornecTabMateriais.has(m.id)}
+                                              onCheckedChange={(v) => {
+                                                setIdsFornecTabMateriais((prev) => {
+                                                  const next = new Set(prev);
+                                                  if (v === true) next.add(m.id);
+                                                  else next.delete(m.id);
+                                                  return next;
+                                                });
+                                              }}
+                                              aria-label={`Selecionar material ${m.nome}`}
+                                            />
+                                          </TableCell>
+                                        )}
                                         <TableCell className="font-medium">{m.nome}</TableCell>
                                         {isChefe && (
                                           <TableCell className="text-right tabular-nums">
@@ -1875,6 +2311,271 @@ export function Cadastro() {
               </Card>
             )}
           </div>
+
+          <Dialog
+            open={bulkFornecPrecosOpen}
+            onOpenChange={(open) => {
+              setBulkFornecPrecosOpen(open);
+              if (!open) {
+                setBulkFornecPrecoVenda("");
+                setBulkFornecPrecoCusto("");
+                setBulkFornecMargemLucro("");
+                setBulkFornecMatBase("");
+                setBulkFornecMatFab("");
+                setBulkFornecLimparFab(false);
+              }
+            }}
+          >
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Preços em massa (fornecedores)</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                {idsFornecTabProdutos.size} produto(s) e {idsFornecTabMateriais.size} material(is) selecionados.
+                Preencha só o que quiser alterar.
+              </p>
+              {idsFornecTabProdutos.size > 0 && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <p className="text-sm font-medium">Produtos selecionados</p>
+                  <p className="text-xs text-muted-foreground">
+                    Alterar venda atualiza a %; alterar % atualiza a venda (com custo maior que zero).
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="bulkFornecPrecoCusto">Preço de custo</Label>
+                    <Input
+                      id="bulkFornecPrecoCusto"
+                      type="text"
+                      inputMode="decimal"
+                      className="tabular-nums"
+                      value={bulkFornecPrecoCusto}
+                      onChange={handleBulkFornecCustoChange}
+                      placeholder="Manter atual"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bulkFornecPrecoVenda">Preço de venda</Label>
+                    <Input
+                      id="bulkFornecPrecoVenda"
+                      type="text"
+                      inputMode="decimal"
+                      className="tabular-nums"
+                      value={bulkFornecPrecoVenda}
+                      onChange={handleBulkFornecVendaChange}
+                      placeholder="Manter atual"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bulkFornecMargemLucro">Percentual sobre o custo (%)</Label>
+                    <Input
+                      id="bulkFornecMargemLucro"
+                      type="text"
+                      inputMode="decimal"
+                      className="tabular-nums"
+                      value={bulkFornecMargemLucro}
+                      onChange={handleBulkFornecMargemChange}
+                      placeholder="Ex.: 30"
+                    />
+                  </div>
+                </div>
+              )}
+              {idsFornecTabMateriais.size > 0 && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <p className="text-sm font-medium">Materiais selecionados</p>
+                  <div className="space-y-2">
+                    <Label htmlFor="bulkFornecMatBase">Preço base (compra/estoque)</Label>
+                    <Input
+                      id="bulkFornecMatBase"
+                      type="text"
+                      inputMode="decimal"
+                      value={bulkFornecMatBase}
+                      onChange={(e) => setBulkFornecMatBase(e.target.value)}
+                      placeholder="Manter atual"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bulkFornecMatFab">Preço fabricação (insumos)</Label>
+                    <Input
+                      id="bulkFornecMatFab"
+                      type="text"
+                      inputMode="decimal"
+                      value={bulkFornecMatFab}
+                      onChange={(e) => {
+                        setBulkFornecMatFab(e.target.value);
+                        if (e.target.value.trim()) setBulkFornecLimparFab(false);
+                      }}
+                      placeholder="Manter atual"
+                      disabled={bulkFornecLimparFab}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="bulkFornecLimparFab"
+                      checked={bulkFornecLimparFab}
+                      onCheckedChange={(v) => {
+                        const on = v === true;
+                        setBulkFornecLimparFab(on);
+                        if (on) setBulkFornecMatFab("");
+                      }}
+                    />
+                    <Label htmlFor="bulkFornecLimparFab" className="text-sm font-normal cursor-pointer">
+                      Remover preço de fabricação (voltar a usar o preço base nos insumos)
+                    </Label>
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setBulkFornecPrecosOpen(false)}
+                  disabled={savingBulkFornec}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  disabled={savingBulkFornec}
+                  onClick={async () => {
+                    const nP = idsFornecTabProdutos.size;
+                    const nM = idsFornecTabMateriais.size;
+                    const rawV = bulkFornecPrecoVenda.trim();
+                    const rawC = bulkFornecPrecoCusto.trim();
+                    const rawFM = bulkFornecMargemLucro.trim();
+                    const rawMB = bulkFornecMatBase.trim();
+                    const rawMF = bulkFornecMatFab.trim();
+                    const wantProd = nP > 0 && (rawV !== "" || rawC !== "" || rawFM !== "");
+                    const wantMat =
+                      nM > 0 && (rawMB !== "" || rawMF !== "" || bulkFornecLimparFab);
+                    if (!wantProd && !wantMat) {
+                      toast.error(
+                        "Preencha pelo menos um preço conforme o que selecionou (produtos e/ou materiais)."
+                      );
+                      return;
+                    }
+                    if (nP > 0 && !wantProd && nM === 0) {
+                      toast.error("Você selecionou produtos: informe custo, venda e/ou %.");
+                      return;
+                    }
+                    if (nM > 0 && !wantMat && nP === 0) {
+                      toast.error(
+                        "Você selecionou materiais: informe preço base e/ou fabricação, ou marque remover fabricação."
+                      );
+                      return;
+                    }
+                    let preco_venda: number | undefined;
+                    let preco_custo: number | undefined;
+                    let margem_lucro_percent: number | undefined;
+                    if (wantProd) {
+                      if (rawC) {
+                        const c = roundDecimalPlaces(parseFloat(rawC.replace(",", ".")), 4);
+                        if (Number.isNaN(c) || c < 0) {
+                          toast.error("Preço de custo inválido");
+                          return;
+                        }
+                        preco_custo = c;
+                      }
+                      if (rawV) {
+                        const v = roundDecimalPlaces(parseFloat(rawV.replace(",", ".")), 4);
+                        if (Number.isNaN(v) || v < 0) {
+                          toast.error("Preço de venda inválido");
+                          return;
+                        }
+                        preco_venda = v;
+                      }
+                      if (rawFM) {
+                        const m = roundDecimalPlaces(parseFloat(rawFM.replace(",", ".")), 4);
+                        if (Number.isNaN(m)) {
+                          toast.error("Percentual inválido");
+                          return;
+                        }
+                        margem_lucro_percent = m;
+                      }
+                    }
+                    let preco_unitario_base: number | undefined;
+                    let preco_fabricacao: number | null | undefined;
+                    if (wantMat) {
+                      if (rawMB) {
+                        const b = roundDecimalPlaces(parseFloat(rawMB.replace(",", ".")), 4);
+                        if (Number.isNaN(b) || b < 0) {
+                          toast.error("Preço base do material inválido");
+                          return;
+                        }
+                        preco_unitario_base = b;
+                      }
+                      if (bulkFornecLimparFab) preco_fabricacao = null;
+                      else if (rawMF) {
+                        const f = roundDecimalPlaces(parseFloat(rawMF.replace(",", ".")), 4);
+                        if (Number.isNaN(f) || f < 0) {
+                          toast.error("Preço de fabricação inválido");
+                          return;
+                        }
+                        preco_fabricacao = f;
+                      }
+                    }
+                    try {
+                      setSavingBulkFornec(true);
+                      const parts: string[] = [];
+                      if (wantProd) {
+                        const res =
+                          preco_custo !== undefined && preco_venda !== undefined
+                            ? await api.bulkUpdateProdutosPrecos({
+                                ids: [...idsFornecTabProdutos],
+                                preco_custo,
+                                preco_venda,
+                                margem_lucro_percent: null,
+                              })
+                            : preco_custo !== undefined && margem_lucro_percent !== undefined
+                              ? await api.bulkUpdateProdutosPrecos({
+                                  ids: [...idsFornecTabProdutos],
+                                  preco_custo,
+                                  preco_venda: null,
+                                  margem_lucro_percent,
+                                })
+                              : await api.bulkUpdateProdutosPrecos({
+                                  ids: [...idsFornecTabProdutos],
+                                  preco_custo: preco_custo ?? null,
+                                  preco_venda: preco_venda ?? null,
+                                  margem_lucro_percent: margem_lucro_percent ?? null,
+                                });
+                        parts.push(`${res.ok} produto(s)`);
+                        if (res.failed > 0) toast.warning(`${res.failed} produto(s) com erro.`);
+                      }
+                      if (wantMat) {
+                        const matPayload: {
+                          ids: string[];
+                          preco_unitario_base?: number;
+                          preco_fabricacao?: number | null;
+                        } = { ids: [...idsFornecTabMateriais] };
+                        if (preco_unitario_base !== undefined)
+                          matPayload.preco_unitario_base = preco_unitario_base;
+                        if (preco_fabricacao !== undefined) matPayload.preco_fabricacao = preco_fabricacao;
+                        const res = await api.bulkUpdateMateriaisPrecos(matPayload);
+                        parts.push(`${res.ok} material(is)`);
+                        if (res.failed > 0) toast.warning(`${res.failed} material(is) com erro.`);
+                      }
+                      toast.success(`Atualizado: ${parts.join(" · ")}.`);
+                      setBulkFornecPrecosOpen(false);
+                      setBulkFornecPrecoVenda("");
+                      setBulkFornecPrecoCusto("");
+                      setBulkFornecMargemLucro("");
+                      setBulkFornecMatBase("");
+                      setBulkFornecMatFab("");
+                      setBulkFornecLimparFab(false);
+                      setIdsFornecTabProdutos(new Set());
+                      setIdsFornecTabMateriais(new Set());
+                      await loadData();
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Erro ao atualizar preços");
+                    } finally {
+                      setSavingBulkFornec(false);
+                    }
+                  }}
+                >
+                  {savingBulkFornec ? "Aplicando…" : "Aplicar"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={!!verDadosFornecedor} onOpenChange={(open) => !open && setVerDadosFornecedor(null)}>
             <DialogContent className="max-w-md">
@@ -1966,17 +2667,32 @@ export function Cadastro() {
                     </Select>
                   </div>
                   {isChefe && (
-                    <div className="space-y-2">
-                      <Label htmlFor="precoMaterial">Preço Unitário Base *</Label>
-                      <Input
-                        id="precoMaterial"
-                        type="text"
-                        inputMode="decimal"
-                        value={precoMaterial}
-                        onChange={(e) => setPrecoMaterial(e.target.value)}
-                        placeholder="0,0000"
-                      />
-                    </div>
+                    <>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="precoMaterial">Preço base (compra e estoque) *</Label>
+                        <Input
+                          id="precoMaterial"
+                          type="text"
+                          inputMode="decimal"
+                          value={precoMaterial}
+                          onChange={(e) => setPrecoMaterial(e.target.value)}
+                          placeholder="0,0000"
+                        />
+                        <p className="text-xs text-muted-foreground">Usado em compras e valorização de estoque; não altera histórico de notas já lançadas.</p>
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="precoMaterialFabricacao">Preço na fabricação (insumos)</Label>
+                        <Input
+                          id="precoMaterialFabricacao"
+                          type="text"
+                          inputMode="decimal"
+                          value={precoMaterialFabricacao}
+                          onChange={(e) => setPrecoMaterialFabricacao(e.target.value)}
+                          placeholder="Opcional — vazio usa o preço base"
+                        />
+                        <p className="text-xs text-muted-foreground">Só para custo de materiais nos produtos fabricados. Deixe vazio para usar o preço base.</p>
+                      </div>
+                    </>
                   )}
                 </div>
                 <div className="flex gap-2">
@@ -2031,9 +2747,18 @@ export function Cadastro() {
                                   <h3 className="font-medium">{material.nome}</h3>
                                 </div>
                                 {isChefe && (
-                                  <p className="text-lg font-semibold text-primary">
-                                    {formatCurrency(material.precoUnitarioBase)}
-                                  </p>
+                                  <div className="space-y-0.5">
+                                    <p className="text-sm text-muted-foreground">
+                                      Base (compra/estoque):{" "}
+                                      <span className="font-medium text-foreground">{formatCurrency(material.precoUnitarioBase)}</span>
+                                    </p>
+                                    <p className="text-lg font-semibold text-primary">
+                                      Fabricação (insumos):{" "}
+                                      {material.precoFabricacao != null && !Number.isNaN(Number(material.precoFabricacao))
+                                        ? formatCurrency(Number(material.precoFabricacao))
+                                        : formatCurrency(material.precoUnitarioBase)}
+                                    </p>
+                                  </div>
                                 )}
                               </div>
                               <div className="flex items-center gap-2">
