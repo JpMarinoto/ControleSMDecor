@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -56,7 +56,7 @@ export function ContaBancoList() {
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
-  const handleCreateConta = async (e: React.FormEvent) => {
+  const handleCreateConta = async (e: FormEvent) => {
     e.preventDefault();
     const nome = nomeConta.trim();
     if (!nome) {
@@ -205,7 +205,7 @@ export function ContaBancoDetalhe() {
     load();
   }, [id]);
 
-  const handleMovimento = async (e: React.FormEvent) => {
+  const handleMovimento = async (e: FormEvent) => {
     e.preventDefault();
     if (!id) return;
     const v = parseFloat(valorMov.replace(",", "."));
@@ -233,7 +233,7 @@ export function ContaBancoDetalhe() {
     }
   };
 
-  const handleAtualizarSaldo = async (e: React.FormEvent) => {
+  const handleAtualizarSaldo = async (e: FormEvent) => {
     e.preventDefault();
     if (!id) return;
     const s = parseFloat(novoSaldo.replace(",", "."));

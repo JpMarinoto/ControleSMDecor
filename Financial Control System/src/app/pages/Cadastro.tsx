@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -126,6 +126,21 @@ function fmtPercentBr(n: number) {
   });
 }
 
+/** Campos iniciais do diálogo de preços em massa (alinhado à formatação dos handlers onChange). */
+function bulkProdPrecosInitialFromReference(p: Produto): { custo: string; venda: string; margem: string } {
+  const c = roundDecimalPlaces(Number(p.precoCusto ?? 0), 4);
+  const v = roundDecimalPlaces(Number(p.precoInicial), 4);
+  const custoStr = fmtDecimalPt(c);
+  const vendaStr = fmtDecimalPt(v);
+  const margemStr =
+    c > 0 ? fmtPercentBr((v / c - 1) * 100) : fmtPercentBr(roundDecimalPlaces(Number(p.margemLucroPercent ?? 0), 2));
+  return { custo: custoStr, venda: vendaStr, margem: margemStr };
+}
+
+/** Painel do formulário fixo abaixo do header ao editar, para não perder o formulário ao rolar a lista. */
+const CADASTRO_FORM_EDIT_SHELL =
+  "sticky top-20 z-30 bg-background/95 pb-3 pt-2 -mx-1 px-1 backdrop-blur-sm border-b border-border/80 shadow-sm";
+
 /** Preço unitário do material na composição (fabricação): override opcional ou base. */
 function precoUnitarioInsumoMaterial(m: Material): number {
   const fab = m.precoFabricacao;
@@ -233,6 +248,53 @@ export function Cadastro() {
   // Form states - Contas
   const [nomeConta, setNomeConta] = useState('');
   const [saldoConta, setSaldoConta] = useState('');
+
+  const cadastroClienteFormRef = useRef<HTMLDivElement>(null);
+  const cadastroProdutoFormRef = useRef<HTMLDivElement>(null);
+  const cadastroCategoriaFormRef = useRef<HTMLDivElement>(null);
+  const cadastroFornecedorFormRef = useRef<HTMLDivElement>(null);
+  const cadastroMaterialFormRef = useRef<HTMLDivElement>(null);
+  const cadastroContaFormRef = useRef<HTMLDivElement>(null);
+
+  const flashCadastroFormShell = (el: HTMLDivElement | null): (() => void) | undefined => {
+    if (!el) return undefined;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background", "rounded-xl");
+    const id = window.setTimeout(() => {
+      el.classList.remove("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background", "rounded-xl");
+    }, 1600);
+    return () => window.clearTimeout(id);
+  };
+
+  useLayoutEffect(() => {
+    if (!editingCliente) return;
+    return flashCadastroFormShell(cadastroClienteFormRef.current);
+  }, [editingCliente?.id]);
+
+  useLayoutEffect(() => {
+    if (!editingProduto) return;
+    return flashCadastroFormShell(cadastroProdutoFormRef.current);
+  }, [editingProduto?.id]);
+
+  useLayoutEffect(() => {
+    if (!editingCategoria) return;
+    return flashCadastroFormShell(cadastroCategoriaFormRef.current);
+  }, [editingCategoria?.id]);
+
+  useLayoutEffect(() => {
+    if (!editingFornecedor) return;
+    return flashCadastroFormShell(cadastroFornecedorFormRef.current);
+  }, [editingFornecedor?.id]);
+
+  useLayoutEffect(() => {
+    if (!editingMaterial) return;
+    return flashCadastroFormShell(cadastroMaterialFormRef.current);
+  }, [editingMaterial?.id]);
+
+  useLayoutEffect(() => {
+    if (!editingConta) return;
+    return flashCadastroFormShell(cadastroContaFormRef.current);
+  }, [editingConta?.id]);
 
   useEffect(() => {
     loadData();
@@ -1005,6 +1067,10 @@ export function Cadastro() {
 
         {/* CLIENTES */}
         <TabsContent value="clientes" className="space-y-6">
+          <div
+            ref={cadastroClienteFormRef}
+            className={`scroll-mt-24 ${editingCliente ? CADASTRO_FORM_EDIT_SHELL : ""}`}
+          >
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1142,6 +1208,7 @@ export function Cadastro() {
               </form>
             </CardContent>
           </Card>
+          </div>
 
           <div className="space-y-3">
             {clientes.length > 0 ? (
@@ -1235,6 +1302,14 @@ export function Cadastro() {
 
         {/* PRODUTOS */}
         <TabsContent value="produtos" className="space-y-6">
+          <div
+            ref={cadastroProdutoFormRef}
+            className={`scroll-mt-24 ${
+              editingProduto
+                ? `${CADASTRO_FORM_EDIT_SHELL} max-h-[min(88vh,calc(100dvh-5rem))] overflow-y-auto`
+                : ""
+            }`}
+          >
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1510,6 +1585,7 @@ export function Cadastro() {
               </form>
             </CardContent>
           </Card>
+          </div>
 
           {isChefe && produtos.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
@@ -1521,7 +1597,20 @@ export function Cadastro() {
                 variant="secondary"
                 size="sm"
                 disabled={idsProdutosSelecionados.size === 0}
-                onClick={() => setBulkPrecosOpen(true)}
+                onClick={() => {
+                  const ref = produtos.find((p) => idsProdutosSelecionados.has(p.id));
+                  if (ref) {
+                    const init = bulkProdPrecosInitialFromReference(ref);
+                    setBulkPrecoCusto(init.custo);
+                    setBulkPrecoVenda(init.venda);
+                    setBulkMargemLucro(init.margem);
+                  } else {
+                    setBulkPrecoCusto("");
+                    setBulkPrecoVenda("");
+                    setBulkMargemLucro("");
+                  }
+                  setBulkPrecosOpen(true);
+                }}
               >
                 Atualizar preços em massa
               </Button>
@@ -1679,8 +1768,9 @@ export function Cadastro() {
                 <DialogTitle>Atualizar preços em massa</DialogTitle>
               </DialogHeader>
               <p className="text-sm text-muted-foreground">
-                {idsProdutosSelecionados.size} produto(s) selecionado(s). Alterar venda atualiza a %; alterar % atualiza a
-                venda (com custo maior que zero).
+                {idsProdutosSelecionados.size} produto(s) selecionado(s). Os campos começam com os valores do primeiro
+                produto na lista entre os selecionados; ao aplicar, todos recebem o que estiver no formulário. Alterar
+                venda atualiza a %; alterar % atualiza a venda (com custo maior que zero).
               </p>
               <div className="space-y-2">
                 <Label htmlFor="bulkPrecoCusto">Preço de custo</Label>
@@ -1810,6 +1900,10 @@ export function Cadastro() {
 
         {/* CATEGORIAS */}
         <TabsContent value="categorias" className="space-y-6">
+          <div
+            ref={cadastroCategoriaFormRef}
+            className={`scroll-mt-24 ${editingCategoria ? CADASTRO_FORM_EDIT_SHELL : ""}`}
+          >
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1868,6 +1962,7 @@ export function Cadastro() {
               </form>
             </CardContent>
           </Card>
+          </div>
 
           <div className="space-y-3">
             {categorias.length > 0 ? (
@@ -1933,6 +2028,10 @@ export function Cadastro() {
 
         {/* FORNECEDORES */}
         <TabsContent value="fornecedores" className="space-y-6">
+          <div
+            ref={cadastroFornecedorFormRef}
+            className={`scroll-mt-24 ${editingFornecedor ? CADASTRO_FORM_EDIT_SHELL : ""}`}
+          >
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2070,6 +2169,7 @@ export function Cadastro() {
               </form>
             </CardContent>
           </Card>
+          </div>
 
           {isChefe &&
             (idsFornecTabProdutos.size > 0 || idsFornecTabMateriais.size > 0) && (
@@ -2605,6 +2705,10 @@ export function Cadastro() {
 
         {/* MATERIAIS */}
         <TabsContent value="materiais" className="space-y-6">
+          <div
+            ref={cadastroMaterialFormRef}
+            className={`scroll-mt-24 ${editingMaterial ? CADASTRO_FORM_EDIT_SHELL : ""}`}
+          >
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2711,6 +2815,7 @@ export function Cadastro() {
               </form>
             </CardContent>
           </Card>
+          </div>
 
           <div className="space-y-3">
             {materiais.length > 0 ? (
@@ -2810,6 +2915,10 @@ export function Cadastro() {
         {/* CONTAS BANCÁRIAS - apenas chefe */}
         {isChefe && (
         <TabsContent value="contas" className="space-y-6">
+          <div
+            ref={cadastroContaFormRef}
+            className={`scroll-mt-24 ${editingConta ? CADASTRO_FORM_EDIT_SHELL : ""}`}
+          >
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2857,6 +2966,7 @@ export function Cadastro() {
               </form>
             </CardContent>
           </Card>
+          </div>
 
           <div className="space-y-3">
             {contas.length > 0 ? (

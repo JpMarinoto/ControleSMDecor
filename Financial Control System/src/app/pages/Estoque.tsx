@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
@@ -86,7 +86,7 @@ export function Estoque() {
     load();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (tipoAjusteItem === "material") {
       if (!materialId) {
@@ -518,7 +518,7 @@ export function Estoque() {
                               <span className="flex items-center gap-2">
                                 {item.nome}
                                 {item.alterado_hoje && (
-                                  <Sparkles className="size-4 text-amber-600 shrink-0" title="Alterado hoje" />
+                                  <Sparkles className="size-4 text-amber-600 shrink-0" aria-label="Alterado hoje" />
                                 )}
                               </span>
                             </TableCell>
@@ -582,7 +582,7 @@ export function Estoque() {
                                 {item.alterado_hoje && (
                                   <Sparkles
                                     className="size-4 text-amber-600 shrink-0"
-                                    title="Alterado hoje"
+                                    aria-label="Alterado hoje"
                                   />
                                 )}
                               </span>
@@ -653,7 +653,7 @@ export function Estoque() {
                               <span className="flex items-center gap-2">
                                 {item.nome}
                                 {item.alterado_hoje && (
-                                  <Sparkles className="size-4 text-amber-600 shrink-0" title="Alterado hoje" />
+                                  <Sparkles className="size-4 text-amber-600 shrink-0" aria-label="Alterado hoje" />
                                 )}
                               </span>
                             </TableCell>
@@ -745,7 +745,7 @@ export function Estoque() {
                                   {item.alterado_hoje && (
                                     <Sparkles
                                       className="size-4 text-amber-600 shrink-0"
-                                      title="Alterado hoje"
+                                      aria-label="Alterado hoje"
                                     />
                                   )}
                                 </span>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, type FormEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -590,7 +590,7 @@ export function Compra() {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
 
     if (!fornecedorId) {
@@ -1092,7 +1092,7 @@ export function Compra() {
                           <TableCell className="font-medium truncate">
                             <span className="inline-flex items-center gap-1.5">
                               {ordem.cancelada && /^\d+$/.test(String(ordem.id)) ? (
-                                <Ban className="size-3.5 shrink-0 text-destructive" title="Ordem cancelada" aria-hidden />
+                                <Ban className="size-3.5 shrink-0 text-destructive" aria-label="Ordem cancelada" />
                               ) : null}
                               <span className={ordem.cancelada ? "text-muted-foreground" : undefined}>{ordem.fornecedor}</span>
                             </span>
@@ -1157,7 +1157,7 @@ export function Compra() {
                   <div className="space-y-1">
                     <DialogTitle className="flex items-center gap-2 text-xl font-semibold leading-tight sm:text-2xl">
                       {detailCompra.cancelada ? (
-                        <Ban className="size-5 shrink-0 text-destructive" title="Ordem cancelada" aria-hidden />
+                        <Ban className="size-5 shrink-0 text-destructive" aria-label="Ordem cancelada" />
                       ) : null}
                       {detailCompra.fornecedor}
                     </DialogTitle>

@@ -1,3 +1,4 @@
+import React from "react";
 import { Link } from "react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { ArrowLeftRight, ArrowDownCircle, CreditCard, Wallet, Building2 } from "lucide-react";

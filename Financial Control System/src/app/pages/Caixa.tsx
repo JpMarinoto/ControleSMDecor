@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO } from "../lib/format";
@@ -75,7 +75,7 @@ export function Caixa() {
     loadHistorico();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const v = parseFloat(valor.replace(",", "."));
     if (isNaN(v) || v <= 0) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { api } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -52,7 +52,7 @@ export function FuncionariosList() {
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
-  const handleCriar = async (e: React.FormEvent) => {
+  const handleCriar = async (e: FormEvent) => {
     e.preventDefault();
     const nome = nomeNovo.trim();
     if (!nome) {

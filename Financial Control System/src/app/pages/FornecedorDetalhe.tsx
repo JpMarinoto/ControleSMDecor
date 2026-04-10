@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import React, { Fragment, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime } from "../lib/format";
@@ -212,7 +212,7 @@ export function FornecedorDetalhe() {
     }
   };
 
-  const handlePagar = async (e: React.FormEvent) => {
+  const handlePagar = async (e: FormEvent) => {
     e.preventDefault();
     if (!id) return;
     const v = parseFloat(valorPagamento.replace(",", "."));

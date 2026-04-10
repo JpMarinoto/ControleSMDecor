@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { formatDateOnly } from "../lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -44,7 +44,7 @@ export function Saidas() {
     load();
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const v = parseFloat(valor.replace(",", "."));
     if (!descricao.trim() || isNaN(v) || v <= 0) {
