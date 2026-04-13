@@ -149,7 +149,13 @@ class Command(BaseCommand):
         for cliente, itens in vendas_config:
             v = Venda.objects.create(cliente=cliente)
             for prod, qtd, preco_un in itens:
-                ItemVenda.objects.create(venda=v, produto=prod, quantidade=qtd, preco_unitario=preco_un)
+                ItemVenda.objects.create(
+                    venda=v,
+                    produto=prod,
+                    quantidade=qtd,
+                    preco_unitario=preco_un,
+                    preco_custo_unitario=prod.preco_custo,
+                )
 
         self.stdout.write("Criando pagamentos de clientes...")
         Pagamento.objects.create(cliente=clientes[0], valor=Decimal("500.00"))

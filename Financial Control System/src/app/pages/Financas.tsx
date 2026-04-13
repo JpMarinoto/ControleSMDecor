@@ -1,12 +1,13 @@
 import React from "react";
 import { Link } from "react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { ArrowLeftRight, ArrowDownCircle, CreditCard, Wallet, Building2 } from "lucide-react";
+import { ArrowLeftRight, ArrowDownCircle, CreditCard, Wallet, Building2, PiggyBank } from "lucide-react";
 import { Transactions } from "./Transactions";
 import { Saidas } from "./Saidas";
 import { DividasGerais } from "./DividasGerais";
 import { Caixa } from "./Caixa";
 import { ContaBancoList } from "./ContaBanco";
+import { FinancasLucros } from "./FinancasLucros";
 
 export function Financas() {
   return (
@@ -15,31 +16,35 @@ export function Financas() {
         <div>
           <h1 className="text-3xl font-semibold">Finanças</h1>
           <p className="text-muted-foreground">
-            Transações, saídas, dívidas gerais, caixa e contas bancárias em um só lugar
+            Transações, saídas, dívidas, lucros, caixa e contas bancárias em um só lugar
           </p>
         </div>
       </div>
 
       <Tabs defaultValue="transacoes" className="w-full">
-        <TabsList className="grid w-full max-w-3xl grid-cols-5">
-          <TabsTrigger value="transacoes" className="flex items-center gap-2">
-            <ArrowLeftRight className="size-4" />
+        <TabsList className="flex w-full flex-wrap gap-1 h-auto p-1 justify-start sm:justify-center max-w-5xl">
+          <TabsTrigger value="transacoes" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <ArrowLeftRight className="size-4 shrink-0" />
             Transações
           </TabsTrigger>
-          <TabsTrigger value="saidas" className="flex items-center gap-2">
-            <ArrowDownCircle className="size-4" />
+          <TabsTrigger value="saidas" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <ArrowDownCircle className="size-4 shrink-0" />
             Saídas
           </TabsTrigger>
-          <TabsTrigger value="dividas" className="flex items-center gap-2">
-            <CreditCard className="size-4" />
+          <TabsTrigger value="dividas" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <CreditCard className="size-4 shrink-0" />
             Dívidas gerais
           </TabsTrigger>
-          <TabsTrigger value="caixa" className="flex items-center gap-2">
-            <Wallet className="size-4" />
+          <TabsTrigger value="lucros" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <PiggyBank className="size-4 shrink-0" />
+            Lucros
+          </TabsTrigger>
+          <TabsTrigger value="caixa" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <Wallet className="size-4 shrink-0" />
             Caixa
           </TabsTrigger>
-          <TabsTrigger value="contas" className="flex items-center gap-2">
-            <Building2 className="size-4" />
+          <TabsTrigger value="contas" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <Building2 className="size-4 shrink-0" />
             Contas banco
           </TabsTrigger>
         </TabsList>
@@ -51,6 +56,9 @@ export function Financas() {
         </TabsContent>
         <TabsContent value="dividas" className="mt-6">
           <DividasGerais />
+        </TabsContent>
+        <TabsContent value="lucros" className="mt-6">
+          <FinancasLucros />
         </TabsContent>
         <TabsContent value="caixa" className="mt-6">
           <Caixa />

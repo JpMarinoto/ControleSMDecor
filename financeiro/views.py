@@ -594,11 +594,13 @@ def registrar_venda(request):
             if p_ids[i] and p_ids[i].strip():
                 q = qts[i] if i < len(qts) else 1
                 pr = precos[i] if i < len(precos) else 0
+                produto = Produto.objects.get(pk=int(p_ids[i]))
                 ItemVenda.objects.create(
                     venda=venda,
                     produto_id=int(p_ids[i]),
                     quantidade=int(q) or 1,
                     preco_unitario=pr or 0,
+                    preco_custo_unitario=produto.preco_custo,
                 )
         total = sum((float(precos[i]) if i < len(precos) else 0) * (int(qts[i]) if i < len(qts) else 1) for i in range(len(p_ids)) if p_ids[i] and p_ids[i].strip())
         _registrar_log(request, 'Criar', 'Venda', f'Venda #{venda.id} - Cliente ID {venda.cliente_id} - Total R$ {total:.2f}')
@@ -630,11 +632,13 @@ def editar_venda(request, id):
             if p_ids[i] and str(p_ids[i]).strip():
                 q = qts[i] if i < len(qts) else 1
                 pr = precos[i] if i < len(precos) else 0
+                produto = Produto.objects.get(pk=int(p_ids[i]))
                 ItemVenda.objects.create(
                     venda=venda,
                     produto_id=int(p_ids[i]),
                     quantidade=int(q) or 1,
                     preco_unitario=pr or 0,
+                    preco_custo_unitario=produto.preco_custo,
                 )
         _registrar_log(request, 'Editar', 'Venda', f'Venda #{venda.id} atualizada')
         return redirect('detalhe_venda', id=venda.id)

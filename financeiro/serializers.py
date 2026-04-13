@@ -173,7 +173,7 @@ class ItemVendaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ItemVenda
-        fields = ['id', 'produto', 'produto_nome', 'quantidade', 'preco_unitario']
+        fields = ['id', 'produto', 'produto_nome', 'quantidade', 'preco_unitario', 'preco_custo_unitario']
 
 
 class VendaSerializer(serializers.ModelSerializer):
@@ -220,11 +220,13 @@ class VendaSerializer(serializers.ModelSerializer):
             cliente = Cliente.objects.get(pk=cliente_id)
         venda = Venda.objects.create(cliente=cliente)
         for item in itens_data:
+            produto = Produto.objects.get(pk=item['produto'])
             ItemVenda.objects.create(
                 venda=venda,
                 produto_id=item['produto'],
                 quantidade=item.get('quantidade', 1),
-                preco_unitario=item.get('preco_unitario', Produto.objects.get(pk=item['produto']).preco_venda),
+                preco_unitario=item.get('preco_unitario', produto.preco_venda),
+                preco_custo_unitario=produto.preco_custo,
             )
         return venda
 

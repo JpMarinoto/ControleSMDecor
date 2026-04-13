@@ -65,6 +65,32 @@ export interface EstoqueItem {
   alterado_hoje?: boolean;
 }
 
+/** Resposta da API `/relatorio-lucros-vendas/` (margem por vendas no período). */
+export interface RelatorioLucrosVendas {
+  data_inicio: string;
+  data_fim: string;
+  receita_total: number;
+  custo_total: number;
+  lucro_total: number;
+  por_cliente: { cliente_id: number; cliente_nome: string; receita: number; custo: number; lucro: number }[];
+  por_produto: {
+    produto_id: number;
+    produto_nome: string;
+    quantidade: number;
+    receita: number;
+    custo: number;
+    lucro: number;
+  }[];
+}
+
+/** Resposta da API `/relatorio-compras-periodo/` (compras por material/produto no intervalo). */
+export interface RelatorioComprasPeriodo {
+  data_inicio: string;
+  data_fim: string;
+  materiais: { material_id: number; nome: string; quantidade: number; total_gasto: number }[];
+  produtos: { produto_id: number; nome: string; quantidade: number; total_gasto: number }[];
+}
+
 /** Resposta da API `/precificacoes/shopee/` (precificação salva no SQLite). */
 export interface PrecificacaoShopeeApiRow {
   id: number;
@@ -400,6 +426,27 @@ export const api = {
     if (!response.ok) return [];
     const data = await response.json().catch(() => null);
     return Array.isArray(data) ? data : [];
+  },
+
+  getRelatorioLucrosVendas: async (params: { data_inicio: string; data_fim: string; cliente_id?: string }) => {
+    const sp = new URLSearchParams();
+    sp.set('data_inicio', params.data_inicio);
+    sp.set('data_fim', params.data_fim);
+    if (params.cliente_id && params.cliente_id !== 'all') sp.set('cliente_id', params.cliente_id);
+    const response = await fetch(`${API_BASE_URL}/relatorio-lucros-vendas/?${sp.toString()}`, {
+      headers: authHeaders(),
+    });
+    return readJsonOrThrow(response) as Promise<RelatorioLucrosVendas>;
+  },
+
+  getRelatorioComprasPeriodo: async (params: { data_inicio: string; data_fim: string }) => {
+    const sp = new URLSearchParams();
+    sp.set('data_inicio', params.data_inicio);
+    sp.set('data_fim', params.data_fim);
+    const response = await fetch(`${API_BASE_URL}/relatorio-compras-periodo/?${sp.toString()}`, {
+      headers: authHeaders(),
+    });
+    return readJsonOrThrow(response) as Promise<RelatorioComprasPeriodo>;
   },
 
   getVendaDetalhe: async (id: string) => {

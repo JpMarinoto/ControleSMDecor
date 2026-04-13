@@ -189,6 +189,20 @@ class ItemVenda(models.Model):
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT)
     quantidade = models.PositiveIntegerField(default=1)
     preco_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    preco_custo_unitario = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        verbose_name='Custo unitário (snapshot)',
+        help_text='Custo do produto no momento da venda; usado no relatório de lucros.',
+    )
+
+    def save(self, *args, **kwargs):
+        if self.preco_custo_unitario is None and self.produto_id:
+            pc = Produto.objects.filter(pk=self.produto_id).values_list('preco_custo', flat=True).first()
+            self.preco_custo_unitario = pc if pc is not None else Decimal('0')
+        super().save(*args, **kwargs)
 
     @property
     def total_item(self):

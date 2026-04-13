@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django.db.models import Sum, F, Q, Value, DecimalField, ExpressionWrapper
+from django.db.models.functions import Coalesce
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -803,10 +805,17 @@ class VendaListCreate(APIView):
             prod_id = item.get('produto') or item.get('produto_id')
             qty = item.get('quantidade', 1)
             preco = item.get('preco_unitario')
+            produto = Produto.objects.get(pk=prod_id)
             # Snapshot: só usa preço do cadastro se o cliente não enviou preco_unitario (notas antigas nunca são atualizadas pelo PUT do produto).
-            if preco is None and prod_id:
-                preco = Produto.objects.get(pk=prod_id).preco_venda
-            ItemVenda.objects.create(venda=venda, produto_id=prod_id, quantidade=qty, preco_unitario=preco)
+            if preco is None:
+                preco = produto.preco_venda
+            ItemVenda.objects.create(
+                venda=venda,
+                produto_id=prod_id,
+                quantidade=qty,
+                preco_unitario=preco,
+                preco_custo_unitario=produto.preco_custo,
+            )
         total = sum(i.get("quantidade", 1) * float(i.get("preco_unitario", 0)) for i in itens)
         _api_log(request, "Criar", "Venda", f"Venda #{venda.id} - Cliente {cliente.nome} (ID {cliente_id}) - Total R$ {total:.2f}")
         serializer = VendaSerializer(venda)
@@ -902,24 +911,31 @@ class VendaAddItem(APIView):
         prod_id = request.data.get('produto') or request.data.get('produto_id')
         qty = request.data.get('quantidade', 1)
         preco = request.data.get('preco_unitario')
-        if prod_id:
-            try:
-                prod_add = Produto.objects.get(pk=prod_id)
-            except Produto.DoesNotExist:
-                return Response({'produto': ['Produto não encontrado.']}, status=status.HTTP_400_BAD_REQUEST)
-            if not prod_add.ativo:
-                return Response(
-                    {
-                        'produto': [
-                            f'Produto "{prod_add.nome}" foi removido do cadastro e não pode ser adicionado à venda.'
-                        ]
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        if preco is None and prod_id:
-            preco = Produto.objects.get(pk=prod_id).preco_venda
+        if not prod_id:
+            return Response({'produto': ['Obrigatório.']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            produto = Produto.objects.get(pk=prod_id)
+        except Produto.DoesNotExist:
+            return Response({'produto': ['Produto não encontrado.']}, status=status.HTTP_400_BAD_REQUEST)
+        if not produto.ativo:
+            return Response(
+                {
+                    'produto': [
+                        f'Produto "{produto.nome}" foi removido do cadastro e não pode ser adicionado à venda.'
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if preco is None:
+            preco = produto.preco_venda
         # preco_unitario gravado na linha; alterar Produto.preco_venda depois não mexe neste registro.
-        ItemVenda.objects.create(venda=venda, produto_id=prod_id, quantidade=qty, preco_unitario=preco)
+        ItemVenda.objects.create(
+            venda=venda,
+            produto_id=prod_id,
+            quantidade=qty,
+            preco_unitario=preco,
+            preco_custo_unitario=produto.preco_custo,
+        )
         _api_log(request, "Editar", "Venda", f"Venda #{pk} - item adicionado (produto {prod_id}, qtd {qty})")
         venda = Venda.objects.select_related('cliente').prefetch_related('itens__produto').get(pk=pk)
         serializer = VendaSerializer(venda)
@@ -987,10 +1003,19 @@ class VendaItemDetail(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class VendaCopiar(APIView):
     def post(self, request, pk):
-        origem = Venda.objects.select_related('cliente').prefetch_related('itens').get(pk=pk)
+        origem = Venda.objects.select_related('cliente').prefetch_related('itens__produto').get(pk=pk)
         nova = Venda.objects.create(cliente=origem.cliente, data_venda=origem.data_venda)
         for item in origem.itens.all():
-            ItemVenda.objects.create(venda=nova, produto=item.produto, quantidade=item.quantidade, preco_unitario=item.preco_unitario)
+            cu = item.preco_custo_unitario
+            if cu is None and item.produto_id:
+                cu = item.produto.preco_custo
+            ItemVenda.objects.create(
+                venda=nova,
+                produto=item.produto,
+                quantidade=item.quantidade,
+                preco_unitario=item.preco_unitario,
+                preco_custo_unitario=cu,
+            )
         _api_log(request, "Criar", "Venda", f"Venda #{nova.id} copiada da venda #{pk}")
         serializer = VendaSerializer(nova)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1025,6 +1050,194 @@ class UltimoPrecoClienteProduto(APIView):
         if prod and prod.ativo:
             return Response({'preco': float(prod.preco_venda)})
         return Response({'preco': None})
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RelatorioLucrosVendas(APIView):
+    """Lucro por mercadoria: (preço de venda − custo) × quantidade, agregado no período (data da venda)."""
+
+    def get(self, request):
+        if not getattr(request.user, "is_authenticated", False):
+            return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            from .views_auth import _is_chefe
+            if not _is_chefe(request):
+                return Response(
+                    {"error": "Apenas o chefe pode ver o relatório de lucros."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except Exception:
+            return Response(
+                {"error": "Apenas o chefe pode ver o relatório de lucros."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        di = _parse_data_request(request.GET.get('data_inicio') or request.GET.get('de'))
+        df = _parse_data_request(request.GET.get('data_fim') or request.GET.get('ate'))
+        if not di or not df:
+            return Response(
+                {'error': 'Informe data_inicio e data_fim (YYYY-MM-DD).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if di > df:
+            return Response(
+                {'error': 'data_inicio não pode ser posterior a data_fim.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        cliente_param = (request.GET.get('cliente_id') or '').strip()
+        qs = ItemVenda.objects.filter(
+            venda__cancelada=False,
+            venda__data_venda__date__gte=di,
+            venda__data_venda__date__lte=df,
+        )
+        if cliente_param:
+            try:
+                qs = qs.filter(venda__cliente_id=int(cliente_param))
+            except ValueError:
+                return Response({'error': 'cliente_id inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        dec4 = DecimalField(max_digits=14, decimal_places=4)
+        zero = Value(Decimal('0'), output_field=dec4)
+        custo_u = Coalesce(F('preco_custo_unitario'), F('produto__preco_custo'), zero, output_field=dec4)
+        money = DecimalField(max_digits=18, decimal_places=4)
+        qs_ann = qs.annotate(
+            receita_linha=ExpressionWrapper(F('quantidade') * F('preco_unitario'), output_field=money),
+            custo_linha=ExpressionWrapper(F('quantidade') * custo_u, output_field=money),
+        )
+
+        tot = qs_ann.aggregate(
+            receita_total=Sum('receita_linha'),
+            custo_total=Sum('custo_linha'),
+        )
+        receita_total = tot['receita_total'] or Decimal('0')
+        custo_total = tot['custo_total'] or Decimal('0')
+        lucro_total = receita_total - custo_total
+
+        por_cliente = []
+        for row in (
+            qs_ann.values('venda__cliente_id', 'venda__cliente__nome')
+            .annotate(receita=Sum('receita_linha'), custo=Sum('custo_linha'))
+            .order_by('-receita')
+        ):
+            rec = row['receita'] or Decimal('0')
+            cust = row['custo'] or Decimal('0')
+            por_cliente.append({
+                'cliente_id': row['venda__cliente_id'],
+                'cliente_nome': row['venda__cliente__nome'] or '',
+                'receita': _safe_float(rec),
+                'custo': _safe_float(cust),
+                'lucro': _safe_float(rec - cust),
+            })
+
+        por_produto = []
+        for row in (
+            qs_ann.values('produto_id', 'produto__nome')
+            .annotate(qtd_vendida=Sum('quantidade'), receita=Sum('receita_linha'), custo=Sum('custo_linha'))
+            .order_by('-receita')
+        ):
+            rec = row['receita'] or Decimal('0')
+            cust = row['custo'] or Decimal('0')
+            por_produto.append({
+                'produto_id': row['produto_id'],
+                'produto_nome': row['produto__nome'] or '',
+                'quantidade': int(row['qtd_vendida'] or 0),
+                'receita': _safe_float(rec),
+                'custo': _safe_float(cust),
+                'lucro': _safe_float(rec - cust),
+            })
+
+        return Response({
+            'data_inicio': di.isoformat(),
+            'data_fim': df.isoformat(),
+            'receita_total': _safe_float(receita_total),
+            'custo_total': _safe_float(custo_total),
+            'lucro_total': _safe_float(lucro_total),
+            'por_cliente': por_cliente,
+            'por_produto': por_produto,
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RelatorioComprasPeriodo(APIView):
+    """Materiais e produtos comprados no período (data da compra), excl. ordens canceladas."""
+
+    def get(self, request):
+        if not getattr(request.user, "is_authenticated", False):
+            return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            from .views_auth import _is_chefe
+            if not _is_chefe(request):
+                return Response(
+                    {"error": "Apenas o chefe pode ver este relatório."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except Exception:
+            return Response(
+                {"error": "Apenas o chefe pode ver este relatório."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        di = _parse_data_request(request.GET.get('data_inicio') or request.GET.get('de'))
+        df = _parse_data_request(request.GET.get('data_fim') or request.GET.get('ate'))
+        if not di or not df:
+            return Response(
+                {'error': 'Informe data_inicio e data_fim (YYYY-MM-DD).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if di > df:
+            return Response(
+                {'error': 'data_inicio não pode ser posterior a data_fim.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        filtro_ordem_ok = Q(ordem__isnull=True) | Q(ordem__cancelada=False)
+        money = DecimalField(max_digits=18, decimal_places=2)
+        # total_gasto antes de quantidade: senão F('quantidade') vira Sum(quantidade) e Sum aninha Sum (FieldError no Django 6).
+        linha_valor = ExpressionWrapper(F('quantidade') * F('preco_no_dia'), output_field=money)
+
+        mat_base = CompraMaterial.objects.filter(
+            filtro_ordem_ok,
+            data_compra__date__gte=di,
+            data_compra__date__lte=df,
+        )
+        materiais = []
+        for row in (
+            mat_base.values('material_id', 'material__nome')
+            .annotate(total_gasto=Sum(linha_valor), quantidade=Sum('quantidade'))
+            .order_by('-quantidade')
+        ):
+            materiais.append({
+                'material_id': row['material_id'],
+                'nome': row['material__nome'] or '',
+                'quantidade': int(row['quantidade'] or 0),
+                'total_gasto': _safe_float(row['total_gasto'] or 0),
+            })
+
+        prod_base = CompraProduto.objects.filter(
+            filtro_ordem_ok,
+            data_compra__date__gte=di,
+            data_compra__date__lte=df,
+        )
+        produtos = []
+        for row in (
+            prod_base.values('produto_id', 'produto__nome')
+            .annotate(total_gasto=Sum(linha_valor), quantidade=Sum('quantidade'))
+            .order_by('-quantidade')
+        ):
+            produtos.append({
+                'produto_id': row['produto_id'],
+                'nome': row['produto__nome'] or '',
+                'quantidade': int(row['quantidade'] or 0),
+                'total_gasto': _safe_float(row['total_gasto'] or 0),
+            })
+
+        return Response({
+            'data_inicio': di.isoformat(),
+            'data_fim': df.isoformat(),
+            'materiais': materiais,
+            'produtos': produtos,
+        })
 
 
 # --- Compras (ordem com itens, como Venda) ---

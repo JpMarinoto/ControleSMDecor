@@ -34,6 +34,8 @@ urlpatterns = [
     path('vendas/<int:pk>/itens/<int:item_pk>/', views_api.VendaItemDetail.as_view()),
     path('vendas/<int:pk>/copiar/', views_api.VendaCopiar.as_view()),
     path('ultimo-preco-cliente-produto/', views_api.UltimoPrecoClienteProduto.as_view()),
+    path('relatorio-lucros-vendas/', views_api.RelatorioLucrosVendas.as_view()),
+    path('relatorio-compras-periodo/', views_api.RelatorioComprasPeriodo.as_view()),
     path('compras/', views_api.CompraListCreate.as_view()),
     path('compras/<int:pk>/', views_api.CompraDetail.as_view()),
     path('compras/<int:pk>/copiar/', views_api.CompraCopiar.as_view()),
