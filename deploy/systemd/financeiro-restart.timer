@@ -1,0 +1,12 @@
+[Unit]
+Description=Agenda vários reinícios diários do serviço financeiro
+
+[Timer]
+# Horários no fuso local do servidor (ver: timedatectl). Ajuste conforme necessário.
+OnCalendar=*-*-* 08:00:00
+OnCalendar=*-*-* 14:00:00
+OnCalendar=*-*-* 20:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
