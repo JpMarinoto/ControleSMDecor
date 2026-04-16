@@ -139,8 +139,6 @@ export function ClienteDetalhe() {
   const [selectedPrecoBulkIds, setSelectedPrecoBulkIds] = useState<Set<number>>(new Set());
   const [bulkPrecoComum, setBulkPrecoComum] = useState("");
   const [bulkPrecoLoading, setBulkPrecoLoading] = useState(false);
-  /** Só chefe: impressão do fechamento com valores em R$; desmarcado = apenas quantidades (como funcionário). */
-  const [fechamentoImpressaoComValores, setFechamentoImpressaoComValores] = useState(true);
 
   const loadDetalhe = () => {
     if (!id) return;
@@ -384,7 +382,7 @@ export function ClienteDetalhe() {
 
   const imprimirFechamento = () => {
     if (!printRef.current || !data) return;
-    const comValores = isChefe && fechamentoImpressaoComValores;
+    const comValores = true;
     const periodoLabel =
       periodo === "semana"
         ? "Última semana"
@@ -469,7 +467,7 @@ export function ClienteDetalhe() {
         <body>
           ${getEmpresaHeaderHtml()}
           <h1>Fechamento – ${data.cliente.nome}</h1>
-          <p class="meta">Período: ${periodoLabel}${comValores ? "" : " · sem valores (R$)"}</p>
+          <p class="meta">Período: ${periodoLabel}</p>
           ${resumoBlock}
           <p class="meta"><strong>Vendas no período:</strong> ${vendasFiltradas.length}</p>
           <h3 style="font-size:14px;margin:20px 0 8px;">Vendas</h3>
@@ -483,7 +481,7 @@ export function ClienteDetalhe() {
         </body>
       </html>
     `;
-    const tituloPrev = `Fechamento — ${data.cliente.nome} (${periodoLabel})${comValores ? "" : " · só quantidades"}`;
+    const tituloPrev = `Fechamento — ${data.cliente.nome} (${periodoLabel})`;
     void api
       .registrarImpressao({
         tipo: "fechamento_cliente",
@@ -495,7 +493,7 @@ export function ClienteDetalhe() {
     setPrintPreview({
       html: htmlFech,
       titulo: tituloPrev,
-      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}${comValores ? "" : "-sem-valores"}`,
+      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-${periodoLabel.replace(/\s+/g, "-").slice(0, 40)}`,
     });
   };
 
@@ -518,7 +516,7 @@ export function ClienteDetalhe() {
     }
     if (!data) return;
 
-    const comValores = isChefe && fechamentoImpressaoComValores;
+    const comValores = true;
     const porData = [...vendasSelecionadas].sort((a, b) => parseData(a.data) - parseData(b.data));
     const notasHtml = porData
       .map((v) => {
@@ -725,7 +723,7 @@ export function ClienteDetalhe() {
         </body>
       </html>
     `;
-    const tituloSel = `Fechamento (seleção) — ${data.cliente.nome} · ${vendasSelecionadas.length} nota(s)${comValores ? "" : " · só quantidades"}`;
+    const tituloSel = `Fechamento (seleção) — ${data.cliente.nome} · ${vendasSelecionadas.length} nota(s)`;
     void api
       .registrarImpressao({
         tipo: "fechamento_cliente_selecao",
@@ -743,7 +741,7 @@ export function ClienteDetalhe() {
     setPrintPreview({
       html: htmlSel,
       titulo: tituloSel,
-      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-selecao${comValores ? "" : "-sem-valores"}`,
+      downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-selecao`,
     });
   };
 
@@ -931,18 +929,6 @@ export function ClienteDetalhe() {
               <Input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="w-36" />
             </div>
           )}
-          {isChefe && (
-            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
-              <Checkbox
-                id="fechamento-impressao-valores"
-                checked={fechamentoImpressaoComValores}
-                onCheckedChange={(c) => setFechamentoImpressaoComValores(c === true)}
-              />
-              <Label htmlFor="fechamento-impressao-valores" className="cursor-pointer text-xs font-normal leading-snug">
-                Incluir valores (R$) na impressão do fechamento
-              </Label>
-            </div>
-          )}
           <Button
             variant="outline"
             size="sm"
@@ -1119,17 +1105,6 @@ export function ClienteDetalhe() {
             <Receipt className="size-5 text-muted-foreground" />
             Fechamento (seleção)
           </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Selecione vendas na tabela ou use &quot;Imprimir fechamento do período&quot; no cabeçalho. A coluna{" "}
-            <strong>Marcada paga</strong> é só controle visual (não lança pagamento).
-            {isChefe && (
-              <>
-                {" "}
-                Como chefe, use a opção <strong>Incluir valores (R$) na impressão</strong> ao lado dos botões de
-                impressão: desmarcada, a impressão fica só com quantidades (como para funcionários).
-              </>
-            )}
-          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1623,7 +1598,7 @@ export function ClienteDetalhe() {
         }
         confirmLabel="Confirmar exclusão"
         requireMotivo
-        onVerified={async ({ motivo }) => {
+        onVerified={async ({ motivo, password: _password, observacao: _observacao }) => {
           if (!pagamentoExcluir) return;
           const pid = pagamentoExcluir.id;
           setPagamentoExcluir(null);

@@ -14,7 +14,9 @@ import {
 } from "./ui/alert-dialog";
 import { useAuth } from "../contexts/AuthContext";
 
-const SCROLL_THRESHOLD = 24;
+/** Acima disto o header fica “compacto” (só estilo); altura da barra é fixa para não mudar o scroll máximo. */
+const SCROLL_COMPACT_ENTER = 36;
+const SCROLL_COMPACT_LEAVE = 10;
 
 export function Layout() {
   const location = useLocation();
@@ -26,7 +28,13 @@ export function Layout() {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setHeaderCompact(window.scrollY > SCROLL_THRESHOLD);
+    const onScroll = () => {
+      const y = window.scrollY;
+      setHeaderCompact((prev) => {
+        if (prev) return y > SCROLL_COMPACT_LEAVE;
+        return y > SCROLL_COMPACT_ENTER;
+      });
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
     return () => window.removeEventListener("scroll", onScroll);
@@ -118,17 +126,13 @@ export function Layout() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Header compacto: encolhe ao rolar para liberar espaço */}
+      {/* Altura fixa: evita mudar altura do documento ao rolar (oscilação da barra no fim da página). */}
       <header
-        className={`border-b bg-card text-card-foreground sticky top-0 z-10 transition-all duration-200 ${
+        className={`border-b bg-card text-card-foreground sticky top-0 z-10 transition-shadow duration-200 ${
           headerCompact ? "shadow-sm" : ""
         }`}
       >
-        <div
-          className={`w-full px-2 md:px-4 flex items-center justify-between gap-6 md:gap-8 transition-all duration-200 ${
-            headerCompact ? "h-11 md:h-12" : "h-14 md:h-16"
-          }`}
-        >
+        <div className="flex h-14 md:h-16 w-full items-center justify-between gap-6 md:gap-8 px-2 md:px-4">
           <div className="flex items-center gap-2 min-w-0 flex-shrink-0 max-w-[200px] md:max-w-none">
             <div
               className={`flex shrink-0 items-center justify-center object-contain transition-all duration-200 ${
@@ -228,8 +232,8 @@ export function Layout() {
       <main
         className={
           mainContentFullWidth
-            ? "mx-auto w-full max-w-none px-3 sm:px-4 md:px-6 py-3 md:py-4 text-foreground"
-            : "container mx-auto px-2 md:px-3 py-3 md:py-4 text-foreground"
+            ? "mx-auto w-full max-w-none px-3 sm:px-4 md:px-6 py-3 md:py-4 text-foreground [overflow-anchor:none]"
+            : "container mx-auto px-2 md:px-3 py-3 md:py-4 text-foreground [overflow-anchor:none]"
         }
       >
         <Outlet />

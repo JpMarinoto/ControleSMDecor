@@ -555,7 +555,10 @@ export const api = {
     return response.json();
   },
 
-  patchCompraOrdemData: async (id: string, body: { data?: string; data_compra?: string }) => {
+  patchCompraOrdemData: async (
+    id: string,
+    body: { data?: string; data_compra?: string; password: string; observacao: string }
+  ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -564,20 +567,51 @@ export const api = {
     return readJsonOrThrow(response);
   },
 
-  updateCompra: async (id: string, data: { quantidade?: number; preco_no_dia?: number; material?: number; fornecedor?: number }) => {
+  addCompraItem: async (
+    ordemId: string,
+    data: {
+      tipo: 'material' | 'produto';
+      material?: number;
+      produto?: number;
+      quantidade: number;
+      preco_no_dia: number;
+      password: string;
+      observacao: string;
+    }
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/compras/${ordemId}/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(data),
+    });
+    return readJsonOrThrow(response);
+  },
+
+  updateCompra: async (
+    id: string,
+    data: {
+      quantidade?: number;
+      preco_no_dia?: number;
+      material?: number;
+      fornecedor?: number;
+      produto?: number;
+      password: string;
+      observacao: string;
+    }
+  ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(data),
     });
-    return response.json();
+    return readJsonOrThrow(response);
   },
 
-  deleteCompra: async (id: string, motivo: string) => {
+  deleteCompra: async (id: string, payload: { password: string; observacao: string }) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ motivo }),
+      body: JSON.stringify({ motivo: payload.observacao, observacao: payload.observacao, password: payload.password }),
     });
     if (response.status === 204) return;
     const body = await response.json().catch(() => ({}));

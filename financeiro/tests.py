@@ -1,8 +1,9 @@
 import json
 from decimal import Decimal
 
+from django.contrib.auth.models import User
 from django.test import TestCase
-from rest_framework.test import APIRequestFactory
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from financeiro.models import Cliente, Produto, Venda, Fornecedor, Material, OrdemCompra
 from financeiro.views_api import VendaListCreate, VendaDetail, CompraListCreate, CompraDetail
@@ -101,6 +102,7 @@ class CompraDataApiTest(TestCase):
     """Garante que POST /api/compras/ grava data_compra conforme o corpo."""
 
     def setUp(self):
+        self.user = User.objects.create_user("teste_compra", password="senha_segura_123")
         self.fornecedor = Fornecedor.objects.create(nome="Fornecedor Teste Compra")
         self.material = Material.objects.create(nome="Material Teste", preco_unitario_base=Decimal("5.0000"))
 
@@ -163,17 +165,24 @@ class CompraDataApiTest(TestCase):
         oid = r0.data["id"]
         ordem = OrdemCompra.objects.get(pk=oid)
         lanc_iso = ordem.data_lancamento.date().isoformat() if ordem.data_lancamento else ""
-        r1 = CompraDetail.as_view()(
-            factory.patch(
-                f"/api/compras/{oid}/",
-                data=json.dumps({"data": "2025-04-15"}),
-                content_type="application/json",
+        req_patch = factory.patch(
+            f"/api/compras/{oid}/",
+            data=json.dumps(
+                {
+                    "data": "2025-04-15",
+                    "password": "senha_segura_123",
+                    "observacao": "Ajuste de data para teste automatizado",
+                }
             ),
-            pk=oid,
+            content_type="application/json",
         )
+        force_authenticate(req_patch, user=self.user)
+        r1 = CompraDetail.as_view()(req_patch, pk=oid)
         self.assertEqual(r1.status_code, 200)
         self.assertEqual(r1.data.get("data"), "2025-04-15")
-        self.assertEqual(r1.data.get("data_lancamento"), lanc_iso)
+        dl_resp = r1.data.get("data_lancamento")
+        self.assertIsNotNone(dl_resp)
+        self.assertTrue(str(dl_resp).startswith(lanc_iso), msg=f"data_lancamento={dl_resp!r} deve manter o dia {lanc_iso}")
         ordem.refresh_from_db()
         self.assertEqual(ordem.data_compra.date().isoformat(), "2025-04-15")
         self.assertEqual(ordem.data_lancamento.date().isoformat(), lanc_iso)
@@ -203,14 +212,19 @@ class CompraDataApiTest(TestCase):
         )
         self.assertEqual(r0.status_code, 201)
         oid = r0.data["id"]
-        r1 = CompraDetail.as_view()(
-            factory.delete(
-                f"/api/compras/{oid}/",
-                data=json.dumps({"motivo": "Cancelamento de teste"}),
-                content_type="application/json",
+        req_del = factory.delete(
+            f"/api/compras/{oid}/",
+            data=json.dumps(
+                {
+                    "motivo": "Cancelamento de teste",
+                    "observacao": "Cancelamento de teste",
+                    "password": "senha_segura_123",
+                }
             ),
-            pk=oid,
+            content_type="application/json",
         )
+        force_authenticate(req_del, user=self.user)
+        r1 = CompraDetail.as_view()(req_del, pk=oid)
         self.assertEqual(r1.status_code, status.HTTP_204_NO_CONTENT)
         ordem = OrdemCompra.objects.get(pk=oid)
         self.assertTrue(ordem.cancelada)

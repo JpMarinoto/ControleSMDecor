@@ -475,7 +475,7 @@ function DashboardChefe() {
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
+                  <ResponsiveContainer width="100%" height={100} debounce={120} className={chartSurfaceClass}>
                     <BarChart data={receivableData}>
                       <RechartsTooltip
                         content={({ active, payload }) => {
@@ -499,7 +499,7 @@ function DashboardChefe() {
                 <div className="mt-2 text-center">
                   <p className="text-xl font-bold dash-text-positive">{formatCurrency(aReceber)}</p>
                 </div>
-                <div className="mt-3 space-y-2 max-h-36 overflow-y-auto flex-1">
+                <div className="mt-3 max-h-36 flex-1 space-y-2 overflow-y-auto overscroll-y-contain">
                   {clientesComSaldo.length > 0 ? (
                     clientesComSaldo.map((c: any) => (
                       <div key={c.id} className="flex items-center justify-between p-2 rounded-md dash-inset-row">
@@ -523,7 +523,7 @@ function DashboardChefe() {
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
+                  <ResponsiveContainer width="100%" height={100} debounce={120} className={chartSurfaceClass}>
                     <BarChart data={payableData}>
                       <RechartsTooltip
                         content={({ active, payload }) => {
@@ -547,7 +547,7 @@ function DashboardChefe() {
                 <div className="mt-2 text-center">
                   <p className="text-xl font-bold dash-text-negative">{formatCurrency(aPagar)}</p>
                 </div>
-                <div className="mt-3 space-y-2 max-h-36 overflow-y-auto flex-1">
+                <div className="mt-3 max-h-36 flex-1 space-y-2 overflow-y-auto overscroll-y-contain">
                   {fornecedoresComSaldo.length > 0 || (dividasGerais && dividasGerais.length > 0) ? (
                     <>
                       {fornecedoresComSaldo.map((f: any) => (
@@ -579,7 +579,7 @@ function DashboardChefe() {
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
+                  <ResponsiveContainer width="100%" height={100} debounce={120} className={chartSurfaceClass}>
                     <LineChart data={weeklyBalanceData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.55} vertical={false} />
                       <XAxis dataKey="day" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
@@ -632,7 +632,7 @@ function DashboardChefe() {
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
-                  <ResponsiveContainer width="100%" height={100} className={chartSurfaceClass}>
+                  <ResponsiveContainer width="100%" height={100} debounce={120} className={chartSurfaceClass}>
                     <BarChart data={entradasSaidasData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" strokeOpacity={0.55} vertical={false} />
                       <XAxis dataKey="label" tick={{ fontSize: 10, fill: "var(--muted-foreground)" }} />

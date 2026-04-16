@@ -275,6 +275,17 @@ class OrdemCompra(models.Model):
         verbose_name='Marcada como paga',
         help_text='Controle manual no detalhe do fornecedor.',
     )
+    ultima_alteracao_observacao = models.TextField(
+        blank=True,
+        default='',
+        verbose_name='Última observação de alteração',
+        help_text='Texto da última alteração (data, itens, exclusão, etc.) para exibição no sistema.',
+    )
+    ultima_alteracao_em = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='Data da última alteração',
+    )
 
     class Meta:
         ordering = ['-data_compra']

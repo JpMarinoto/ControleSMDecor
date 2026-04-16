@@ -99,17 +99,61 @@ def _api_log(request, acao, tabela, detalhes=""):
 
 
 def _exigir_motivo_exclusao(request):
-    """Motivo obrigatório no corpo JSON do DELETE (mín. 3 caracteres)."""
+    """Motivo/observação obrigatória no corpo JSON do DELETE (mín. 3 caracteres).
+
+    Compatibilidade: aceita `motivo` (antigo) e `observacao` (novo).
+    """
     data = request.data if hasattr(request, 'data') and request.data is not None else {}
     if not isinstance(data, dict):
         data = {}
-    motivo = (data.get('motivo') or '').strip()
+    motivo = (data.get('observacao') or data.get('motivo') or '').strip()
     if len(motivo) < 3:
         return None, Response(
-            {'motivo': ['Informe o motivo da exclusão (mínimo 3 caracteres).']},
+            {'observacao': ['Informe o motivo/observação (mínimo 3 caracteres).']},
             status=status.HTTP_400_BAD_REQUEST,
         )
     return motivo, None
+
+
+def _exigir_senha_e_observacao_compra(request, min_obs=5):
+    """Exige senha do usuário autenticado + observação para auditoria."""
+    data = request.data if hasattr(request, 'data') and request.data is not None else {}
+    if not isinstance(data, dict):
+        data = {}
+    if not getattr(request.user, 'is_authenticated', False):
+        return None, None, Response(
+            {'detail': 'É necessário estar autenticado para alterar compras.'},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    password = (data.get('password') or '').strip()
+    observacao = (data.get('observacao') or '').strip()
+    if not password:
+        return None, None, Response(
+            {'password': ['Informe sua senha para confirmar a alteração.']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(observacao) < min_obs:
+        return None, None, Response(
+            {'observacao': [f'Informe a observação (mínimo {min_obs} caracteres).']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not request.user.check_password(password):
+        return None, None, Response(
+            {'password': ['Senha incorreta.']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return password, observacao, None
+
+
+def _set_ultima_alteracao_ordem(ordem_pk, observacao):
+    """Grava observação e horário na ordem para exibição discreta (tooltip) no frontend."""
+    if not ordem_pk:
+        return
+    obs = (observacao or '').strip()[:2000]
+    OrdemCompra.objects.filter(pk=ordem_pk).update(
+        ultima_alteracao_observacao=obs,
+        ultima_alteracao_em=timezone.now(),
+    )
 
 
 def _produto_elegivel_compra_pronta(produto):
@@ -856,11 +900,13 @@ class VendaDetail(APIView):
                 )
             venda.marcada_paga = bool(data.get('marcada_paga'))
             venda.save(update_fields=['marcada_paga'])
+            cn = venda.cliente.nome if getattr(venda, 'cliente', None) else 'Cliente'
+            est = 'marcada como paga' if venda.marcada_paga else 'desmarcada (em aberto)'
             _api_log(
                 request,
                 'Editar',
                 'Venda',
-                f"Venda #{pk} — marcada_paga={'sim' if venda.marcada_paga else 'não'}",
+                f'Cliente «{cn}» — Venda nº {venda.id} — {est}',
             )
             return Response(VendaSerializer(venda).data)
 
@@ -1463,6 +1509,9 @@ class CompraDetail(APIView):
             )
         if ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+        _, observacao, err = _exigir_senha_e_observacao_compra(request)
+        if err:
+            return err
         data = request.data or {}
         data_raw = data.get('data') or data.get('data_compra')
         if not data_raw:
@@ -1482,20 +1531,107 @@ class CompraDetail(APIView):
             datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0),
             tzinfo=tz_br,
         )
+        data_antiga = ordem.data_compra.date().isoformat() if ordem.data_compra else ''
         ordem.data_compra = data_hora
-        ordem.save(update_fields=['data_compra'])
+        ordem.ultima_alteracao_observacao = observacao[:2000]
+        ordem.ultima_alteracao_em = timezone.now()
+        ordem.save(update_fields=['data_compra', 'ultima_alteracao_observacao', 'ultima_alteracao_em'])
         ordem.itens.update(data_compra=data_hora)
         ordem.itens_produtos.update(data_compra=data_hora)
         _api_log(
             request,
             "Editar",
             "Compra",
-            f"Ordem #{pk_int} - data da compra alterada para {data_enviada.isoformat()}",
+            f"Ordem #{pk_int} - data da compra {data_antiga} → {data_enviada.isoformat()}. Obs.: {observacao}",
         )
         ordem = OrdemCompra.objects.prefetch_related(
             'itens__material', 'itens_produtos__produto'
         ).select_related('fornecedor').get(pk=pk_int)
         return Response(OrdemCompraSerializer(ordem).data)
+
+    def post(self, request, pk):
+        """Adiciona um item (material/produto) numa ordem existente."""
+        try:
+            pk_int = int(pk)
+        except (ValueError, TypeError):
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        ordem = OrdemCompra.objects.select_related('fornecedor').filter(pk=pk_int).first()
+        if not ordem:
+            return Response({'detail': 'Só é possível adicionar itens a uma ordem (id numérico).'}, status=status.HTTP_404_NOT_FOUND)
+        if ordem.cancelada:
+            return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+        _, observacao, err = _exigir_senha_e_observacao_compra(request)
+        if err:
+            return err
+        data = request.data if isinstance(request.data, dict) else {}
+        item_tipo = (data.get('tipo') or '').strip().lower()
+        qtd = data.get('quantidade')
+        preco = data.get('preco_no_dia')
+        if qtd is None or preco is None:
+            return Response({'detail': 'Informe quantidade e preco_no_dia.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            q = _int_quantidade_item(qtd)
+            p = Decimal(str(preco).replace(',', '.'))
+        except (ValueError, TypeError):
+            return Response({'detail': 'Quantidade ou preço inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+        if q <= 0 or p < 0:
+            return Response({'detail': 'Quantidade deve ser > 0 e preço >= 0.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Default: inferir tipo pelo campo presente
+        material_id = data.get('material')
+        produto_id = data.get('produto')
+        if not item_tipo:
+            item_tipo = 'produto' if produto_id else 'material'
+
+        if item_tipo == 'produto' or produto_id:
+            if not produto_id:
+                return Response({'produto': ['Informe o produto.']}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                prod = Produto.objects.get(pk=int(produto_id))
+            except (Produto.DoesNotExist, ValueError, TypeError):
+                return Response({'produto': ['Produto inválido.']}, status=status.HTTP_400_BAD_REQUEST)
+            if not _produto_elegivel_compra_pronta(prod):
+                return Response({'produto': ['Produto não elegível para compra como item pronto.']}, status=status.HTTP_400_BAD_REQUEST)
+            item = CompraProduto.objects.create(
+                ordem=ordem,
+                fornecedor=ordem.fornecedor,
+                produto=prod,
+                quantidade=q,
+                preco_no_dia=p,
+                data_compra=ordem.data_compra,
+            )
+            _api_log(
+                request,
+                "Editar",
+                "Compra",
+                f"Ordem #{pk_int} - item produto adicionado (linha #{item.id}, produto {prod.id}, qtd {q}, preço {float(p)}). Obs.: {observacao}",
+            )
+            _set_ultima_alteracao_ordem(pk_int, observacao)
+        else:
+            if not material_id:
+                return Response({'material': ['Informe o material.']}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                material = Material.objects.get(pk=int(material_id))
+            except (Material.DoesNotExist, ValueError, TypeError):
+                return Response({'material': ['Material inválido.']}, status=status.HTTP_400_BAD_REQUEST)
+            item = CompraMaterial.objects.create(
+                ordem=ordem,
+                fornecedor=ordem.fornecedor,
+                material=material,
+                quantidade=q,
+                preco_no_dia=p,
+                data_compra=ordem.data_compra,
+            )
+            _api_log(
+                request,
+                "Editar",
+                "Compra",
+                f"Ordem #{pk_int} - item material adicionado (linha #{item.id}, material {material.id}, qtd {q}, preço {float(p)}). Obs.: {observacao}",
+            )
+            _set_ultima_alteracao_ordem(pk_int, observacao)
+
+        ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').get(pk=pk_int)
+        return Response(OrdemCompraSerializer(ordem).data, status=status.HTTP_200_OK)
 
     def put(self, request, pk):
         if isinstance(pk, str) and pk.startswith('item-'):
@@ -1516,6 +1652,14 @@ class CompraDetail(APIView):
                 return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
+        _, observacao, err = _exigir_senha_e_observacao_compra(request)
+        if err:
+            return err
+        old_q = obj.quantidade
+        old_p = float(obj.preco_no_dia or 0)
+        old_mat = getattr(obj, 'material_id', None)
+        old_prod = getattr(obj, 'produto_id', None)
+        old_forn = getattr(obj, 'fornecedor_id', None)
         if request.data.get('quantidade') is not None:
             try:
                 obj.quantidade = _int_quantidade_item(request.data.get('quantidade'))
@@ -1552,7 +1696,25 @@ class CompraDetail(APIView):
             except (ValueError, TypeError):
                 pass
         obj.save()
-        _api_log(request, "Editar", "Compra", f"Compra #{pk} atualizada")
+        mud = []
+        if request.data.get('quantidade') is not None and old_q != obj.quantidade:
+            mud.append(f"qtd {old_q}→{obj.quantidade}")
+        if request.data.get('preco_no_dia') is not None and old_p != float(obj.preco_no_dia or 0):
+            mud.append(f"preço {old_p}→{float(obj.preco_no_dia or 0)}")
+        if kind == 'material' and request.data.get('material') is not None and old_mat != obj.material_id:
+            mud.append(f"material {old_mat}→{obj.material_id}")
+        if kind == 'produto' and request.data.get('produto') is not None and old_prod != obj.produto_id:
+            mud.append(f"produto {old_prod}→{obj.produto_id}")
+        if request.data.get('fornecedor') is not None and old_forn != obj.fornecedor_id:
+            mud.append(f"fornecedor_linha {old_forn}→{obj.fornecedor_id}")
+        det = ', '.join(mud) if mud else 'sem mudança de campos reconhecida'
+        _api_log(
+            request,
+            "Editar",
+            "Compra",
+            f"{'Ordem #' + str(obj.ordem_id) if obj.ordem_id else 'Compra avulsa'} linha #{pk} ({kind}): {det}. Obs.: {observacao}",
+        )
+        _set_ultima_alteracao_ordem(obj.ordem_id, observacao)
         if kind == 'material':
             return Response(CompraSerializer(obj).data)
         return Response(ItemCompraProdutoSerializer(obj).data)
@@ -1569,16 +1731,22 @@ class CompraDetail(APIView):
         if ordem:
             if ordem.cancelada:
                 return Response(status=status.HTTP_204_NO_CONTENT)
-            motivo, err = _exigir_motivo_exclusao(request)
+            _, observacao, err = _exigir_senha_e_observacao_compra(request)
             if err:
                 return err
-            ordem.cancelada = True
-            ordem.save(update_fields=['cancelada'])
+            motivo, merr = _exigir_motivo_exclusao(request)
+            if merr:
+                return merr
+            OrdemCompra.objects.filter(pk=pk_int).update(
+                cancelada=True,
+                ultima_alteracao_observacao=observacao[:2000],
+                ultima_alteracao_em=timezone.now(),
+            )
             _api_log(
                 request,
                 "Cancelar",
                 "Compra",
-                f"Ordem #{pk} cancelada (permanece no histórico). Motivo: {motivo}",
+                f"Ordem #{pk} cancelada (permanece no histórico). Motivo: {motivo}. Obs.: {observacao}",
             )
             return Response(status=status.HTTP_204_NO_CONTENT)
         try:
@@ -1592,25 +1760,35 @@ class CompraDetail(APIView):
                 return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
             if objp.ordem_id and objp.ordem.cancelada:
                 return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
-            motivo, err = _exigir_motivo_exclusao(request)
+            _, observacao, err = _exigir_senha_e_observacao_compra(request)
             if err:
                 return err
+            motivo, merr = _exigir_motivo_exclusao(request)
+            if merr:
+                return merr
             ordem = objp.ordem
+            if ordem:
+                _set_ultima_alteracao_ordem(ordem.pk, observacao)
             objp.delete()
             if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
                 ordem.delete()
-            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}")
+            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
             return Response(status=status.HTTP_204_NO_CONTENT)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
-        motivo, err = _exigir_motivo_exclusao(request)
+        _, observacao, err = _exigir_senha_e_observacao_compra(request)
         if err:
             return err
+        motivo, merr = _exigir_motivo_exclusao(request)
+        if merr:
+            return merr
         ordem = obj.ordem
+        if ordem:
+            _set_ultima_alteracao_ordem(ordem.pk, observacao)
         obj.delete()
         if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
             ordem.delete()
-        _api_log(request, "Excluir", "Compra", f"Compra #{pk} excluída. Motivo: {motivo}")
+        _api_log(request, "Excluir", "Compra", f"Compra #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -3093,8 +3271,10 @@ class FornecedorCompraMarcacaoPaga(APIView):
                 return Response({'error': 'Apenas o chefe pode alterar.'}, status=status.HTTP_403_FORBIDDEN)
         except Exception:
             return Response({'error': 'Apenas o chefe pode alterar.'}, status=status.HTTP_403_FORBIDDEN)
-        if not Fornecedor.objects.filter(pk=pk).exists():
+        fornecedor_ctx = Fornecedor.objects.filter(pk=pk).first()
+        if not fornecedor_ctx:
             return Response({'error': 'Fornecedor não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        fnome = fornecedor_ctx.nome or 'Fornecedor'
         body = getattr(request, 'data', None) or {}
         if not isinstance(body, dict) and hasattr(request, 'body'):
             try:
@@ -3106,6 +3286,7 @@ class FornecedorCompraMarcacaoPaga(APIView):
         if 'marcada_paga' not in body:
             return Response({'error': 'marcada_paga é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
         mp = bool(body.get('marcada_paga'))
+        est_paga = 'marcada como paga' if mp else 'desmarcada (em aberto)'
         ordem_id = body.get('ordem_id')
         linha_id = body.get('linha_id')
         if ordem_id is not None and linha_id is not None:
@@ -3123,7 +3304,12 @@ class FornecedorCompraMarcacaoPaga(APIView):
                 return Response({'error': 'Ordem não encontrada neste fornecedor'}, status=status.HTTP_404_NOT_FOUND)
             o.marcada_paga = mp
             o.save(update_fields=['marcada_paga'])
-            _api_log(request, 'Editar', 'OrdemCompra', f'Ordem #{oid} fornecedor {pk} marcada_paga={mp}')
+            _api_log(
+                request,
+                'Editar',
+                'OrdemCompra',
+                f'Fornecedor «{fnome}» — Ordem nº {oid} — {est_paga}',
+            )
             return Response({'ok': True, 'ordem_id': oid, 'marcada_paga': mp})
         if linha_id is not None:
             s = str(linha_id).strip()
@@ -3132,35 +3318,41 @@ class FornecedorCompraMarcacaoPaga(APIView):
                     cid = int(s[4:])
                 except ValueError:
                     return Response({'error': 'linha_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
-                c = CompraMaterial.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem').first()
+                c = CompraMaterial.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem', 'material').first()
                 if not c:
                     return Response({'error': 'Linha não encontrada'}, status=status.HTTP_404_NOT_FOUND)
                 if c.ordem_id and c.ordem:
                     c.ordem.marcada_paga = mp
                     c.ordem.save(update_fields=['marcada_paga'])
+                    log_msg = f'Fornecedor «{fnome}» — Ordem nº {c.ordem.id} — {est_paga}'
                 else:
                     c.marcada_paga = mp
                     c.save(update_fields=['marcada_paga'])
+                    mat_nome = c.material.nome if getattr(c, 'material', None) else 'material'
+                    log_msg = f'Fornecedor «{fnome}» — Compra avulsa (material: {mat_nome}) — {est_paga}'
             elif s.startswith('prod-'):
                 try:
                     cid = int(s[5:])
                 except ValueError:
                     return Response({'error': 'linha_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
-                c = CompraProduto.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem').first()
+                c = CompraProduto.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem', 'produto').first()
                 if not c:
                     return Response({'error': 'Linha não encontrada'}, status=status.HTTP_404_NOT_FOUND)
                 if c.ordem_id and c.ordem:
                     c.ordem.marcada_paga = mp
                     c.ordem.save(update_fields=['marcada_paga'])
+                    log_msg = f'Fornecedor «{fnome}» — Ordem nº {c.ordem.id} — {est_paga}'
                 else:
                     c.marcada_paga = mp
                     c.save(update_fields=['marcada_paga'])
+                    prod_nome = c.produto.nome if getattr(c, 'produto', None) else 'produto'
+                    log_msg = f'Fornecedor «{fnome}» — Compra avulsa (produto: {prod_nome}) — {est_paga}'
             else:
                 return Response(
                     {'error': 'linha_id deve ser mat-<id> ou prod-<id>'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            _api_log(request, 'Editar', 'Compra', f'Linha {s} fornecedor {pk} marcada_paga={mp}')
+            _api_log(request, 'Editar', 'Compra', log_msg)
             return Response({'ok': True, 'linha_id': s, 'marcada_paga': mp})
         return Response({'error': 'Informe ordem_id ou linha_id'}, status=status.HTTP_400_BAD_REQUEST)
 

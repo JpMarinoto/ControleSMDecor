@@ -11,7 +11,7 @@ import { Checkbox } from "../components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { UserPlus, Package, Pencil, Trash2, Tag, Truck, TreePine, Building2, Eye } from "lucide-react";
+import { UserPlus, Package, Pencil, Trash2, Tag, Truck, TreePine, Building2, Info } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { api } from "../lib/api";
@@ -1239,7 +1239,7 @@ export function Cadastro() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Button variant="ghost" size="icon" onClick={() => setVerDadosCliente(cliente)} title="Ver dados">
-                            <Eye className="size-4" />
+                            <Info className="size-4" />
                           </Button>
                           <Button variant="ghost" size="icon" onClick={() => handleEditCliente(cliente)}>
                             <Pencil className="size-4" />
@@ -2223,7 +2223,7 @@ export function Cadastro() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Button variant="ghost" size="icon" onClick={() => setVerDadosFornecedor(fornecedor)} title="Ver dados">
-                            <Eye className="size-4" />
+                            <Info className="size-4" />
                           </Button>
                           <Button variant="ghost" size="icon" onClick={() => handleEditFornecedor(fornecedor)}>
                             <Pencil className="size-4" />

@@ -65,7 +65,11 @@ type SenhaProps = {
   confirmLabel?: string;
   /** Quando true, exige campo motivo (mín. 3 caracteres) além da senha. */
   requireMotivo?: boolean;
-  onVerified: (ctx: { motivo: string }) => Promise<void>;
+  /** Quando true, exige campo observação (mín. 5 caracteres) além da senha. */
+  requireObservacao?: boolean;
+  motivoLabel?: string;
+  observacaoLabel?: string;
+  onVerified: (ctx: { motivo: string; observacao: string; password: string }) => Promise<void>;
 };
 
 /** Confirmação com verificação da senha do usuário logado (ex.: excluir venda). */
@@ -76,18 +80,24 @@ export function ConfirmacaoComSenhaDialog({
   description,
   confirmLabel = "Confirmar com senha",
   requireMotivo = false,
+  requireObservacao = false,
+  motivoLabel = "Motivo",
+  observacaoLabel = "Observação",
   onVerified,
 }: SenhaProps) {
   const fieldId = useId();
   const motivoId = useId();
+  const observacaoId = useId();
   const [password, setPassword] = useState("");
   const [motivo, setMotivo] = useState("");
+  const [observacao, setObservacao] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open) {
       setPassword("");
       setMotivo("");
+      setObservacao("");
       setLoading(false);
     }
   }, [open]);
@@ -104,13 +114,25 @@ export function ConfirmacaoComSenhaDialog({
         return;
       }
     }
+    if (requireObservacao) {
+      const o = observacao.trim();
+      if (o.length < 5) {
+        toast.error("Informe a observação (mínimo 5 caracteres)");
+        return;
+      }
+    }
     setLoading(true);
     try {
       await api.authVerifyPassword(password);
-      await onVerified({ motivo: requireMotivo ? motivo.trim() : "" });
+      await onVerified({
+        motivo: requireMotivo ? motivo.trim() : "",
+        observacao: requireObservacao ? observacao.trim() : "",
+        password: password.trim(),
+      });
       onOpenChange(false);
       setPassword("");
       setMotivo("");
+      setObservacao("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Senha incorreta");
     } finally {
@@ -143,7 +165,7 @@ export function ConfirmacaoComSenhaDialog({
         >
           {requireMotivo ? (
             <div className="space-y-2">
-              <Label htmlFor={motivoId}>Motivo da exclusão</Label>
+              <Label htmlFor={motivoId}>{motivoLabel}</Label>
               <Textarea
                 id={motivoId}
                 name={`motivo-${motivoId.replace(/[^a-zA-Z0-9]/g, "")}`}
@@ -151,6 +173,20 @@ export function ConfirmacaoComSenhaDialog({
                 rows={3}
                 value={motivo}
                 onChange={(e) => setMotivo(e.target.value)}
+                className="min-h-[4.5rem] resize-y"
+              />
+            </div>
+          ) : null}
+          {requireObservacao ? (
+            <div className="space-y-2">
+              <Label htmlFor={observacaoId}>{observacaoLabel}</Label>
+              <Textarea
+                id={observacaoId}
+                name={`obs-${observacaoId.replace(/[^a-zA-Z0-9]/g, "")}`}
+                placeholder="Descreva o motivo da alteração (obrigatório)"
+                rows={3}
+                value={observacao}
+                onChange={(e) => setObservacao(e.target.value)}
                 className="min-h-[4.5rem] resize-y"
               />
             </div>
@@ -178,7 +214,8 @@ export function ConfirmacaoComSenhaDialog({
             disabled={
               loading ||
               !password.trim() ||
-              (requireMotivo && motivo.trim().length < 3)
+              (requireMotivo && motivo.trim().length < 3) ||
+              (requireObservacao && observacao.trim().length < 5)
             }
             onClick={() => void submit()}
           >

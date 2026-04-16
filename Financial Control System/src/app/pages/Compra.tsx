@@ -1,4 +1,4 @@
-import React, { useState, useEffect, type FormEvent } from "react";
+import React, { useState, useEffect, useRef, type FormEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -6,7 +6,22 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { ShoppingCart, Plus, Trash2, Eye, Copy, Pencil, Check, X, Printer, Calendar, Hash, Package, Ban } from "lucide-react";
+import {
+  ShoppingCart,
+  Plus,
+  Trash2,
+  Copy,
+  Pencil,
+  Check,
+  X,
+  Printer,
+  Calendar,
+  Hash,
+  Package,
+  Ban,
+  MessageSquare,
+  PanelRightOpen,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { formatDateOnly, parseDateOnlyToTime, parseLancamentoToTime, getTodayLocalISO } from "../lib/format";
@@ -16,6 +31,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
 import { SimpleConfirmDialog, ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
 import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+import { cn } from "../components/ui/utils";
 
 interface ItemCompra {
   id: number;
@@ -36,8 +53,46 @@ interface OrdemCompra {
   data: string;
   data_lancamento?: string;
   cancelada?: boolean;
+  /** Texto da última alteração (API); exibido em tooltip discreto. */
+  ultima_alteracao_observacao?: string;
+  ultima_alteracao_em?: string | null;
   itens: ItemCompra[];
   total: number;
+}
+
+function OrdemAlteracaoMarker({
+  observacao,
+  className,
+}: {
+  observacao?: string | null;
+  className?: string;
+}) {
+  const text = (observacao ?? "").trim();
+  if (!text) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            "inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded-full bg-muted/90 text-muted-foreground shadow-sm ring-1 ring-border/50 hover:bg-muted hover:text-foreground",
+            className,
+          )}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          aria-label="Ordem alterada — observação da última alteração"
+        >
+          <MessageSquare className="size-3 opacity-85" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent
+        side="top"
+        sideOffset={6}
+        className="max-w-[min(340px,88vw)] border border-border bg-popover px-3 py-2 text-left text-popover-foreground shadow-md [&>svg]:hidden"
+      >
+        <p className="whitespace-pre-wrap text-xs leading-relaxed">{text}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function sortOrdemCompraRecentFirst(a: OrdemCompra, b: OrdemCompra): number {
@@ -132,9 +187,32 @@ export function Compra() {
     downloadBaseName: string;
   } | null>(null);
   const [editDetailDataCompra, setEditDetailDataCompra] = useState("");
+  const [addDetailTipo, setAddDetailTipo] = useState<"material" | "produto">("material");
+  const [addDetailMaterialId, setAddDetailMaterialId] = useState("");
+  const [addDetailProdutoId, setAddDetailProdutoId] = useState("");
+  const [addDetailQtd, setAddDetailQtd] = useState("");
+  const [addDetailPreco, setAddDetailPreco] = useState("");
+  const [addItemSenhaOpen, setAddItemSenhaOpen] = useState(false);
+  const pendingAddItemRef = useRef<{
+    ordemId: string;
+    tipo: "material" | "produto";
+    material?: number;
+    produto?: number;
+    quantidade: number;
+    preco_no_dia: number;
+  } | null>(null);
+  const [editItemSenhaOpen, setEditItemSenhaOpen] = useState(false);
+  const pendingEditItemRef = useRef<{
+    itemId: string;
+    ordemIdRef: string | number;
+    detId: string | null;
+    qtd: number;
+    preco: number;
+  } | null>(null);
+  const [dataCompraSenhaOpen, setDataCompraSenhaOpen] = useState(false);
+  const pendingDataCompraRef = useRef<{ ordemId: string; data: string } | null>(null);
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
-
   useEffect(() => {
     if (detailCompra?.data) setEditDetailDataCompra(String(detailCompra.data).slice(0, 10));
   }, [detailCompra?.id, detailCompra?.data]);
@@ -210,6 +288,9 @@ export function Compra() {
               data: o.data || "",
               data_lancamento: o.data_lancamento || "",
               cancelada: o.cancelada === true,
+              ultima_alteracao_observacao:
+                typeof o.ultima_alteracao_observacao === "string" ? o.ultima_alteracao_observacao : "",
+              ultima_alteracao_em: o.ultima_alteracao_em ?? undefined,
               itens: (o.itens || []).map((i: any) => ({
                 id: i.id,
                 tipo: (i.tipo === "produto" ? "produto" : "material") as "material" | "produto",
@@ -243,6 +324,11 @@ export function Compra() {
     try {
       const d = await api.getCompraDetalhe(idStr);
       setDetailCompra(d);
+      setAddDetailTipo("material");
+      setAddDetailMaterialId("");
+      setAddDetailProdutoId("");
+      setAddDetailQtd("");
+      setAddDetailPreco("");
     } catch {
       toast.error("Erro ao carregar detalhe da compra");
     }
@@ -263,48 +349,8 @@ export function Compra() {
       toast.info("Data já é esta.");
       return;
     }
-    setSimpleConfirm({
-      title: "Alterar data da compra",
-      description:
-        "A data da operação será atualizada nesta ordem e em todos os itens. A data de lançamento não muda.",
-      confirmLabel: "Confirmar",
-      onConfirm: () => {
-        void (async () => {
-          try {
-            const idStr = String(detailCompra.id);
-            const raw = await api.patchCompraOrdemData(idStr, { data: trimmed });
-            const r = raw as Record<string, unknown>;
-            const next: OrdemCompra =
-              raw && typeof raw === "object"
-                ? {
-                    id: r.id as string | number,
-                    fornecedor: (r.fornecedor as string) || detailCompra.fornecedor,
-                    fornecedor_id: (r.fornecedor_id as number) ?? detailCompra.fornecedor_id,
-                    data: (r.data as string) || trimmed,
-                    data_lancamento: (r.data_lancamento as string) || detailCompra.data_lancamento,
-                    cancelada: (r.cancelada as boolean) === true,
-                    itens: (r.itens as ItemCompra[]) || detailCompra.itens,
-                    total: Number(r.total) || detailCompra.total,
-                  }
-                : detailCompra;
-            setDetailCompra(next);
-            setOrdens((prev) =>
-              prev.map((x) =>
-                String(x.id) === idStr
-                  ? { ...x, data: next.data || trimmed, data_lancamento: next.data_lancamento, cancelada: next.cancelada }
-                  : x
-              )
-            );
-            toast.success("Data da compra atualizada");
-            setSimpleConfirm(null);
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : "Erro ao atualizar data";
-            toast.error(msg);
-            setSimpleConfirm(null);
-          }
-        })();
-      },
-    });
+    pendingDataCompraRef.current = { ordemId: String(detailCompra.id), data: trimmed };
+    setDataCompraSenhaOpen(true);
   };
 
   const handleCopiarOrdem = () => {
@@ -333,9 +379,9 @@ export function Compra() {
     });
   };
 
-  const handleDeleteCompra = async (id: string | number, motivo: string) => {
+  const handleDeleteCompra = async (id: string | number, password: string, observacao: string) => {
     try {
-      await api.deleteCompra(String(id), motivo);
+      await api.deleteCompra(String(id), { password, observacao });
       toast.success("Item excluído");
       await loadData();
       setDetailCompra(null);
@@ -411,32 +457,13 @@ export function Compra() {
     const itemId = String(editingItem.id);
     const ordemIdRef = editingItem.ordemId;
     const detId = detailCompra ? String(detailCompra.id) : null;
-    setSimpleConfirm({
-      title: "Salvar alterações na compra",
-      description: "Confirma atualizar quantidade e preço deste item?",
-      confirmLabel: "Salvar",
-      onConfirm: () => {
-        void (async () => {
-          try {
-            await api.updateCompra(itemId, { quantidade: qtd, preco_no_dia: preco });
-            toast.success("Item atualizado");
-            await loadData();
-            setEditingItem(null);
-            if (detId && detId === String(ordemIdRef)) {
-              const d = await api.getCompraDetalhe(String(ordemIdRef));
-              setDetailCompra(d);
-            }
-          } catch {
-            toast.error("Erro ao atualizar item");
-          }
-        })();
-      },
-    });
+    pendingEditItemRef.current = { itemId, ordemIdRef, detId, qtd, preco };
+    setEditItemSenhaOpen(true);
   };
 
   const imprimirCompra = (ordem: OrdemCompra) => {
     const dataFormatada = formatDateOnly(ordem.data);
-    const mostrarValores = isChefe; // chefe vê valores, funcionário não
+    const mostrarValores = isChefe;
     const usuarioNome =
       (user as any)?.first_name ||
       (user as any)?.username ||
@@ -686,15 +713,15 @@ export function Compra() {
     return true;
   });
 
-  return (
+    return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-2">
           <h1 className="text-3xl font-semibold">Compras</h1>
           <p className="text-muted-foreground">Registre compras e consulte o histórico</p>
         </div>
         {isChefe && ordens.length > 0 && (
-          <Card className="px-6 py-3">
+          <Card className="shrink-0 px-6 py-3">
             <p className="text-sm text-muted-foreground">Total em Compras</p>
             <p className="text-2xl font-semibold text-red-600">{formatCurrency(totalCompras)}</p>
           </Card>
@@ -910,14 +937,15 @@ export function Compra() {
                   </Button>
                 </div>
                 {itensForm.length > 0 ? (
-                  <Table className="table-fixed">
+                  <div className="w-full overflow-x-auto rounded-md border border-border/60">
+                    <Table className="min-w-[720px] text-sm">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[min(200px,40%)]">Item</TableHead>
-                        <TableHead className="w-20 text-right">Qtd</TableHead>
-                        {isChefe && <TableHead className="w-28 text-right">Preço un.</TableHead>}
-                        {isChefe && <TableHead className="w-28 text-right">Total</TableHead>}
-                        <TableHead className="w-[120px] text-right">Ações</TableHead>
+                        <TableHead className="min-w-[200px]">Item</TableHead>
+                        <TableHead className="w-24 text-right">Qtd</TableHead>
+                        {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Preço un.</TableHead>}
+                        {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Total</TableHead>}
+                        <TableHead className="w-[132px] text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -972,9 +1000,13 @@ export function Compra() {
                             ) : (
                               <>
                                 <TableCell className="text-right align-middle">{item.quantidade}</TableCell>
-                                {isChefe && <TableCell className="text-right align-middle">{formatCurrency(precoItem || 0)}</TableCell>}
                                 {isChefe && (
-                                  <TableCell className="text-right align-middle">
+                                  <TableCell className="text-right align-middle tabular-nums">
+                                    {formatCurrency(precoItem || 0)}
+                                  </TableCell>
+                                )}
+                                {isChefe && (
+                                  <TableCell className="text-right align-middle tabular-nums">
                                     {formatCurrency(!isNaN(qtdItem * precoItem) ? qtdItem * precoItem : 0)}
                                   </TableCell>
                                 )}
@@ -1005,6 +1037,7 @@ export function Compra() {
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Nenhum item adicionado ainda. Selecione o fornecedor, o material e a quantidade
@@ -1070,14 +1103,15 @@ export function Compra() {
                 </div>
               </div>
               {ordensFiltradas.length > 0 ? (
-                <Table className="table-fixed">
+                <div className="w-full overflow-x-auto rounded-md border border-border/60">
+                <Table className="min-w-[800px] text-sm">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[min(180px,30%)]">Fornecedor</TableHead>
-                      <TableHead className="w-24">Data</TableHead>
-                      <TableHead>Itens</TableHead>
-                      {isChefe && <TableHead className="w-28 text-right">Total</TableHead>}
-                      <TableHead className="w-[140px] text-right">Ações</TableHead>
+                      <TableHead className="min-w-[160px]">Fornecedor</TableHead>
+                      <TableHead className="w-28 whitespace-nowrap">Data</TableHead>
+                      <TableHead className="min-w-[220px]">Itens</TableHead>
+                      {isChefe && <TableHead className="w-36 text-right whitespace-nowrap">Total</TableHead>}
+                      <TableHead className="w-[148px] text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1090,23 +1124,28 @@ export function Compra() {
                           onClick={() => openDetail(ordem)}
                         >
                           <TableCell className="font-medium truncate">
-                            <span className="inline-flex items-center gap-1.5">
+                            <span className="inline-flex min-w-0 items-center gap-1.5">
                               {ordem.cancelada && /^\d+$/.test(String(ordem.id)) ? (
                                 <Ban className="size-3.5 shrink-0 text-destructive" aria-label="Ordem cancelada" />
                               ) : null}
-                              <span className={ordem.cancelada ? "text-muted-foreground" : undefined}>{ordem.fornecedor}</span>
+                              <span className={cn("min-w-0 truncate", ordem.cancelada ? "text-muted-foreground" : undefined)}>
+                                {ordem.fornecedor}
+                              </span>
+                              <OrdemAlteracaoMarker observacao={ordem.ultima_alteracao_observacao} className="shrink-0" />
                             </span>
                           </TableCell>
                           <TableCell className="text-muted-foreground whitespace-nowrap">
                             {formatDateOnly(ordem.data)}
                           </TableCell>
-                          <TableCell className="truncate">
+                          <TableCell className="max-w-md">
+                            <span className="line-clamp-2 break-words">
                             {ordem.itens?.length === 1
                               ? getItemNome(ordem.itens[0])
                               : `${ordem.itens?.length ?? 0} itens`}
+                            </span>
                           </TableCell>
                           {isChefe && (
-                            <TableCell className="text-right font-medium text-red-600">
+                            <TableCell className="text-right font-medium text-red-600 tabular-nums whitespace-nowrap">
                               {formatCurrency(ordem.total)}
                             </TableCell>
                           )}
@@ -1114,7 +1153,7 @@ export function Compra() {
                             <div className="flex items-center justify-end gap-0.5">
                               <span className="relative inline-flex">
                                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDetail(ordem)} title="Ver detalhes">
-                                  <Eye className="size-4" />
+                                  <PanelRightOpen className="size-4" />
                                 </Button>
                                 {ordem.cancelada && /^\d+$/.test(String(ordem.id)) ? (
                                   <span
@@ -1135,6 +1174,7 @@ export function Compra() {
                       ))}
                   </TableBody>
                 </Table>
+                </div>
               ) : (
                 <p className="py-8 text-center text-muted-foreground">
                   {ordens.length === 0 ? "Nenhuma compra registrada" : "Nenhuma compra encontrada com os filtros informados."}
@@ -1146,7 +1186,7 @@ export function Compra() {
       </Tabs>
 
       <Dialog open={!!detailCompra} onOpenChange={(open) => !open && setDetailCompra(null)}>
-        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden gap-0 p-0 sm:max-w-2xl">
+        <DialogContent className="flex max-h-[90vh] w-[min(72rem,calc(100vw-1rem))] max-w-none flex-col overflow-hidden gap-0 p-0 sm:max-w-[min(72rem,calc(100vw-1.5rem))]">
           {detailCompra && (
             <>
               <DialogHeader className="shrink-0 space-y-4 border-b bg-gradient-to-br from-muted/80 to-muted/30 px-6 pb-5 pt-6 text-left sm:pr-12">
@@ -1155,11 +1195,12 @@ export function Compra() {
                 </p>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="space-y-1">
-                    <DialogTitle className="flex items-center gap-2 text-xl font-semibold leading-tight sm:text-2xl">
+                    <DialogTitle className="flex flex-wrap items-center gap-2 text-xl font-semibold leading-tight sm:text-2xl">
                       {detailCompra.cancelada ? (
                         <Ban className="size-5 shrink-0 text-destructive" aria-label="Ordem cancelada" />
                       ) : null}
-                      {detailCompra.fornecedor}
+                      <span className="min-w-0">{detailCompra.fornecedor}</span>
+                      <OrdemAlteracaoMarker observacao={detailCompra.ultima_alteracao_observacao} />
                     </DialogTitle>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
                       <span className="inline-flex items-center gap-1.5" title="Data da operação de compra">
@@ -1214,28 +1255,156 @@ export function Compra() {
                     </div>
                   )}
                 </div>
-                <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-                  <Table>
+                {/^\d+$/.test(String(detailCompra.id)) && !detailCompra.cancelada && isChefe ? (
+                  <div className="mb-4 rounded-xl border bg-card p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium">Adicionar item</h3>
+                        <p className="text-xs text-muted-foreground">
+                          Será pedido senha e observação e ficará registrado nos logs.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => {
+                          const ordemId = String(detailCompra.id);
+                          const qtd = parseQtdInteira(addDetailQtd);
+                          if (!qtd) {
+                            toast.error("Informe a quantidade");
+                            return;
+                          }
+                          const preco = parseFloat(String(addDetailPreco).replace(",", "."));
+                          if (!Number.isFinite(preco) || preco < 0) {
+                            toast.error("Informe o preço unitário");
+                            return;
+                          }
+                          if (addDetailTipo === "material") {
+                            if (!addDetailMaterialId) {
+                              toast.error("Selecione o material");
+                              return;
+                            }
+                            pendingAddItemRef.current = {
+                              ordemId,
+                              tipo: "material",
+                              material: Number(addDetailMaterialId),
+                              quantidade: qtd,
+                              preco_no_dia: preco,
+                            };
+                          } else {
+                            if (!addDetailProdutoId) {
+                              toast.error("Selecione o produto");
+                              return;
+                            }
+                            pendingAddItemRef.current = {
+                              ordemId,
+                              tipo: "produto",
+                              produto: Number(addDetailProdutoId),
+                              quantidade: qtd,
+                              preco_no_dia: preco,
+                            };
+                          }
+                          setAddItemSenhaOpen(true);
+                        }}
+                      >
+                        <Plus className="size-4 mr-2" />
+                        Adicionar
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-4">
+                      <div className="space-y-2 md:col-span-1">
+                        <Label>Tipo</Label>
+                        <Select value={addDetailTipo} onValueChange={(v) => setAddDetailTipo(v as any)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="material">Material</SelectItem>
+                            <SelectItem value="produto">Produto</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2 md:col-span-1">
+                        <Label>{addDetailTipo === "material" ? "Material" : "Produto"}</Label>
+                        {addDetailTipo === "material" ? (
+                          <Select value={addDetailMaterialId} onValueChange={setAddDetailMaterialId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {materiais
+                                .filter((m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === String(detailCompra.fornecedor_id))
+                                .map((m: any) => (
+                                  <SelectItem key={m.id} value={String(m.id)}>
+                                    {m.nome}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Select value={addDetailProdutoId} onValueChange={setAddDetailProdutoId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {produtosRevenda
+                                .filter((p: any) => produtoDisponivelParaFornecedor(p, String(detailCompra.fornecedor_id ?? "")))
+                                .sort((a: any, b: any) => String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"))
+                                .map((p: any) => (
+                                  <SelectItem key={p.id} value={String(p.id)}>
+                                    {p.nome}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                      <div className="space-y-2 md:col-span-1">
+                        <Label>Quantidade</Label>
+                        <Input value={addDetailQtd} onChange={(e) => setAddDetailQtd(e.target.value)} type="number" min={1} />
+                      </div>
+                      <div className="space-y-2 md:col-span-1">
+                        <Label>Preço unitário</Label>
+                        <Input value={addDetailPreco} onChange={(e) => setAddDetailPreco(e.target.value)} inputMode="decimal" />
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+                  <Table className="w-full table-fixed text-sm">
                   <TableHeader>
                     <TableRow className="border-b bg-muted/50 hover:bg-muted/50">
-                      <TableHead className="font-semibold">Item</TableHead>
-                      <TableHead className="w-20 text-right font-semibold">Qtd</TableHead>
-                      {isChefe && <TableHead className="w-28 text-right font-semibold">Preço un.</TableHead>}
-                      {isChefe && <TableHead className="w-28 text-right font-semibold">Total</TableHead>}
-                      <TableHead className="w-[100px] text-right font-semibold">Ações</TableHead>
+                      <TableHead className={cn("min-w-0 font-semibold", isChefe ? "w-[32%]" : "w-[58%]")}>Item</TableHead>
+                      <TableHead className={cn("text-right font-semibold", isChefe ? "w-[10%]" : "w-[14%]")}>Qtd</TableHead>
+                      {isChefe && (
+                        <TableHead className="w-[19%] text-right font-semibold whitespace-nowrap">Preço un.</TableHead>
+                      )}
+                      {isChefe && (
+                        <TableHead className="w-[19%] text-right font-semibold whitespace-nowrap">Total</TableHead>
+                      )}
+                      <TableHead className={cn("text-right font-semibold", isChefe ? "w-[20%]" : "w-[28%]")}>Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(detailCompra.itens || []).map((item) => (
                       <TableRow key={item.id} className="border-border/60">
-                        <TableCell className="font-medium">{getItemNome(item)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{item.quantidade}</TableCell>
-                        {isChefe && <TableCell className="text-right">{formatCurrency(item.preco_no_dia)}</TableCell>}
+                        <TableCell className="min-w-0 font-medium break-words align-top py-2 pr-2">
+                          {getItemNome(item)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums align-top py-2 px-1">{item.quantidade}</TableCell>
                         {isChefe && (
-                          <TableCell className="text-right text-red-600">{formatCurrency(item.total)}</TableCell>
+                          <TableCell className="text-right tabular-nums align-top py-2 px-1 text-xs sm:text-sm whitespace-nowrap">
+                            {formatCurrency(item.preco_no_dia)}
+                          </TableCell>
                         )}
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-0.5">
+                        {isChefe && (
+                          <TableCell className="text-right text-red-600 tabular-nums align-top py-2 px-1 text-xs sm:text-sm whitespace-nowrap">
+                            {formatCurrency(item.total)}
+                          </TableCell>
+                        )}
+                        <TableCell className="text-right align-top py-1.5 pl-1">
+                          <div className="flex flex-wrap items-center justify-end gap-0.5">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -1361,16 +1530,81 @@ export function Compra() {
       ) : null}
 
       <ConfirmacaoComSenhaDialog
+        open={dataCompraSenhaOpen}
+        onOpenChange={(o) => {
+          setDataCompraSenhaOpen(o);
+          if (!o) pendingDataCompraRef.current = null;
+        }}
+        title="Alterar data da compra"
+        description="A data da operação será atualizada nesta ordem e em todos os itens. A data de lançamento não muda. Informe a observação e confirme com sua senha."
+        confirmLabel="Confirmar alteração"
+        requireObservacao
+        observacaoLabel="Motivo da alteração"
+        onVerified={async ({ password, observacao }) => {
+          const p = pendingDataCompraRef.current;
+          if (!p) return;
+          try {
+            const raw = await api.patchCompraOrdemData(p.ordemId, {
+              data: p.data,
+              password,
+              observacao,
+            });
+            const r = raw as Record<string, unknown>;
+            const next: OrdemCompra =
+              raw && typeof raw === "object"
+                ? {
+                    id: r.id as string | number,
+                    fornecedor: (r.fornecedor as string) || (detailCompra?.fornecedor || ""),
+                    fornecedor_id: (r.fornecedor_id as number) ?? detailCompra?.fornecedor_id,
+                    data: (r.data as string) || p.data,
+                    data_lancamento: (r.data_lancamento as string) || detailCompra?.data_lancamento,
+                    cancelada: (r.cancelada as boolean) === true,
+                    ultima_alteracao_observacao:
+                      typeof r.ultima_alteracao_observacao === "string"
+                        ? r.ultima_alteracao_observacao
+                        : detailCompra?.ultima_alteracao_observacao,
+                    ultima_alteracao_em:
+                      (r.ultima_alteracao_em as string | null | undefined) ?? detailCompra?.ultima_alteracao_em,
+                    itens: (r.itens as ItemCompra[]) || detailCompra?.itens || [],
+                    total: Number(r.total) || detailCompra?.total || 0,
+                  }
+                : (detailCompra as OrdemCompra);
+            setDetailCompra(next);
+            setOrdens((prev) =>
+              prev.map((x) =>
+                String(x.id) === String(p.ordemId)
+                  ? {
+                      ...x,
+                      data: next.data || p.data,
+                      data_lancamento: next.data_lancamento,
+                      cancelada: next.cancelada,
+                      ultima_alteracao_observacao: next.ultima_alteracao_observacao,
+                      ultima_alteracao_em: next.ultima_alteracao_em,
+                    }
+                  : x
+              )
+            );
+            toast.success("Data da compra atualizada");
+          } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Erro ao atualizar data");
+          } finally {
+            pendingDataCompraRef.current = null;
+          }
+        }}
+      />
+
+      <ConfirmacaoComSenhaDialog
         open={excluirCompraOpen}
         onOpenChange={setExcluirCompraOpen}
         title="Cancelar ordem de compra"
         description="A ordem ficará no histórico como cancelada e deixará de contar no saldo do fornecedor (os itens não são apagados). Informe o motivo e confirme com sua senha."
         confirmLabel="Confirmar cancelamento"
-        requireMotivo
-        onVerified={async ({ motivo }) => {
+        requireObservacao
+        observacaoLabel="Motivo do cancelamento"
+        onVerified={async ({ password, observacao }) => {
           if (!detailCompra || !/^\d+$/.test(String(detailCompra.id))) return;
           const idStr = String(detailCompra.id);
-          await api.deleteCompra(idStr, motivo);
+          await api.deleteCompra(idStr, { password, observacao });
           toast.success("Ordem cancelada");
           await loadData();
           try {
@@ -1394,12 +1628,90 @@ export function Compra() {
         title="Excluir item da ordem"
         description="O valor deixará de contar nas compras do fornecedor. Informe o motivo e confirme com sua senha."
         confirmLabel="Confirmar exclusão"
-        requireMotivo
-        onVerified={async ({ motivo }) => {
+        requireObservacao
+        observacaoLabel="Motivo da exclusão"
+        onVerified={async ({ password, observacao }) => {
           if (excluirItemCompraId == null) return;
           const idDel = excluirItemCompraId;
           setExcluirItemCompraId(null);
-          await handleDeleteCompra(idDel, motivo);
+          await handleDeleteCompra(idDel, password, observacao);
+        }}
+      />
+
+      <ConfirmacaoComSenhaDialog
+        open={addItemSenhaOpen}
+        onOpenChange={(o) => {
+          setAddItemSenhaOpen(o);
+          if (!o) pendingAddItemRef.current = null;
+        }}
+        title="Adicionar item na ordem"
+        description="Informe a observação (motivo) e confirme com sua senha."
+        confirmLabel="Adicionar item"
+        requireObservacao
+        observacaoLabel="Motivo da alteração"
+        onVerified={async ({ password, observacao }) => {
+          const p = pendingAddItemRef.current;
+          if (!p) return;
+          try {
+            const updated = await api.addCompraItem(p.ordemId, {
+              tipo: p.tipo,
+              material: p.material,
+              produto: p.produto,
+              quantidade: p.quantidade,
+              preco_no_dia: p.preco_no_dia,
+              password,
+              observacao,
+            });
+            toast.success("Item adicionado");
+            await loadData();
+            if (detailCompra && String(detailCompra.id) === String(p.ordemId)) {
+              setDetailCompra(updated as OrdemCompra);
+            }
+            setAddDetailMaterialId("");
+            setAddDetailProdutoId("");
+            setAddDetailQtd("");
+            setAddDetailPreco("");
+          } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Erro ao adicionar item");
+          } finally {
+            pendingAddItemRef.current = null;
+          }
+        }}
+      />
+
+      <ConfirmacaoComSenhaDialog
+        open={editItemSenhaOpen}
+        onOpenChange={(o) => {
+          setEditItemSenhaOpen(o);
+          if (!o) pendingEditItemRef.current = null;
+        }}
+        title="Alterar item da ordem"
+        description="Informe a observação (motivo) e confirme com sua senha. Isso ficará registrado nos logs."
+        confirmLabel="Salvar alteração"
+        requireObservacao
+        observacaoLabel="Motivo da alteração"
+        onVerified={async ({ password, observacao }) => {
+          const p = pendingEditItemRef.current;
+          if (!p) return;
+          try {
+            await api.updateCompra(p.itemId, {
+              quantidade: p.qtd,
+              preco_no_dia: p.preco,
+              password,
+              observacao,
+            });
+            toast.success("Item atualizado");
+            await loadData();
+            setEditingItem(null);
+            if (p.detId && p.detId === String(p.ordemIdRef)) {
+              const d = await api.getCompraDetalhe(String(p.ordemIdRef));
+              setDetailCompra(d as OrdemCompra);
+            }
+          } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : "Erro ao atualizar item");
+          } finally {
+            pendingEditItemRef.current = null;
+          }
         }}
       />
 

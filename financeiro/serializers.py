@@ -276,6 +276,7 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
     fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
     data = serializers.SerializerMethodField()
     data_lancamento = serializers.SerializerMethodField()
+    ultima_alteracao_em = serializers.SerializerMethodField()
     itens = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
 
@@ -283,8 +284,14 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
         model = OrdemCompra
         fields = [
             'id', 'fornecedor_id', 'fornecedor', 'data', 'data_lancamento', 'cancelada',
-            'marcada_paga', 'itens', 'total',
+            'marcada_paga', 'ultima_alteracao_observacao', 'ultima_alteracao_em', 'itens', 'total',
         ]
+
+    def get_ultima_alteracao_em(self, obj):
+        dt = getattr(obj, 'ultima_alteracao_em', None)
+        if not dt:
+            return None
+        return _lancamento_iso_datetime_br(dt)
 
     def get_data(self, obj):
         return _data_compra_iso_br(obj.data_compra)

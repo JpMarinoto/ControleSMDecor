@@ -19,7 +19,7 @@ ls -1t backups/db/db-*.sqlite3 | head -1
 
 Depois dar o comando
 
-scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/db-2026-04-12_223849.sqlite3 "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-04-12_223849.sqlite3"
+scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/NOMEBD "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMEBD"
 
 
 Sequiser pegar o banco do backup e colocar na localhost voce da
@@ -31,7 +31,7 @@ python manage.py migrate --noinput
 
 
 DA PASTA POR FORA DE BACKUP
-copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-04-08_193912.sqlite3" db.sqlite3
+copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-04-15_192059.sqlite3 " db.sqlite3
 python manage.py migrate --noinput
 
 

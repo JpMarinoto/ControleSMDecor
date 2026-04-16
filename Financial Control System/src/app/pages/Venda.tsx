@@ -21,12 +21,29 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
-import { TrendingUp, Plus, Trash2, Copy, Eye, Pencil, Check, X, Printer, Calendar, Hash, Package, Ban, ChevronsUpDown, Search } from "lucide-react";
+import {
+  TrendingUp,
+  Plus,
+  Trash2,
+  Copy,
+  Pencil,
+  Check,
+  X,
+  Printer,
+  Calendar,
+  Hash,
+  Package,
+  Ban,
+  ChevronsUpDown,
+  Search,
+  PanelRightOpen,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { formatDateOnly, parseDateOnlyToTime, parseLancamentoToTime, getTodayLocalISO } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Checkbox } from "../components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
 import { resolvePrintLogoDataUrl } from "../lib/printLogo";
@@ -115,10 +132,11 @@ export function Venda() {
     titulo: string;
     downloadBaseName: string;
   } | null>(null);
+  /** Impressão da venda: com ou sem colunas de preço/total (via do cliente). */
+  const [vendaImpressaoComValores, setVendaImpressaoComValores] = useState(false);
   const [editDetailDataVenda, setEditDetailDataVenda] = useState("");
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
-
   useEffect(() => {
     if (detailVenda?.data) setEditDetailDataVenda(String(detailVenda.data).slice(0, 10));
   }, [detailVenda?.id, detailVenda?.data]);
@@ -379,6 +397,7 @@ export function Venda() {
       .slice(0, 72) || "cliente";
 
   const imprimirVenda = async (venda: Venda) => {
+    const mostrarValoresNaFolha = vendaImpressaoComValores;
     const logoDataUrl = await resolvePrintLogoDataUrl();
     const empresaHeader = getEmpresaHeaderHtml(logoDataUrl);
     const escHtml = (s: string) =>
@@ -415,23 +434,22 @@ export function Venda() {
 
     const itensRows = itens
       .map((i) => {
+        const nomeProd = ((i as any).produto_nome || "").trim() || "—";
         const precoUnit =
           toNum((i as any).preco_unitario) || toNum((i as any).precoUnitario) || 0;
         const qtd = toNum((i as any).quantidade);
         const totalItem =
           toNum((i as any).total_item) || toNum((i as any).total) || (precoUnit * qtd);
-        if (isChefe) {
-          // Chefe vê quantidade, valor unitário e total
+        if (mostrarValoresNaFolha) {
           return `<tr>
-            <td>${i.produto_nome || `Produto #${i.produto}`}</td>
+            <td>${nomeProd}</td>
             <td class="num">${qtd}</td>
             <td class="num">${formatCurrency(precoUnit)}</td>
             <td class="num">${formatCurrency(totalItem)}</td>
           </tr>`;
         }
-        // Funcionário vê apenas produto e quantidade
         return `<tr>
-          <td>${i.produto_nome || `Produto #${i.produto}`}</td>
+          <td>${nomeProd}</td>
           <td class="num">${qtd}</td>
         </tr>`;
       })
@@ -458,7 +476,7 @@ export function Venda() {
           <table>
             <thead>
               ${
-                isChefe
+                mostrarValoresNaFolha
                   ? `<tr>
                        <th style="width: 46%;">Produto</th>
                        <th class="num" style="width: 18%;">Qtd</th>
@@ -475,7 +493,7 @@ export function Venda() {
               ${itensRows}
             </tbody>
           </table>
-          ${isChefe ? `<div class="total-venda"><strong>Total da venda: ${formatCurrency(totalVenda)}</strong></div>` : ""}
+          ${mostrarValoresNaFolha ? `<div class="total-venda"><strong>Total da venda: ${formatCurrency(totalVenda)}</strong></div>` : ""}
         </div>
 
         <div class="assinatura">
@@ -573,20 +591,21 @@ export function Venda() {
     </div>
   </body>
 </html>`;
-    const tituloPrev = `Venda #${numeroVenda || "?"} — ${venda.clienteNome || ""}`.trim();
+    const tituloPrev =
+      `Venda #${numeroVenda || "?"} — ${venda.clienteNome || ""}${mostrarValoresNaFolha ? "" : " · só quantidades"}`.trim();
     void api
       .registrarImpressao({
         tipo: "venda",
         titulo: tituloPrev,
         html,
-        meta: { venda_id: venda.id, cliente_id: venda.cliente },
+        meta: { venda_id: venda.id, cliente_id: venda.cliente, com_valores: mostrarValoresNaFolha },
       })
       .catch(() => {});
     const nomeSlug = slugNomeArquivo(venda.clienteNome || "cliente");
     setPrintPreview({
       html,
       titulo: tituloPrev,
-      downloadBaseName: `${nomeSlug}-venda-${numeroVenda || "nova"}`,
+      downloadBaseName: `${nomeSlug}-venda-${numeroVenda || "nova"}${mostrarValoresNaFolha ? "" : "-sem-valores"}`,
     });
   };
 
@@ -917,13 +936,13 @@ export function Venda() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-2">
           <h1 className="text-3xl font-semibold">Vendas</h1>
           <p className="text-muted-foreground">Registre vendas e consulte o histórico</p>
         </div>
         {isChefe && vendas.length > 0 && (
-          <Card className="px-6 py-3">
+          <Card className="shrink-0 px-6 py-3">
             <p className="text-sm text-muted-foreground">Total em Vendas</p>
             <p className="text-2xl font-semibold text-green-600">{formatCurrency(totalVendas)}</p>
           </Card>
@@ -1103,12 +1122,13 @@ export function Venda() {
                   </Button>
                 </div>
                 {itensForm.length > 0 ? (
-                  <Table className="table-fixed">
+                  <div className="w-full overflow-x-auto rounded-md border border-border/60">
+                  <Table className="min-w-[640px] text-sm">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[min(200px,40%)]">Produto</TableHead>
-                        <TableHead className="w-20 text-right">Qtd</TableHead>
-                        <TableHead className="w-[120px] text-right">Ações</TableHead>
+                        <TableHead className="min-w-[200px]">Produto</TableHead>
+                        <TableHead className="w-24 text-right">Qtd</TableHead>
+                        <TableHead className="w-[132px] text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1171,6 +1191,7 @@ export function Venda() {
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Nenhum item adicionado ainda. Selecione o produto e a quantidade e clique em
@@ -1219,6 +1240,18 @@ export function Venda() {
               </div>
             </div>
 
+            <div className="flex max-w-lg items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5">
+              <Checkbox
+                id="venda-imp-valores-nova"
+                checked={vendaImpressaoComValores}
+                onCheckedChange={(c) => setVendaImpressaoComValores(c === true)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="venda-imp-valores-nova" className="cursor-pointer text-sm font-normal leading-snug">
+                Mostrar valores (R$) na impressão após registrar
+              </Label>
+            </div>
+
             <Button type="submit" disabled={produtos.length === 0}>
               <Plus className="size-4 mr-2" />
               Registrar venda
@@ -1265,14 +1298,15 @@ export function Venda() {
                 </div>
               </div>
               {vendasFiltradas.length > 0 ? (
-                <Table>
+                <div className="w-full overflow-x-auto rounded-md border border-border/60">
+                <Table className="min-w-[800px] text-sm">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Itens (quantidade × produto)</TableHead>
-                      {isChefe && <TableHead className="text-right">Total</TableHead>}
-                      <TableHead className="w-10"></TableHead>
+                      <TableHead className="min-w-[140px]">Cliente</TableHead>
+                      <TableHead className="w-28 whitespace-nowrap">Data</TableHead>
+                      <TableHead className="min-w-[240px]">Itens (quantidade × produto)</TableHead>
+                      {isChefe && <TableHead className="w-36 text-right whitespace-nowrap">Total</TableHead>}
+                      <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1301,22 +1335,24 @@ export function Venda() {
                           <TableCell className="text-muted-foreground whitespace-nowrap">
                             {formatDateOnly(venda.data)}
                           </TableCell>
-                          <TableCell className="text-sm">
+                          <TableCell className="text-sm max-w-md">
+                            <span className="line-clamp-2 break-words">
                             {venda.itens && venda.itens.length > 0
                               ? venda.itens
                                   .map((i) => `${i.quantidade}× ${i.produto_nome || `Produto #${i.produto}`}`)
                                   .join(", ")
                               : "—"}
+                            </span>
                           </TableCell>
                           {isChefe && (
-                            <TableCell className="text-right font-medium text-green-600">
+                            <TableCell className="text-right font-medium text-green-600 tabular-nums whitespace-nowrap">
                               {formatCurrency(venda.total)}
                             </TableCell>
                           )}
                           <TableCell>
                             <span className="relative inline-flex">
                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openDetail(venda); }} title="Ver detalhes">
-                                <Eye className="size-4" />
+                                <PanelRightOpen className="size-4" />
                               </Button>
                               {venda.cancelada ? (
                                 <span
@@ -1331,6 +1367,7 @@ export function Venda() {
                       ))}
                   </TableBody>
                 </Table>
+                </div>
               ) : (
                 <p className="py-8 text-center text-muted-foreground">
                   {vendas.length === 0 ? "Nenhuma venda registrada" : "Nenhuma venda encontrada com os filtros informados."}
@@ -1342,7 +1379,7 @@ export function Venda() {
       </Tabs>
 
       <Dialog open={!!detailVenda} onOpenChange={(open) => !open && setDetailVenda(null)}>
-        <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogContent className="flex max-h-[90vh] w-[min(56rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(56rem,96vw)]">
           {detailVenda && (
             <>
               <DialogHeader className="shrink-0 space-y-4 border-b bg-gradient-to-br from-muted/80 to-muted/30 px-6 pb-5 pt-6 text-left sm:pr-12">
@@ -1417,21 +1454,25 @@ export function Venda() {
                     </div>
                   ) : null}
                 </div>
-                <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-                  <Table>
+                <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+                  <Table className="min-w-[640px] text-sm">
                 <TableHeader>
                   <TableRow className="border-b bg-muted/50 hover:bg-muted/50">
-                    <TableHead className="font-semibold">Produto</TableHead>
-                    <TableHead className="text-right font-semibold">Qtd</TableHead>
-                    {isChefe && <TableHead className="text-right font-semibold">Preço un.</TableHead>}
-                    {isChefe && <TableHead className="text-right font-semibold">Total</TableHead>}
-                    <TableHead className="w-[52px]"></TableHead>
+                    <TableHead className="min-w-[180px] font-semibold">Produto</TableHead>
+                    <TableHead className="w-24 text-right font-semibold">Qtd</TableHead>
+                    {isChefe && (
+                      <TableHead className="w-32 text-right font-semibold whitespace-nowrap">Preço un.</TableHead>
+                    )}
+                    {isChefe && (
+                      <TableHead className="w-32 text-right font-semibold whitespace-nowrap">Total</TableHead>
+                    )}
+                    <TableHead className="w-[104px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(detailVenda.itens || []).map((item) => (
                     <TableRow key={item.id} className="border-border/60">
-                      <TableCell className="font-medium">{item.produto_nome || `#${item.produto}`}</TableCell>
+                      <TableCell className="font-medium break-words">{item.produto_nome || `#${item.produto}`}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {isChefe && editingVendaItemId === item.id ? (
                           <Input
@@ -1446,7 +1487,7 @@ export function Venda() {
                         )}
                       </TableCell>
                       {isChefe && (
-                        <TableCell className="text-right">
+                        <TableCell className="text-right tabular-nums">
                           {editingVendaItemId === item.id ? (
                             <Input
                               type="text"
@@ -1461,7 +1502,16 @@ export function Venda() {
                         </TableCell>
                       )}
                       {isChefe && (
-                        <TableCell className="text-right">{formatCurrency(item.quantidade * item.preco_unitario)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {editingVendaItemId === item.id
+                            ? (() => {
+                                const q = parseInt(editVendaQtd, 10);
+                                const p = parseFloat(String(editVendaPreco).replace(",", "."));
+                                if (!Number.isFinite(q) || !Number.isFinite(p)) return "—";
+                                return formatCurrency(q * p);
+                              })()
+                            : formatCurrency(item.quantidade * item.preco_unitario)}
+                        </TableCell>
                       )}
                       <TableCell>
                         {isChefe ? (
@@ -1667,28 +1717,41 @@ export function Venda() {
               </div>
               </div>
 
-              <DialogFooter className="shrink-0 gap-2 border-t bg-muted/30 px-6 py-4 sm:flex sm:flex-row sm:flex-wrap sm:justify-end">
-                <Button variant="outline" onClick={() => detailVenda && void imprimirVenda(detailVenda)} title="Imprimir esta venda para o cliente pagar">
-                  <Printer className="size-4 mr-2" />
-                  Imprimir venda
-                </Button>
-                {!detailVenda.cancelada && (
-                  <Button
-                    variant="destructive"
-                    onClick={() => setExcluirVendaOpen(true)}
-                    title="Cancelar esta venda (exige senha)"
-                  >
-                    <Trash2 className="size-4 mr-2" />
-                    Excluir venda
+              <DialogFooter className="shrink-0 flex-col gap-3 border-t bg-muted/30 px-6 py-4 sm:flex sm:flex-col">
+                <div className="flex w-full items-start gap-2">
+                  <Checkbox
+                    id="venda-imp-valores-detalhe"
+                    checked={vendaImpressaoComValores}
+                    onCheckedChange={(c) => setVendaImpressaoComValores(c === true)}
+                    className="mt-0.5"
+                  />
+                  <Label htmlFor="venda-imp-valores-detalhe" className="cursor-pointer text-left text-sm font-normal leading-snug">
+                    Mostrar valores (R$) na impressão
+                  </Label>
+                </div>
+                <div className="flex w-full flex-wrap justify-end gap-2">
+                  <Button variant="outline" onClick={() => detailVenda && void imprimirVenda(detailVenda)} title="Imprimir esta venda para o cliente pagar">
+                    <Printer className="size-4 mr-2" />
+                    Imprimir venda
                   </Button>
-                )}
-                <Button variant="outline" onClick={() => setCopiarConfirmOpen(true)} disabled={!!detailVenda.cancelada}>
-                  <Copy className="size-4 mr-2" />
-                  Copiar venda
-                </Button>
-                <Button variant="default" onClick={() => setDetailVenda(null)}>
-                  Fechar
-                </Button>
+                  {!detailVenda.cancelada && (
+                    <Button
+                      variant="destructive"
+                      onClick={() => setExcluirVendaOpen(true)}
+                      title="Cancelar esta venda (exige senha)"
+                    >
+                      <Trash2 className="size-4 mr-2" />
+                      Excluir venda
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => setCopiarConfirmOpen(true)} disabled={!!detailVenda.cancelada}>
+                    <Copy className="size-4 mr-2" />
+                    Copiar venda
+                  </Button>
+                  <Button variant="default" onClick={() => setDetailVenda(null)}>
+                    Fechar
+                  </Button>
+                </div>
               </DialogFooter>
               <AlertDialog open={copiarConfirmOpen} onOpenChange={setCopiarConfirmOpen}>
                 <AlertDialogContent>
@@ -1731,7 +1794,7 @@ export function Venda() {
         description="A venda será cancelada e deixará de contar no saldo do cliente (fica no histórico como cancelada). Digite o motivo e sua senha para confirmar."
         confirmLabel="Confirmar exclusão"
         requireMotivo
-        onVerified={async ({ motivo }) => {
+        onVerified={async ({ motivo, password: _password, observacao: _observacao }) => {
           if (!detailVenda) return;
           await api.deleteVenda(String(detailVenda.id), motivo);
           toast.success("Venda cancelada");

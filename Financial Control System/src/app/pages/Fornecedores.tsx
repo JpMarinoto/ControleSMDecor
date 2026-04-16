@@ -79,7 +79,8 @@ export function FornecedoresList() {
             {loading ? (
               <p className="text-muted-foreground">Carregando...</p>
             ) : (
-              <Table>
+              <div className="w-full overflow-x-auto rounded-md border border-border/60">
+              <Table className="min-w-[720px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Nome</TableHead>
@@ -111,8 +112,14 @@ export function FornecedoresList() {
                         </TableCell>
                         <TableCell className="text-muted-foreground">{f.telefone || "-"}</TableCell>
                         {isChefe && (
-                          <TableCell className={`text-right font-medium ${Number(f.saldo_devedor ?? 0) > 0 ? "text-red-600" : "text-muted-foreground"}`}>
-                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(f.saldo_devedor ?? 0))}
+                          <TableCell
+                            className={`text-right font-medium tabular-nums ${
+                              Number(f.saldo_devedor ?? 0) > 0 ? "text-red-600" : "text-muted-foreground"
+                            }`}
+                          >
+                            {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+                              Number(f.saldo_devedor ?? 0),
+                            )}
                           </TableCell>
                         )}
                         <TableCell>
@@ -127,6 +134,7 @@ export function FornecedoresList() {
                   )}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Users, ChevronRight, Printer, Calendar, FileText } from "lucide-react";
+import { Users, ChevronRight, Printer, FileText } from "lucide-react";
 import { motion } from "motion/react";
 import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 
@@ -19,18 +19,6 @@ interface Cliente {
   cpf?: string;
   cnpj?: string;
   saldo_devedor?: number;
-}
-
-function getSemanaAtual() {
-  const hoje = new Date();
-  const seg = new Date(hoje);
-  seg.setDate(hoje.getDate() - hoje.getDay() + 1);
-  const dom = new Date(seg);
-  dom.setDate(seg.getDate() + 6);
-  return {
-    data_inicio: seg.toISOString().split("T")[0],
-    data_fim: dom.toISOString().split("T")[0],
-  };
 }
 
 export function ClientesList() {
@@ -67,14 +55,6 @@ export function ClientesList() {
     } else {
       load();
     }
-  };
-
-  const fechamentoSemanal = () => {
-    const { data_inicio, data_fim } = getSemanaAtual();
-    setDataInicio(data_inicio);
-    setDataFim(data_fim);
-    setUsarFiltro(true);
-    load({ data_inicio, data_fim });
   };
 
   const limparFiltro = () => {
@@ -134,13 +114,9 @@ export function ClientesList() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Clientes</h1>
-          <p className="text-muted-foreground">Lista de clientes, filtro por data e fechamento semanal</p>
+          <p className="text-muted-foreground">Lista de clientes e filtro por data</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fechamentoSemanal}>
-            <Calendar className="size-4 mr-2" />
-            Fechamento semanal
-          </Button>
           <Button variant="outline" size="sm" onClick={imprimir} disabled={clientes.length === 0}>
             <Printer className="size-4 mr-2" />
             Imprimir

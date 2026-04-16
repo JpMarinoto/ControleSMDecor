@@ -9,7 +9,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { ArrowLeft, Truck, Receipt, CreditCard, DollarSign, Printer, Package, ChevronRight, Ban, Pencil, Trash2, CheckCircle2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Truck,
+  Receipt,
+  CreditCard,
+  DollarSign,
+  Printer,
+  Package,
+  ChevronRight,
+  Ban,
+  Pencil,
+  Trash2,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
@@ -104,6 +119,8 @@ export function FornecedorDetalhe() {
   const isChefe = user?.is_chefe === true;
   const [data, setData] = useState<FornecedorDetalheData | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Só lista de compras + histórico: oculta preço unit. e totais; quantidades e demais dados do fornecedor seguem visíveis. */
+  const [mostrarPrecosListaCompras, setMostrarPrecosListaCompras] = useState(false);
   const [openPagamento, setOpenPagamento] = useState(false);
   const [valorPagamento, setValorPagamento] = useState("");
   const [metodoPagamento, setMetodoPagamento] = useState("");
@@ -573,21 +590,44 @@ export function FornecedorDetalhe() {
     }
   };
 
+  const comprasTableColSpan =
+    !isChefe ? (mostrarPrecosListaCompras ? 4 : 3) : mostrarPrecosListaCompras ? 7 : 5;
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/fornecedores">
-              <ArrowLeft className="size-4" />
-            </Link>
-          </Button>
-          <div>
-            <h1 className="text-3xl font-semibold">{fornecedor.nome}</h1>
-            <p className="text-muted-foreground">{fornecedor.telefone && `Tel: ${fornecedor.telefone}`}</p>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <Button variant="ghost" size="icon" asChild className="shrink-0">
+              <Link to="/fornecedores">
+                <ArrowLeft className="size-4" />
+              </Link>
+            </Button>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-3xl font-semibold">{fornecedor.nome}</h1>
+              <p className="text-muted-foreground">{fornecedor.telefone && `Tel: ${fornecedor.telefone}`}</p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 shrink-0 gap-2 px-4 text-sm font-medium shadow-sm"
+              onClick={() => setMostrarPrecosListaCompras((v) => !v)}
+              title={
+                mostrarPrecosListaCompras
+                  ? "Ocultar preços e totais na lista de compras (quantidades permanecem)"
+                  : "Mostrar preços e totais na lista de compras abaixo"
+              }
+            >
+              {mostrarPrecosListaCompras ? (
+                <Eye className="size-5 shrink-0" aria-hidden />
+              ) : (
+                <EyeOff className="size-5 shrink-0" aria-hidden />
+              )}
+              {mostrarPrecosListaCompras ? "Ocultar preços na lista" : "Mostrar preços na lista"}
+            </Button>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2">
           <Select
             value={periodo}
             onValueChange={(v) => {
@@ -802,10 +842,6 @@ export function FornecedorDetalhe() {
             <Receipt className="size-5 text-muted-foreground" />
             Fechamento (seleção)
           </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Selecione ordens ou compras avulsas na tabela abaixo. O resumo segue o mesmo critério do detalhe do
-            cliente: total selecionado, pagamentos no intervalo das datas marcadas e saldo do fornecedor.
-          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -838,7 +874,9 @@ export function FornecedorDetalhe() {
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">Saldo atual do fornecedor</p>
-                <p className={`text-xl font-bold ${saldo_devedor > 0 ? "text-destructive" : ""}`}>
+                <p
+                  className={`text-xl font-bold ${saldo_devedor > 0 ? "text-destructive" : ""}`}
+                >
                   {formatCurrency(saldo_devedor)}
                 </p>
               </div>
@@ -851,13 +889,21 @@ export function FornecedorDetalhe() {
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">A pagar desta seleção</p>
-                <p className={`text-xl font-bold ${aPagarDaSelecaoCompras > 0 ? "text-primary" : "text-muted-foreground"}`}>
+                <p
+                  className={`text-xl font-bold ${
+                    aPagarDaSelecaoCompras > 0 ? "text-primary" : "text-muted-foreground"
+                  }`}
+                >
                   {formatCurrency(aPagarDaSelecaoCompras)}
                 </p>
               </div>
               <div className="rounded-lg border bg-background p-4 sm:col-span-2 lg:col-span-4">
                 <p className="text-xs font-medium text-muted-foreground">Compras listadas fora da seleção (bruto)</p>
-                <p className={`text-xl font-bold ${restanteBrutoComprasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"}`}>
+                <p
+                  className={`text-xl font-bold ${
+                    restanteBrutoComprasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"
+                  }`}
+                >
                   {formatCurrency(restanteBrutoComprasForaSelecao)}
                 </p>
               </div>
@@ -876,8 +922,12 @@ export function FornecedorDetalhe() {
       {limites && isChefe && (
         <Card>
           <CardContent className="pt-4">
-            <p className="text-muted-foreground">No período: Compras {formatCurrency(totalComprasPeriodo)} | Pago {formatCurrency(totalPagoPeriodo)}</p>
-            <p className={`font-semibold ${saldoNoPeriodo > 0 ? "text-destructive" : ""}`}>Saldo no período: {formatCurrency(saldoNoPeriodo)}</p>
+            <p className="text-muted-foreground">
+              No período: Compras {formatCurrency(totalComprasPeriodo)} | Pago {formatCurrency(totalPagoPeriodo)}
+            </p>
+            <p className={`font-semibold ${saldoNoPeriodo > 0 ? "text-destructive" : ""}`}>
+              Saldo no período: {formatCurrency(saldoNoPeriodo)}
+            </p>
           </CardContent>
         </Card>
       )}
@@ -1013,35 +1063,37 @@ export function FornecedorDetalhe() {
       </Collapsible>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader className="space-y-3">
-            <div className="space-y-1">
-              <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Ordens canceladas não aparecem aqui — ficam em <strong>Histórico</strong> abaixo. Use o resumo{" "}
-                <strong>Fechamento (seleção)</strong> acima para selecionar tudo e ver totais. A coluna{" "}
-                <strong>Marcada paga</strong> é só controle visual (não registra pagamento no caixa).
-              </p>
-            </div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <div className="w-full rounded-md border border-border/50">
+            <Table className="w-full table-fixed text-sm">
               <TableHeader>
                 <TableRow>
-                  {isChefe && <TableHead className="w-10">Sel.</TableHead>}
-                  {isChefe && <TableHead className="w-[120px]">Marcada paga</TableHead>}
-                  <TableHead>Data</TableHead>
-                  <TableHead>Detalhe</TableHead>
-                  <TableHead className="text-right w-20 tabular-nums">Qtd</TableHead>
-                  <TableHead className="text-right w-28 tabular-nums">V. unit.</TableHead>
-                  {isChefe && <TableHead className="text-right">Total</TableHead>}
+                  {isChefe && <TableHead className="w-11 align-middle">Sel.</TableHead>}
+                  {isChefe && (
+                    <TableHead className="w-[5.5rem] align-middle text-xs font-semibold leading-tight" title="Marcada paga (só visual)">
+                      Marcada
+                    </TableHead>
+                  )}
+                  <TableHead className="w-[5.25rem] whitespace-nowrap align-middle">Data</TableHead>
+                  <TableHead className="min-w-0 align-middle">Detalhe</TableHead>
+                  <TableHead className="w-[4.5rem] text-right align-middle tabular-nums">Qtd</TableHead>
+                  {mostrarPrecosListaCompras && (
+                    <TableHead className="w-[5.25rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr uni</TableHead>
+                  )}
+                  {isChefe && mostrarPrecosListaCompras && (
+                    <TableHead className="w-[5.5rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr total</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {exibirCompras.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 7 : 4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={comprasTableColSpan} className="text-center text-muted-foreground">
                       Nenhuma compra ativa{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
@@ -1055,6 +1107,11 @@ export function FornecedorDetalhe() {
                     const mp = linhaRef?.marcada_paga === true;
                     const saveKey = g.ordemId != null ? `ordem-${g.ordemId}` : linhaRef?.id ?? "";
                     const ordemSel = allSel || someSel;
+                    const qtdTotalGrupo = g.lines.reduce((s, l) => {
+                      const q = l.quantidade;
+                      if (q == null || Number.isNaN(Number(q))) return s;
+                      return s + Number(q);
+                    }, 0);
                     if (g.ordemId != null) {
                       return (
                         <Fragment key={g.key}>
@@ -1092,14 +1149,22 @@ export function FornecedorDetalhe() {
                               </TableCell>
                             )}
                             <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
-                            <TableCell>
-                              <span className="font-medium">Ordem #{g.ordemId}</span>
-                              <span className="text-muted-foreground text-sm block">{g.lines.length} item(ns) nesta compra</span>
+                            <TableCell className="min-w-0 align-top">
+                              <div className="space-y-0.5">
+                                <span className="font-medium">Ordem #{g.ordemId}</span>
+                                <span className="block text-xs text-muted-foreground">{g.lines.length} item(ns) nesta compra</span>
+                              </div>
                             </TableCell>
-                            <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
-                            <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
-                            {isChefe && (
-                              <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
+                            <TableCell className="text-right align-top tabular-nums text-muted-foreground">
+                              {qtdTotalGrupo > 0 ? qtdTotalGrupo : "—"}
+                            </TableCell>
+                            {mostrarPrecosListaCompras && (
+                              <TableCell className="text-right align-top tabular-nums text-muted-foreground">—</TableCell>
+                            )}
+                            {isChefe && mostrarPrecosListaCompras && (
+                              <TableCell className="text-right align-top font-medium tabular-nums text-foreground">
+                                {formatCurrency(g.totalGrupo)}
+                              </TableCell>
                             )}
                           </TableRow>
                           {g.lines.map((linha) => {
@@ -1117,16 +1182,26 @@ export function FornecedorDetalhe() {
                               {isChefe && <TableCell />}
                               {isChefe && <TableCell />}
                               <TableCell />
-                              <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">
+                              <TableCell className="min-w-0">
+                                <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground">
+                                  {linha.material}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums">
                                 {linha.quantidade != null ? linha.quantidade : "—"}
                               </TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">
-                                {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                                  ? formatCurrency(linha.preco_unitario)
-                                  : "—"}
-                              </TableCell>
-                              {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
+                              {mostrarPrecosListaCompras && (
+                                <TableCell className="text-right tabular-nums whitespace-nowrap">
+                                  {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                                    ? formatCurrency(linha.preco_unitario)
+                                    : "—"}
+                                </TableCell>
+                              )}
+                              {isChefe && mostrarPrecosListaCompras && (
+                                <TableCell className="text-right tabular-nums whitespace-nowrap text-red-600">
+                                  {formatCurrency(linha.total)}
+                                </TableCell>
+                              )}
                             </TableRow>
                             );
                           })}
@@ -1175,23 +1250,30 @@ export function FornecedorDetalhe() {
                             </div>
                           </TableCell>
                         )}
-                        <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
-                        <TableCell>{linha.material}</TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell className="text-muted-foreground align-top">{formatDateOnly(linha.data)}</TableCell>
+                        <TableCell className="min-w-0 align-top break-words">{linha.material}</TableCell>
+                        <TableCell className="text-right tabular-nums align-top">
                           {linha.quantidade != null ? linha.quantidade : "—"}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                            ? formatCurrency(linha.preco_unitario)
-                            : "—"}
-                        </TableCell>
-                        {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
+                        {mostrarPrecosListaCompras && (
+                          <TableCell className="text-right tabular-nums whitespace-nowrap align-top">
+                            {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                              ? formatCurrency(linha.preco_unitario)
+                              : "—"}
+                          </TableCell>
+                        )}
+                        {isChefe && mostrarPrecosListaCompras && (
+                          <TableCell className="text-right tabular-nums whitespace-nowrap align-top text-red-600">
+                            {formatCurrency(linha.total)}
+                          </TableCell>
+                        )}
                       </TableRow>
                     );
                   })
                 )}
               </TableBody>
             </Table>
+            </div>
 
             {exibirComprasHistorico.length > 0 ? (
               <Collapsible defaultOpen={false} className="group mt-8 border-t pt-6">
@@ -1206,54 +1288,83 @@ export function FornecedorDetalhe() {
                   </span>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-4">
-                  <Table>
+                  <div className="w-full rounded-md border border-border/50">
+                  <Table className="w-full table-fixed text-sm">
                     <TableHeader>
                       <TableRow>
-                        {isChefe && <TableHead className="w-10" />}
-                        <TableHead>Data</TableHead>
-                        <TableHead>Detalhe</TableHead>
-                        <TableHead className="text-right w-20 tabular-nums">Qtd</TableHead>
-                        <TableHead className="text-right w-28 tabular-nums">V. unit.</TableHead>
-                        {isChefe && <TableHead className="text-right">Total</TableHead>}
+                        {isChefe && <TableHead className="w-11" />}
+                        {isChefe && <TableHead className="w-[5.5rem]" />}
+                        <TableHead className="w-[5.25rem] whitespace-nowrap">Data</TableHead>
+                        <TableHead className="min-w-0">Detalhe</TableHead>
+                        <TableHead className="w-[4.5rem] text-right tabular-nums">Qtd</TableHead>
+                        {mostrarPrecosListaCompras && (
+                          <TableHead className="w-[5.25rem] text-right tabular-nums whitespace-nowrap">Vlr uni</TableHead>
+                        )}
+                        {isChefe && mostrarPrecosListaCompras && (
+                          <TableHead className="w-[5.5rem] text-right tabular-nums whitespace-nowrap">Vlr total</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {gruposComprasHistorico.map((g) => {
+                        const qtdHistGrupo = g.lines.reduce((s, l) => {
+                          const q = l.quantidade;
+                          if (q == null || Number.isNaN(Number(q))) return s;
+                          return s + Number(q);
+                        }, 0);
                         if (g.ordemId != null) {
                           return (
                             <Fragment key={g.key}>
                               <TableRow>
                                 {isChefe && <TableCell className="align-top" />}
+                                {isChefe && <TableCell className="align-top" />}
                                 <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
-                                <TableCell>
-                                  <span className="inline-flex items-center gap-1.5 font-medium">
-                                    <Ban className="size-3.5 shrink-0 text-destructive" aria-hidden />
-                                    Ordem #{g.ordemId}
-                                  </span>
-                                  <span className="text-muted-foreground text-sm block">
-                                    {g.lines.length} item(ns) — cancelada
-                                  </span>
+                                <TableCell className="min-w-0 align-top">
+                                  <div className="space-y-0.5">
+                                    <span className="inline-flex items-center gap-1.5 font-medium">
+                                      <Ban className="size-3.5 shrink-0 text-destructive" aria-hidden />
+                                      Ordem #{g.ordemId}
+                                    </span>
+                                    <span className="block text-xs text-muted-foreground">{g.lines.length} item(ns) — cancelada</span>
+                                  </div>
                                 </TableCell>
-                                <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
-                                <TableCell className="text-right align-top text-muted-foreground tabular-nums">—</TableCell>
-                                {isChefe && (
-                                  <TableCell className="text-right align-top font-medium">{formatCurrency(g.totalGrupo)}</TableCell>
+                                <TableCell className="text-right align-top tabular-nums text-muted-foreground">
+                                  {qtdHistGrupo > 0 ? qtdHistGrupo : "—"}
+                                </TableCell>
+                                {mostrarPrecosListaCompras && (
+                                  <TableCell className="text-right align-top tabular-nums text-muted-foreground">—</TableCell>
+                                )}
+                                {isChefe && mostrarPrecosListaCompras && (
+                                  <TableCell className="text-right align-top font-medium tabular-nums">
+                                    {formatCurrency(g.totalGrupo)}
+                                  </TableCell>
                                 )}
                               </TableRow>
                               {g.lines.map((linha) => (
                                 <TableRow key={linha.id} className="bg-muted/15">
                                   {isChefe && <TableCell />}
+                                  {isChefe && <TableCell />}
                                   <TableCell />
-                                  <TableCell className="pl-6 text-sm text-muted-foreground">{linha.material}</TableCell>
-                                  <TableCell className="text-right text-sm tabular-nums">
+                                  <TableCell className="min-w-0">
+                                    <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground">
+                                      {linha.material}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-right tabular-nums">
                                     {linha.quantidade != null ? linha.quantidade : "—"}
                                   </TableCell>
-                                  <TableCell className="text-right text-sm tabular-nums">
-                                    {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                                      ? formatCurrency(linha.preco_unitario)
-                                      : "—"}
-                                  </TableCell>
-                                  {isChefe && <TableCell className="text-right text-sm">{formatCurrency(linha.total)}</TableCell>}
+                                  {mostrarPrecosListaCompras && (
+                                    <TableCell className="text-right tabular-nums whitespace-nowrap">
+                                      {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                                        ? formatCurrency(linha.preco_unitario)
+                                        : "—"}
+                                    </TableCell>
+                                  )}
+                                  {isChefe && mostrarPrecosListaCompras && (
+                                    <TableCell className="text-right tabular-nums whitespace-nowrap text-red-600">
+                                      {formatCurrency(linha.total)}
+                                    </TableCell>
+                                  )}
                                 </TableRow>
                               ))}
                             </Fragment>
@@ -1263,35 +1374,46 @@ export function FornecedorDetalhe() {
                         return (
                           <TableRow key={g.key}>
                             {isChefe && <TableCell />}
-                            <TableCell className="text-muted-foreground">{formatDateOnly(linha.data)}</TableCell>
-                            <TableCell>{linha.material}</TableCell>
-                            <TableCell className="text-right tabular-nums">{linha.quantidade != null ? linha.quantidade : "—"}</TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                                ? formatCurrency(linha.preco_unitario)
-                                : "—"}
+                            {isChefe && <TableCell />}
+                            <TableCell className="text-muted-foreground align-top">{formatDateOnly(linha.data)}</TableCell>
+                            <TableCell className="min-w-0 align-top break-words">{linha.material}</TableCell>
+                            <TableCell className="text-right tabular-nums align-top">
+                              {linha.quantidade != null ? linha.quantidade : "—"}
                             </TableCell>
-                            {isChefe && <TableCell className="text-right">{formatCurrency(linha.total)}</TableCell>}
+                            {mostrarPrecosListaCompras && (
+                              <TableCell className="text-right tabular-nums whitespace-nowrap align-top">
+                                {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
+                                  ? formatCurrency(linha.preco_unitario)
+                                  : "—"}
+                              </TableCell>
+                            )}
+                            {isChefe && mostrarPrecosListaCompras && (
+                              <TableCell className="text-right tabular-nums whitespace-nowrap align-top text-red-600">
+                                {formatCurrency(linha.total)}
+                              </TableCell>
+                            )}
                           </TableRow>
                         );
                       })}
                     </TableBody>
                   </Table>
+                  </div>
                 </CollapsibleContent>
               </Collapsible>
             ) : null}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Pagamentos{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <div className="w-full overflow-x-auto rounded-md border border-border/50">
+            <Table className="min-w-[520px] text-sm">
               <TableHeader>
                 <TableRow>
                   <TableHead>Data</TableHead>
-                  {isChefe && <TableHead className="text-right">Valor</TableHead>}
+                  {isChefe && <TableHead className="min-w-[8.5rem] text-right whitespace-nowrap">Valor</TableHead>}
                   {isChefe && <TableHead>Forma de pagamento</TableHead>}
                   {isChefe && <TableHead>Conta</TableHead>}
                   {isChefe && <TableHead className="w-[100px] text-right">Ações</TableHead>}
@@ -1310,7 +1432,11 @@ export function FornecedorDetalhe() {
                       <TableCell className="text-muted-foreground">
                         {formatDateOnly(p.data)}
                       </TableCell>
-                      {isChefe && <TableCell className="text-right text-green-600">{formatCurrency(p.valor)}</TableCell>}
+                      {isChefe && (
+                        <TableCell className="text-right text-green-600 whitespace-nowrap tabular-nums">
+                          {formatCurrency(p.valor)}
+                        </TableCell>
+                      )}
                       {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.conta_nome || "-"}</TableCell>}
                       {isChefe && (
@@ -1337,6 +1463,7 @@ export function FornecedorDetalhe() {
                 )}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -1354,7 +1481,7 @@ export function FornecedorDetalhe() {
         }
         confirmLabel="Confirmar exclusão"
         requireMotivo
-        onVerified={async ({ motivo }) => {
+        onVerified={async ({ motivo, password: _password, observacao: _observacao }) => {
           if (!pagamentoExcluir) return;
           const pid = pagamentoExcluir.id;
           setPagamentoExcluir(null);
