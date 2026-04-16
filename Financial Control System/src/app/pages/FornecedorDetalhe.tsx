@@ -1,5 +1,5 @@
 import React, { Fragment, useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useParams } from "react-router";
 import { api } from "../lib/api";
 import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
@@ -115,6 +115,7 @@ interface FornecedorDetalheData {
 
 export function FornecedorDetalhe() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
   const [data, setData] = useState<FornecedorDetalheData | null>(null);
@@ -186,7 +187,7 @@ export function FornecedorDetalhe() {
 
   useEffect(() => {
     load();
-  }, [id]);
+  }, [id, location.key]);
 
   const loadMateriais = () => {
     if (!id) return;

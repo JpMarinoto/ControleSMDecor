@@ -595,6 +595,8 @@ export const api = {
       material?: number;
       fornecedor?: number;
       produto?: number;
+      /** Desambigua quando existem material e produto com o mesmo ID de linha. */
+      tipo?: 'material' | 'produto';
       password: string;
       observacao: string;
     }
@@ -607,11 +609,19 @@ export const api = {
     return readJsonOrThrow(response);
   },
 
-  deleteCompra: async (id: string, payload: { password: string; observacao: string }) => {
+  deleteCompra: async (
+    id: string,
+    payload: { password: string; observacao: string; tipo?: 'material' | 'produto' }
+  ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ motivo: payload.observacao, observacao: payload.observacao, password: payload.password }),
+      body: JSON.stringify({
+        motivo: payload.observacao,
+        observacao: payload.observacao,
+        password: payload.password,
+        ...(payload.tipo ? { tipo: payload.tipo } : {}),
+      }),
     });
     if (response.status === 204) return;
     const body = await response.json().catch(() => ({}));

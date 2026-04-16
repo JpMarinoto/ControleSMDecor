@@ -6,7 +6,7 @@ from django.test import TestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from financeiro.models import Cliente, Produto, Venda, Fornecedor, Material, OrdemCompra
-from financeiro.views_api import VendaListCreate, VendaDetail, CompraListCreate, CompraDetail
+from financeiro.views_api import VendaListCreate, VendaDetail, CompraListCreate, CompraDetail, FornecedorDetalhe
 from rest_framework import status
 
 
@@ -232,3 +232,53 @@ class CompraDataApiTest(TestCase):
         r2 = CompraDetail.as_view()(factory.get(f"/api/compras/{oid}/"), pk=oid)
         self.assertEqual(r2.status_code, 200)
         self.assertTrue(r2.data.get("cancelada"))
+
+    def test_put_item_atualiza_saldo_fornecedor(self):
+        """Alterar preço da linha reflete no saldo_devedor do fornecedor (API detalhe)."""
+        factory = APIRequestFactory()
+        body_create = {
+            "fornecedor_id": self.fornecedor.id,
+            "itens": [
+                {
+                    "tipo": "material",
+                    "material": self.material.id,
+                    "quantidade": 2,
+                    "preco_no_dia": "10.00",
+                }
+            ],
+            "data": "2025-05-01",
+        }
+        r0 = CompraListCreate.as_view()(
+            factory.post(
+                "/api/compras/",
+                data=json.dumps(body_create),
+                content_type="application/json",
+            )
+        )
+        self.assertEqual(r0.status_code, 201)
+        item_id = r0.data["itens"][0]["id"]
+        self.assertEqual(float(self.fornecedor.saldo_devedor), 20.0)
+
+        req_put = factory.put(
+            f"/api/compras/{item_id}/",
+            data=json.dumps(
+                {
+                    "preco_no_dia": "15.00",
+                    "tipo": "material",
+                    "password": "senha_segura_123",
+                    "observacao": "Ajuste de preço em teste automatizado",
+                }
+            ),
+            content_type="application/json",
+        )
+        force_authenticate(req_put, user=self.user)
+        r1 = CompraDetail.as_view()(req_put, pk=item_id)
+        self.assertEqual(r1.status_code, 200)
+        self.fornecedor.refresh_from_db()
+        self.assertEqual(float(self.fornecedor.saldo_devedor), 30.0)
+
+        req_fd = factory.get(f"/api/fornecedores/{self.fornecedor.id}/")
+        force_authenticate(req_fd, user=self.user)
+        rfd = FornecedorDetalhe.as_view()(req_fd, pk=self.fornecedor.id)
+        self.assertEqual(rfd.status_code, 200)
+        self.assertEqual(float(rfd.data["saldo_devedor"]), 30.0)

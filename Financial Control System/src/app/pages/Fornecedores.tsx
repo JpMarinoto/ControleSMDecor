@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { api } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -18,6 +18,7 @@ interface Fornecedor {
 }
 
 export function FornecedoresList() {
+  const location = useLocation();
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
@@ -28,7 +29,7 @@ export function FornecedoresList() {
       .then((data) => setFornecedores(Array.isArray(data) ? data : []))
       .catch(() => setFornecedores([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [location.key]);
 
   const fmt = useMemo(
     () => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }),

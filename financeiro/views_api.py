@@ -156,6 +156,41 @@ def _set_ultima_alteracao_ordem(ordem_pk, observacao):
     )
 
 
+def _resolve_compra_linha_por_pk(pk, tipo_hint=None):
+    """
+    CompraMaterial e CompraProduto têm sequências de ID independentes; o mesmo número pode
+    existir nas duas tabelas. tipo_hint: 'material', 'produto' ou None.
+    Retorna (obj, kind) com kind em {'material','produto'}, (None, None) se não existir,
+    ou (None, 'ambiguous') se existirem os dois e tipo_hint não desambiguar.
+    """
+    try:
+        pk_int = int(pk)
+    except (ValueError, TypeError):
+        return None, None
+    mat = (
+        CompraMaterial.objects.select_related('fornecedor', 'material', 'ordem')
+        .filter(pk=pk_int)
+        .first()
+    )
+    prod = (
+        CompraProduto.objects.select_related('fornecedor', 'produto', 'ordem')
+        .filter(pk=pk_int)
+        .first()
+    )
+    if mat and prod:
+        t = (tipo_hint or '').strip().lower()
+        if t == 'produto':
+            return prod, 'produto'
+        if t == 'material':
+            return mat, 'material'
+        return None, 'ambiguous'
+    if mat:
+        return mat, 'material'
+    if prod:
+        return prod, 'produto'
+    return None, None
+
+
 def _produto_elegivel_compra_pronta(produto):
     """Linha de ordem de compra como produto pronto: não fabricado e (revenda ou fornecedor cadastrado)."""
     if not produto.ativo:
@@ -1637,19 +1672,18 @@ class CompraDetail(APIView):
         if isinstance(pk, str) and pk.startswith('item-'):
             pk = pk.replace('item-', '')
             pk = pk.replace('mat-', '').replace('prod-', '')
-        obj = None
-        kind = None
-        try:
-            obj = CompraMaterial.objects.select_related('fornecedor', 'material', 'ordem').get(pk=pk)
-            kind = 'material'
-        except (CompraMaterial.DoesNotExist, ValueError):
-            obj = None
+        tipo_hint = request.data.get('tipo') if isinstance(request.data, dict) else None
+        obj, kind = _resolve_compra_linha_por_pk(pk, tipo_hint)
+        if kind == 'ambiguous':
+            return Response(
+                {
+                    'detail': 'Existem uma linha de material e uma de produto com o mesmo ID numérico. Envie "tipo": "material" ou "produto".',
+                    'tipo': ['Obrigatório para desambiguar esta linha.'],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if obj is None:
-            try:
-                obj = CompraProduto.objects.select_related('fornecedor', 'produto', 'ordem').get(pk=pk)
-                kind = 'produto'
-            except (CompraProduto.DoesNotExist, ValueError):
-                return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         _, observacao, err = _exigir_senha_e_observacao_compra(request)
@@ -1667,7 +1701,6 @@ class CompraDetail(APIView):
                 pass
         if request.data.get('preco_no_dia') is not None:
             try:
-                from decimal import Decimal
                 obj.preco_no_dia = Decimal(str(request.data.get('preco_no_dia')).replace(',', '.'))
             except (ValueError, TypeError):
                 pass
@@ -1749,31 +1782,18 @@ class CompraDetail(APIView):
                 f"Ordem #{pk} cancelada (permanece no histórico). Motivo: {motivo}. Obs.: {observacao}",
             )
             return Response(status=status.HTTP_204_NO_CONTENT)
-        try:
-            obj = CompraMaterial.objects.select_related('ordem').get(pk=pk_int)
-        except CompraMaterial.DoesNotExist:
-            obj = None
+        tipo_hint = request.data.get('tipo') if isinstance(request.data, dict) else None
+        obj, kind = _resolve_compra_linha_por_pk(pk_int, tipo_hint)
+        if kind == 'ambiguous':
+            return Response(
+                {
+                    'detail': 'Existem linha de material e de produto com o mesmo ID numérico. Envie "tipo": "material" ou "produto".',
+                    'tipo': ['Obrigatório para desambiguar.'],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if obj is None:
-            try:
-                objp = CompraProduto.objects.select_related('ordem').get(pk=pk_int)
-            except CompraProduto.DoesNotExist:
-                return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-            if objp.ordem_id and objp.ordem.cancelada:
-                return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
-            _, observacao, err = _exigir_senha_e_observacao_compra(request)
-            if err:
-                return err
-            motivo, merr = _exigir_motivo_exclusao(request)
-            if merr:
-                return merr
-            ordem = objp.ordem
-            if ordem:
-                _set_ultima_alteracao_ordem(ordem.pk, observacao)
-            objp.delete()
-            if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
-                ordem.delete()
-            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         _, observacao, err = _exigir_senha_e_observacao_compra(request)
@@ -1785,6 +1805,12 @@ class CompraDetail(APIView):
         ordem = obj.ordem
         if ordem:
             _set_ultima_alteracao_ordem(ordem.pk, observacao)
+        if kind == 'produto':
+            obj.delete()
+            if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
+                ordem.delete()
+            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
+            return Response(status=status.HTTP_204_NO_CONTENT)
         obj.delete()
         if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
             ordem.delete()

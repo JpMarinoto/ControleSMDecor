@@ -180,7 +180,10 @@ export function Compra() {
     onConfirm: () => void;
   } | null>(null);
   const [excluirCompraOpen, setExcluirCompraOpen] = useState(false);
-  const [excluirItemCompraId, setExcluirItemCompraId] = useState<string | number | null>(null);
+  const [excluirItemCompra, setExcluirItemCompra] = useState<{
+    id: string | number;
+    tipo: 'material' | 'produto';
+  } | null>(null);
   const [printPreview, setPrintPreview] = useState<{
     html: string;
     titulo: string;
@@ -208,6 +211,7 @@ export function Compra() {
     detId: string | null;
     qtd: number;
     preco: number;
+    tipo: 'material' | 'produto';
   } | null>(null);
   const [dataCompraSenhaOpen, setDataCompraSenhaOpen] = useState(false);
   const pendingDataCompraRef = useRef<{ ordemId: string; data: string } | null>(null);
@@ -379,9 +383,18 @@ export function Compra() {
     });
   };
 
-  const handleDeleteCompra = async (id: string | number, password: string, observacao: string) => {
+  const handleDeleteCompra = async (
+    id: string | number,
+    password: string,
+    observacao: string,
+    tipoLinha?: 'material' | 'produto',
+  ) => {
     try {
-      await api.deleteCompra(String(id), { password, observacao });
+      await api.deleteCompra(String(id), {
+        password,
+        observacao,
+        ...(tipoLinha ? { tipo: tipoLinha } : {}),
+      });
       toast.success("Item excluído");
       await loadData();
       setDetailCompra(null);
@@ -457,7 +470,8 @@ export function Compra() {
     const itemId = String(editingItem.id);
     const ordemIdRef = editingItem.ordemId;
     const detId = detailCompra ? String(detailCompra.id) : null;
-    pendingEditItemRef.current = { itemId, ordemIdRef, detId, qtd, preco };
+    const tipo: 'material' | 'produto' = editingItem.tipo === 'produto' ? 'produto' : 'material';
+    pendingEditItemRef.current = { itemId, ordemIdRef, detId, qtd, preco, tipo };
     setEditItemSenhaOpen(true);
   };
 
@@ -1421,7 +1435,12 @@ export function Compra() {
                               className="h-8 w-8 text-destructive"
                               title="Excluir"
                               disabled={!!detailCompra.cancelada}
-                              onClick={() => setExcluirItemCompraId(item.id)}
+                              onClick={() =>
+                                setExcluirItemCompra({
+                                  id: item.id,
+                                  tipo: item.tipo === 'produto' ? 'produto' : 'material',
+                                })
+                              }
                             >
                               <Trash2 className="size-4" />
                             </Button>
@@ -1621,9 +1640,9 @@ export function Compra() {
       />
 
       <ConfirmacaoComSenhaDialog
-        open={excluirItemCompraId != null}
+        open={excluirItemCompra != null}
         onOpenChange={(o) => {
-          if (!o) setExcluirItemCompraId(null);
+          if (!o) setExcluirItemCompra(null);
         }}
         title="Excluir item da ordem"
         description="O valor deixará de contar nas compras do fornecedor. Informe o motivo e confirme com sua senha."
@@ -1631,10 +1650,10 @@ export function Compra() {
         requireObservacao
         observacaoLabel="Motivo da exclusão"
         onVerified={async ({ password, observacao }) => {
-          if (excluirItemCompraId == null) return;
-          const idDel = excluirItemCompraId;
-          setExcluirItemCompraId(null);
-          await handleDeleteCompra(idDel, password, observacao);
+          if (excluirItemCompra == null) return;
+          const { id: idDel, tipo } = excluirItemCompra;
+          setExcluirItemCompra(null);
+          await handleDeleteCompra(idDel, password, observacao, tipo);
         }}
       />
 
@@ -1697,6 +1716,7 @@ export function Compra() {
             await api.updateCompra(p.itemId, {
               quantidade: p.qtd,
               preco_no_dia: p.preco,
+              tipo: p.tipo,
               password,
               observacao,
             });
