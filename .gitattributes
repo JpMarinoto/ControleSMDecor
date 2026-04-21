@@ -1,0 +1,60 @@
+# Normaliza line endings: sempre LF no repositório.
+# Isso evita commits "fantasmas" por CRLF/LF no Windows e garante
+# que o código funcione corretamente no deploy (VPS Linux).
+
+* text=auto eol=lf
+
+# Código-fonte (frontend)
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.scss  text eol=lf
+*.html  text eol=lf
+*.svg   text eol=lf
+
+# Código-fonte (backend Python / Django)
+*.py    text eol=lf
+*.pyi   text eol=lf
+
+# Configuração / documentação
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.ini   text eol=lf
+*.cfg   text eol=lf
+*.env.example text eol=lf
+.gitignore    text eol=lf
+.gitattributes text eol=lf
+
+# Scripts de deploy (Linux / systemd)
+*.sh      text eol=lf
+*.service text eol=lf
+*.timer   text eol=lf
+
+# Scripts do Windows mantêm CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários — não aplicar conversão
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.otf   binary
+*.sqlite3 binary
