@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import { api } from "../lib/api";
 
 export interface User {
@@ -18,6 +19,18 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
+
+/** Encerra a sessão automaticamente após N minutos sem atividade do usuário. */
+const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+/** Eventos que contam como "atividade" para reiniciar o cronômetro de inatividade. */
+const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
+  "mousemove",
+  "mousedown",
+  "keydown",
+  "touchstart",
+  "scroll",
+  "wheel",
+];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -66,6 +79,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
   }, []);
+
+  /**
+   * Auto-logout por inatividade: enquanto há um usuário logado, reinicia um cronômetro a cada
+   * evento de atividade (mouse, teclado, toque, scroll). Se passar IDLE_TIMEOUT_MS sem atividade,
+   * encerra a sessão e mostra um aviso. RequireAuth redireciona para /login automaticamente.
+   */
+  const idleTimerRef = useRef<number | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+
+    const limparTimer = () => {
+      if (idleTimerRef.current !== null) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+
+    const dispararLogoutPorInatividade = () => {
+      limparTimer();
+      toast.info("Sessão encerrada por inatividade (20 minutos sem atividade).");
+      void logout();
+    };
+
+    const reiniciarTimer = () => {
+      lastActivityRef.current = Date.now();
+      limparTimer();
+      idleTimerRef.current = window.setTimeout(dispararLogoutPorInatividade, IDLE_TIMEOUT_MS);
+    };
+
+    /** Throttle leve: ignora eventos disparados em menos de 500ms para não recriar o timer 60x/s. */
+    const onActivity = () => {
+      const agora = Date.now();
+      if (agora - lastActivityRef.current < 500) return;
+      reiniciarTimer();
+    };
+
+    reiniciarTimer();
+    for (const ev of ACTIVITY_EVENTS) {
+      window.addEventListener(ev, onActivity, { passive: true });
+    }
+
+    return () => {
+      limparTimer();
+      for (const ev of ACTIVITY_EVENTS) {
+        window.removeEventListener(ev, onActivity);
+      }
+    };
+  }, [user, logout]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, refetch }}>

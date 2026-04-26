@@ -102,6 +102,24 @@ export interface PrecificacaoShopeeApiRow {
   linhas: unknown[];
 }
 
+/** Resposta da API `/precificacoes/tiktok/` (precificação TikTok Shop salva no SQLite). */
+export interface PrecificacaoTiktokApiRow {
+  id: number;
+  nome: string;
+  dataIso: string;
+  mesReferencia: string;
+  nfPercent: string;
+  impostoPercent: string;
+  afiliadoPercent: string;
+  comissaoPercent: string;
+  comissaoCap: string;
+  tarifaItem: string;
+  ptePercent: string;
+  pteCap: string;
+  participarPte: boolean;
+  linhas: unknown[];
+}
+
 export const api = {
   // Auth
   authLogin: async (username: string, password: string) => {
@@ -1281,5 +1299,71 @@ export const api = {
       body: JSON.stringify(body),
     });
     return readJsonOrThrow(response) as Promise<PrecificacaoShopeeApiRow>;
+  },
+
+  deletePrecificacaoShopee: async (id: number | string) => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/${id}/`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!response.ok && response.status !== 204) {
+      const text = await response.text();
+      let msg = text;
+      try {
+        const j = JSON.parse(text) as unknown;
+        msg = messageFromApiError(j) || text;
+      } catch {
+        /* usar texto cru */
+      }
+      throw new Error(msg || `HTTP ${response.status}`);
+    }
+  },
+
+  getPrecificacoesTiktok: async (): Promise<PrecificacaoTiktokApiRow[]> => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/`, {
+      headers: authHeaders(),
+    });
+    const data = await readJsonOrThrow(response);
+    return Array.isArray(data) ? (data as PrecificacaoTiktokApiRow[]) : [];
+  },
+
+  savePrecificacaoTiktok: async (body: {
+    nome: string;
+    mesReferencia: string;
+    nfPercent: string;
+    impostoPercent: string;
+    afiliadoPercent: string;
+    comissaoPercent: string;
+    comissaoCap: string;
+    tarifaItem: string;
+    ptePercent: string;
+    pteCap: string;
+    participarPte: boolean;
+    linhas: unknown[];
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response) as Promise<PrecificacaoTiktokApiRow>;
+  },
+
+  deletePrecificacaoTiktok: async (id: number | string) => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/${id}/`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!response.ok && response.status !== 204) {
+      const text = await response.text();
+      let msg = text;
+      try {
+        const j = JSON.parse(text) as unknown;
+        msg = messageFromApiError(j) || text;
+      } catch {
+        /* usar texto cru */
+      }
+      throw new Error(msg || `HTTP ${response.status}`);
+    }
   },
 };

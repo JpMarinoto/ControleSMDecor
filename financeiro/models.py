@@ -252,6 +252,41 @@ class PrecificacaoShopee(models.Model):
         return self.nome
 
 
+class PrecificacaoTiktok(models.Model):
+    """Planilha de precificação TikTok Shop (chefe); persiste no banco junto da Shopee.
+
+    Taxas TikTok Shop Brasil (a partir de 06/02/2026):
+      - Comissão da plataforma: 6% (cap R$ 50/produto)
+      - Tarifa fixa por item: R$ 4
+      - Programa de Taxas de Envio (PTE): 6% (cap R$ 50/produto)
+      - Comissão de afiliado: definida pelo vendedor (geralmente 8–15%)
+    Os valores ficam configuráveis no front (caso o TikTok Shop atualize).
+    """
+
+    nome = models.CharField(max_length=200, unique=True)
+    mes_referencia = models.CharField(max_length=7, blank=True, default="")
+    nf_percent = models.CharField(max_length=20, default="70")
+    imposto_percent = models.CharField(max_length=20, default="10")
+    afiliado_percent = models.CharField(max_length=20, default="0")
+    comissao_percent = models.CharField(max_length=20, default="6")
+    comissao_cap = models.CharField(max_length=20, default="50")
+    tarifa_item = models.CharField(max_length=20, default="4")
+    pte_percent = models.CharField(max_length=20, default="6")
+    pte_cap = models.CharField(max_length=20, default="50")
+    participar_pte = models.BooleanField(default=True)
+    linhas = models.JSONField(default=list)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-atualizado_em"]
+        verbose_name = "Precificação TikTok Shop"
+        verbose_name_plural = "Precificações TikTok Shop"
+
+    def __str__(self):
+        return self.nome
+
+
 # ==========================================
 # 4. TRANSAÇÕES DE COMPRA (FORNECEDORES)
 # ==========================================

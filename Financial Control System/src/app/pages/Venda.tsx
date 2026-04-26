@@ -10,7 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
-import { ScrollArea } from "../components/ui/scroll-area";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1013,78 +1012,76 @@ export function Venda() {
                           placeholder="Pesquisar produto..."
                         />
                       </div>
-                      <CommandList>
+                      <CommandList className="max-h-[320px]">
                         <CommandEmpty>Nenhum produto encontrado.</CommandEmpty>
-                        <ScrollArea className="h-[320px]">
-                          {produtos.length === 0 ? (
-                            <CommandGroup heading="Produtos">
-                              <CommandItem disabled>Nenhum produto cadastrado</CommandItem>
-                            </CommandGroup>
-                          ) : produtoPickerQuery.trim() ? (
-                            produtosFiltradosAgrupados.map(([cat, list]) => (
-                              <CommandGroup key={cat} heading={cat}>
-                                {list.map((p: any) => (
-                                  <CommandItem
-                                    key={p.id}
-                                    value={p.nome}
-                                    onSelect={() => {
-                                      setProdutoId(String(p.id));
-                                      setProdutoPickerOpen(false);
-                                    }}
-                                  >
-                                    {p.nome}
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            ))
-                          ) : (
-                            produtosAgrupados.map(([cat, list]) => {
-                              const isOpen = produtoPickerExpanded.has(cat);
-                              return (
-                                <Collapsible
-                                  key={cat}
-                                  open={isOpen}
-                                  onOpenChange={(open) => {
-                                    setProdutoPickerExpanded((prev) => {
-                                      const next = new Set(prev);
-                                      if (open) next.add(cat);
-                                      else next.delete(cat);
-                                      return next;
-                                    });
+                        {produtos.length === 0 ? (
+                          <CommandGroup heading="Produtos">
+                            <CommandItem disabled>Nenhum produto cadastrado</CommandItem>
+                          </CommandGroup>
+                        ) : produtoPickerQuery.trim() ? (
+                          produtosFiltradosAgrupados.map(([cat, list]) => (
+                            <CommandGroup key={cat} heading={cat}>
+                              {list.map((p: any) => (
+                                <CommandItem
+                                  key={p.id}
+                                  value={p.nome}
+                                  onSelect={() => {
+                                    setProdutoId(String(p.id));
+                                    setProdutoPickerOpen(false);
                                   }}
                                 >
-                                  <CollapsibleTrigger asChild>
-                                    <button
-                                      type="button"
-                                      className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold border-b hover:bg-muted/40"
-                                    >
-                                      <span className="truncate">{cat}</span>
-                                      <span className="text-xs font-normal text-muted-foreground tabular-nums">
-                                        {list.length}
-                                      </span>
-                                    </button>
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent>
-                                    <div className="py-1">
-                                      {list.map((p: any) => (
-                                        <CommandItem
-                                          key={p.id}
-                                          value={p.nome}
-                                          onSelect={() => {
-                                            setProdutoId(String(p.id));
-                                            setProdutoPickerOpen(false);
-                                          }}
-                                        >
-                                          {p.nome}
-                                        </CommandItem>
-                                      ))}
-                                    </div>
-                                  </CollapsibleContent>
-                                </Collapsible>
-                              );
-                            })
-                          )}
-                        </ScrollArea>
+                                  {p.nome}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          ))
+                        ) : (
+                          produtosAgrupados.map(([cat, list]) => {
+                            const isOpen = produtoPickerExpanded.has(cat);
+                            return (
+                              <Collapsible
+                                key={cat}
+                                open={isOpen}
+                                onOpenChange={(open) => {
+                                  setProdutoPickerExpanded((prev) => {
+                                    const next = new Set(prev);
+                                    if (open) next.add(cat);
+                                    else next.delete(cat);
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <CollapsibleTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold border-b hover:bg-muted/40"
+                                  >
+                                    <span className="truncate">{cat}</span>
+                                    <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                                      {list.length}
+                                    </span>
+                                  </button>
+                                </CollapsibleTrigger>
+                                <CollapsibleContent>
+                                  <div className="py-1">
+                                    {list.map((p: any) => (
+                                      <CommandItem
+                                        key={p.id}
+                                        value={p.nome}
+                                        onSelect={() => {
+                                          setProdutoId(String(p.id));
+                                          setProdutoPickerOpen(false);
+                                        }}
+                                      >
+                                        {p.nome}
+                                      </CommandItem>
+                                    ))}
+                                  </div>
+                                </CollapsibleContent>
+                              </Collapsible>
+                            );
+                          })
+                        )}
                       </CommandList>
                     </Command>
                   </PopoverContent>
@@ -1609,84 +1606,90 @@ export function Venda() {
                             placeholder="Pesquisar produto..."
                           />
                         </div>
-                        <CommandList>
+                        <CommandList className="max-h-[320px]">
                           <CommandEmpty>Nenhum produto encontrado.</CommandEmpty>
-                          <ScrollArea className="h-[320px]">
-                            {addItemPickerQuery.trim() ? (
-                              addItemFiltradosAgrupados.map(([cat, list]) => (
-                                <CommandGroup key={cat} heading={cat}>
-                                  {list.map((p: any) => (
-                                    <CommandItem
-                                      key={p.id}
-                                      value={p.nome}
-                                      onSelect={() => {
-                                        setAddItemProdutoId(String(p.id));
-                                        setAddItemPickerOpen(false);
-                                      }}
-                                    >
-                                      <span className="truncate">{p.nome}</span>
-                                      {isChefe && (
-                                        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                                          {formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}
-                                        </span>
-                                      )}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              ))
-                            ) : (
-                              produtosAgrupados.map(([cat, list]) => {
-                                const isOpen = addItemPickerExpanded.has(cat);
-                                return (
-                                  <Collapsible
-                                    key={cat}
-                                    open={isOpen}
-                                    onOpenChange={(open) => {
-                                      setAddItemPickerExpanded((prev) => {
-                                        const next = new Set(prev);
-                                        if (open) next.add(cat);
-                                        else next.delete(cat);
-                                        return next;
-                                      });
+                          {addItemPickerQuery.trim() ? (
+                            addItemFiltradosAgrupados.map(([cat, list]) => (
+                              <CommandGroup key={cat} heading={cat}>
+                                {list.map((p: any) => (
+                                  <CommandItem
+                                    key={p.id}
+                                    value={p.nome}
+                                    onSelect={() => {
+                                      setAddItemProdutoId(String(p.id));
+                                      const precoProd = Number(p.preco_venda ?? p.precoInicial ?? 0);
+                                      if (isChefe && precoProd > 0) {
+                                        setAddItemPreco(precoProd.toFixed(2).replace(".", ","));
+                                      }
+                                      setAddItemPickerOpen(false);
                                     }}
                                   >
-                                    <CollapsibleTrigger asChild>
-                                      <button
-                                        type="button"
-                                        className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold border-b hover:bg-muted/40"
-                                      >
-                                        <span className="truncate">{cat}</span>
-                                        <span className="text-xs font-normal text-muted-foreground tabular-nums">
-                                          {list.length}
-                                        </span>
-                                      </button>
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent>
-                                      <div className="py-1">
-                                        {list.map((p: any) => (
-                                          <CommandItem
-                                            key={p.id}
-                                            value={p.nome}
-                                            onSelect={() => {
-                                              setAddItemProdutoId(String(p.id));
-                                              setAddItemPickerOpen(false);
-                                            }}
-                                          >
-                                            <span className="truncate">{p.nome}</span>
-                                            {isChefe && (
-                                              <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                                                {formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}
-                                              </span>
-                                            )}
-                                          </CommandItem>
-                                        ))}
-                                      </div>
-                                    </CollapsibleContent>
-                                  </Collapsible>
-                                );
-                              })
-                            )}
-                          </ScrollArea>
+                                    <span className="truncate">{p.nome}</span>
+                                    {isChefe && (
+                                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                        {formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}
+                                      </span>
+                                    )}
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            ))
+                          ) : (
+                            produtosAgrupados.map(([cat, list]) => {
+                              const isOpen = addItemPickerExpanded.has(cat);
+                              return (
+                                <Collapsible
+                                  key={cat}
+                                  open={isOpen}
+                                  onOpenChange={(open) => {
+                                    setAddItemPickerExpanded((prev) => {
+                                      const next = new Set(prev);
+                                      if (open) next.add(cat);
+                                      else next.delete(cat);
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  <CollapsibleTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold border-b hover:bg-muted/40"
+                                    >
+                                      <span className="truncate">{cat}</span>
+                                      <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                                        {list.length}
+                                      </span>
+                                    </button>
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent>
+                                    <div className="py-1">
+                                      {list.map((p: any) => (
+                                        <CommandItem
+                                          key={p.id}
+                                          value={p.nome}
+                                          onSelect={() => {
+                                            setAddItemProdutoId(String(p.id));
+                                            const precoProd = Number(p.preco_venda ?? p.precoInicial ?? 0);
+                                            if (isChefe && precoProd > 0) {
+                                              setAddItemPreco(precoProd.toFixed(2).replace(".", ","));
+                                            }
+                                            setAddItemPickerOpen(false);
+                                          }}
+                                        >
+                                          <span className="truncate">{p.nome}</span>
+                                          {isChefe && (
+                                            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                                              {formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}
+                                            </span>
+                                          )}
+                                        </CommandItem>
+                                      ))}
+                                    </div>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              );
+                            })
+                          )}
                         </CommandList>
                       </Command>
                     </PopoverContent>

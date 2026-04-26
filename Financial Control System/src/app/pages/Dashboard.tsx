@@ -11,13 +11,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Input } from "../components/ui/input";
 import { TrendingUp, TrendingDown, Wallet, Receipt, Calendar, DollarSign, Users, Package as PackageIcon, ShoppingCart, Eye, EyeOff } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { BarChart, Bar, LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid, Legend } from "recharts";
 import { motion } from "motion/react";
 
-type PeriodoEntradaSaida = "dia" | "semana" | "mes";
-type PeriodoResumo = "tudo" | "dia" | "semana" | "mes";
+type PeriodoEntradaSaida = "dia" | "semana" | "mes" | "personalizado";
+type PeriodoResumo = "tudo" | "dia" | "semana" | "mes" | "personalizado";
+
+/** Retorna a data de hoje no formato YYYY-MM-DD (sem time-zone). */
+function hojeKey(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString().split("T")[0];
+}
 
 /** Recharts: evita cinza fixo (#e5e7eb / #ccc); segue --border e --muted-foreground do tema. */
 const chartSurfaceClass =
@@ -130,7 +138,15 @@ function normalizarContas(res: unknown): { id: number; nome: string; saldo_atual
 /** Dashboard do chefe: finanças, a receber, a pagar, diário, transações, etc. */
 function DashboardChefe() {
   const [periodoEntradaSaida, setPeriodoEntradaSaida] = useState<PeriodoEntradaSaida>("semana");
+  const [rangeEntradaSaida, setRangeEntradaSaida] = useState<{ inicio: string; fim: string }>(() => {
+    const hoje = hojeKey();
+    return { inicio: hoje, fim: hoje };
+  });
   const [periodoResumo, setPeriodoResumo] = useState<PeriodoResumo>("tudo");
+  const [rangeResumo, setRangeResumo] = useState<{ inicio: string; fim: string }>(() => {
+    const hoje = hojeKey();
+    return { inicio: hoje, fim: hoje };
+  });
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [fornecedores, setFornecedores] = useState<any[]>([]);
@@ -215,10 +231,10 @@ function DashboardChefe() {
     if (periodo === "tudo") return txs;
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
-    const hojeKey = hoje.toISOString().split("T")[0];
+    const hojeStr = hoje.toISOString().split("T")[0];
 
     if (periodo === "dia") {
-      return txs.filter((t) => t.date === hojeKey);
+      return txs.filter((t) => t.date === hojeStr);
     }
 
     if (periodo === "semana") {
@@ -230,6 +246,13 @@ function DashboardChefe() {
         const d = new Date(t.date);
         return d >= semanaInicio && d <= semanaFim;
       });
+    }
+
+    if (periodo === "personalizado") {
+      let ini = rangeResumo.inicio || hojeStr;
+      let fim = rangeResumo.fim || hojeStr;
+      if (ini > fim) [ini, fim] = [fim, ini];
+      return txs.filter((t) => t.date >= ini && t.date <= fim);
     }
 
     // "mes" = últimos 30 dias
@@ -377,6 +400,36 @@ function DashboardChefe() {
       }
       return days;
     }
+    if (periodoEntradaSaida === 'personalizado') {
+      const iniStr = rangeEntradaSaida.inicio || hojeKey;
+      const fimStr = rangeEntradaSaida.fim || hojeKey;
+      let ini = new Date(iniStr + 'T00:00:00');
+      let fim = new Date(fimStr + 'T00:00:00');
+      if (ini.getTime() > fim.getTime()) {
+        const tmp = ini;
+        ini = fim;
+        fim = tmp;
+      }
+      const totalDias = Math.floor((fim.getTime() - ini.getTime()) / 86400000) + 1;
+      // Limita o número de dias renderizados no gráfico para manter a leitura legível
+      const limiteDias = Math.min(totalDias, 92);
+      const offset = totalDias > limiteDias ? totalDias - limiteDias : 0;
+      const days: { label: string; entradas: number; saidas: number }[] = [];
+      for (let i = 0; i < limiteDias; i++) {
+        const date = new Date(ini);
+        date.setDate(ini.getDate() + offset + i);
+        const dateKey = date.toISOString().split('T')[0];
+        const dayTx = transactions.filter(t => t.date === dateKey);
+        const entradas = dayTx.filter(t => t.type === 'income').reduce((s, t) => s + safeNum(t.amount), 0);
+        const saidas = dayTx.filter(t => t.type === 'expense').reduce((s, t) => s + safeNum(t.amount), 0);
+        days.push({
+          label: date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+          entradas,
+          saidas,
+        });
+      }
+      return days;
+    }
     const days: { label: string; entradas: number; saidas: number }[] = [];
     for (let i = 29; i >= 0; i--) {
       const date = new Date(hoje);
@@ -418,6 +471,9 @@ function DashboardChefe() {
     (sum, c) => sum + safeNum(c.saldo_atual ?? c.saldo),
     0
   );
+
+  // Saldo geral (mesma fórmula do card "Total"): A Receber + Caixa/Contas + Estoque - Dívidas
+  const saldoGeral = aReceber + totalSaldoContas + estoqueTotal - aPagar;
 
   const formatCurrency = React.useCallback(
     (value: number) => {
@@ -617,18 +673,38 @@ function DashboardChefe() {
           {/* Entradas x Saídas - filtro Dia / Semana / Mês */}
           <motion.div className="flex" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.25 }}>
             <Card className="dash-tone-flow flex flex-col w-full min-h-[320px]">
-              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 flex-wrap">
                 <CardTitle className="text-sm font-medium dash-title-flow">Entradas x Saídas</CardTitle>
-                <Select value={periodoEntradaSaida} onValueChange={(v) => setPeriodoEntradaSaida(v as PeriodoEntradaSaida)}>
-                  <SelectTrigger className="w-[110px] h-8 text-xs border-border bg-background/40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="dia">Dia</SelectItem>
-                    <SelectItem value="semana">Semana</SelectItem>
-                    <SelectItem value="mes">Mês</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {periodoEntradaSaida === "personalizado" && (
+                    <>
+                      <Input
+                        type="date"
+                        value={rangeEntradaSaida.inicio}
+                        onChange={(e) => setRangeEntradaSaida((r) => ({ ...r, inicio: e.target.value }))}
+                        className="h-8 text-xs w-[140px]"
+                      />
+                      <span className="text-xs text-muted-foreground">até</span>
+                      <Input
+                        type="date"
+                        value={rangeEntradaSaida.fim}
+                        onChange={(e) => setRangeEntradaSaida((r) => ({ ...r, fim: e.target.value }))}
+                        className="h-8 text-xs w-[140px]"
+                      />
+                    </>
+                  )}
+                  <Select value={periodoEntradaSaida} onValueChange={(v) => setPeriodoEntradaSaida(v as PeriodoEntradaSaida)}>
+                    <SelectTrigger className="w-[140px] h-8 text-xs border-border bg-background/40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dia">Dia</SelectItem>
+                      <SelectItem value="semana">Semana</SelectItem>
+                      <SelectItem value="mes">Mês</SelectItem>
+                      <SelectItem value="personalizado">Personalizado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent className="flex flex-col flex-1">
                 <div className="flex justify-center h-[100px]">
@@ -674,19 +750,39 @@ function DashboardChefe() {
       </div>
 
       {/* Stats Grid */}
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-sm font-medium text-muted-foreground">Totais por período</h2>
-        <Select value={periodoResumo} onValueChange={(v) => setPeriodoResumo(v as PeriodoResumo)}>
-          <SelectTrigger className="w-40 h-8 text-xs">
-            <SelectValue placeholder="Período" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="tudo">Todo período</SelectItem>
-            <SelectItem value="dia">Hoje</SelectItem>
-            <SelectItem value="semana">Última semana</SelectItem>
-            <SelectItem value="mes">Últimos 30 dias</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 flex-wrap">
+          {periodoResumo === "personalizado" && (
+            <>
+              <Input
+                type="date"
+                value={rangeResumo.inicio}
+                onChange={(e) => setRangeResumo((r) => ({ ...r, inicio: e.target.value }))}
+                className="h-8 text-xs w-[140px]"
+              />
+              <span className="text-xs text-muted-foreground">até</span>
+              <Input
+                type="date"
+                value={rangeResumo.fim}
+                onChange={(e) => setRangeResumo((r) => ({ ...r, fim: e.target.value }))}
+                className="h-8 text-xs w-[140px]"
+              />
+            </>
+          )}
+          <Select value={periodoResumo} onValueChange={(v) => setPeriodoResumo(v as PeriodoResumo)}>
+            <SelectTrigger className="w-44 h-8 text-xs">
+              <SelectValue placeholder="Período" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tudo">Todo período</SelectItem>
+              <SelectItem value="dia">Hoje</SelectItem>
+              <SelectItem value="semana">Última semana</SelectItem>
+              <SelectItem value="mes">Últimos 30 dias</SelectItem>
+              <SelectItem value="personalizado">Personalizado</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -695,14 +791,18 @@ function DashboardChefe() {
             <div>
               <StatCard
                 title="Saldo Total"
-                value={formatCurrency(balance)}
+                value={formatCurrency(saldoGeral)}
                 icon={Wallet}
                 iconColor="bg-primary/10 text-primary"
               />
             </div>
           </TooltipTrigger>
           <TooltipContent>
-            <p>Saldo Total = Receitas - Despesas (todas as transações registradas).</p>
+            <p>
+              Saldo Total = A Receber ({formatCurrency(aReceber)}) + Caixa/Contas (
+              {formatCurrency(totalSaldoContas)}) + Estoque ({formatCurrency(estoqueTotal)}) − Dívidas
+              ({formatCurrency(aPagar)}).
+            </p>
           </TooltipContent>
         </Tooltip>
         <Tooltip>

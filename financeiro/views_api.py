@@ -45,6 +45,7 @@ from .models import (
     FuncionarioPagamento,
     RegistroImpressao,
     PrecificacaoShopee,
+    PrecificacaoTiktok,
 )
 from .serializers import (
     ClienteSerializer,
@@ -3654,3 +3655,152 @@ class PrecificacaoShopeeListCreate(APIView):
             _precificacao_shopee_payload(obj),
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PrecificacaoShopeeDelete(APIView):
+    """Remove uma precificação Shopee salva (apenas chefe)."""
+
+    def delete(self, request, pk):
+        err = _requer_chefe_precificacao_shopee(request)
+        if err:
+            return err
+        try:
+            obj = PrecificacaoShopee.objects.get(pk=pk)
+        except PrecificacaoShopee.DoesNotExist:
+            return Response({"error": "Precificação não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        nome = obj.nome
+        obj_id = obj.id
+        obj.delete()
+        _api_log(
+            request,
+            "Excluir precificação Shopee",
+            "PrecificacaoShopee",
+            f"{nome} (ID {obj_id})",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _requer_chefe_precificacao_tiktok(request):
+    if not getattr(request.user, "is_authenticated", False):
+        return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        from .views_auth import _is_chefe
+
+        if not _is_chefe(request):
+            return Response(
+                {"error": "Apenas o chefe pode acessar a precificação TikTok."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    except Exception:
+        return Response(
+            {"error": "Apenas o chefe pode acessar a precificação TikTok."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def _precificacao_tiktok_payload(obj):
+    return {
+        "id": obj.id,
+        "nome": obj.nome,
+        "dataIso": obj.atualizado_em.isoformat(),
+        "mesReferencia": obj.mes_referencia or "",
+        "nfPercent": obj.nf_percent or "70",
+        "impostoPercent": obj.imposto_percent or "10",
+        "afiliadoPercent": obj.afiliado_percent or "0",
+        "comissaoPercent": obj.comissao_percent or "6",
+        "comissaoCap": obj.comissao_cap or "50",
+        "tarifaItem": obj.tarifa_item or "4",
+        "ptePercent": obj.pte_percent or "6",
+        "pteCap": obj.pte_cap or "50",
+        "participarPte": bool(obj.participar_pte),
+        "linhas": obj.linhas if isinstance(obj.linhas, list) else [],
+    }
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PrecificacaoTiktokListCreate(APIView):
+    """Lista e grava precificações TikTok Shop no SQLite."""
+
+    def get(self, request):
+        err = _requer_chefe_precificacao_tiktok(request)
+        if err:
+            return err
+        qs = PrecificacaoTiktok.objects.order_by("-atualizado_em")
+        return Response([_precificacao_tiktok_payload(p) for p in qs])
+
+    def post(self, request):
+        err = _requer_chefe_precificacao_tiktok(request)
+        if err:
+            return err
+        body = request.data or {}
+        nome = (body.get("nome") or "").strip()
+        if not nome:
+            return Response({"nome": ["Informe o nome da precificação."]}, status=status.HTTP_400_BAD_REQUEST)
+        mes_ref = (body.get("mesReferencia") or body.get("mes_referencia") or "")[:7]
+        nf_p = str(body.get("nfPercent") or body.get("nf_percent") or "70")[:20]
+        imp_p = str(body.get("impostoPercent") or body.get("imposto_percent") or "10")[:20]
+        afil_p = str(body.get("afiliadoPercent") or body.get("afiliado_percent") or "0")[:20]
+        com_p = str(body.get("comissaoPercent") or body.get("comissao_percent") or "6")[:20]
+        com_cap = str(body.get("comissaoCap") or body.get("comissao_cap") or "50")[:20]
+        tar_item = str(body.get("tarifaItem") or body.get("tarifa_item") or "4")[:20]
+        pte_p = str(body.get("ptePercent") or body.get("pte_percent") or "6")[:20]
+        pte_cap = str(body.get("pteCap") or body.get("pte_cap") or "50")[:20]
+        part_pte_raw = body.get("participarPte", body.get("participar_pte", True))
+        part_pte = bool(part_pte_raw) if not isinstance(part_pte_raw, str) else part_pte_raw.lower() not in ("0", "false", "no", "")
+        linhas = body.get("linhas")
+        if not isinstance(linhas, list):
+            linhas = []
+        if not mes_ref:
+            mes_ref = timezone.now().strftime("%Y-%m")
+        obj, created = PrecificacaoTiktok.objects.update_or_create(
+            nome=nome,
+            defaults={
+                "mes_referencia": mes_ref,
+                "nf_percent": nf_p,
+                "imposto_percent": imp_p,
+                "afiliado_percent": afil_p,
+                "comissao_percent": com_p,
+                "comissao_cap": com_cap,
+                "tarifa_item": tar_item,
+                "pte_percent": pte_p,
+                "pte_cap": pte_cap,
+                "participar_pte": part_pte,
+                "linhas": linhas,
+            },
+        )
+        _api_log(
+            request,
+            "Salvar precificação TikTok Shop",
+            "PrecificacaoTiktok",
+            f"{obj.nome} (ID {obj.id})",
+        )
+        return Response(
+            _precificacao_tiktok_payload(obj),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PrecificacaoTiktokDelete(APIView):
+    """Remove uma precificação TikTok Shop salva (apenas chefe)."""
+
+    def delete(self, request, pk):
+        err = _requer_chefe_precificacao_tiktok(request)
+        if err:
+            return err
+        try:
+            obj = PrecificacaoTiktok.objects.get(pk=pk)
+        except PrecificacaoTiktok.DoesNotExist:
+            return Response({"error": "Precificação não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        nome = obj.nome
+        obj_id = obj.id
+        obj.delete()
+        _api_log(
+            request,
+            "Excluir precificação TikTok Shop",
+            "PrecificacaoTiktok",
+            f"{nome} (ID {obj_id})",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
