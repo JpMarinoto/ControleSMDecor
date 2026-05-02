@@ -15,7 +15,13 @@ pip install -r requirements.txt
 python manage.py migrate
 python manage.py collectstatic --noinput
 cd "Financial Control System" && npm install && npm run build && cd ..
+sudo cp deploy/systemd/financeiro.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl restart financeiro
 sudo systemctl restart nginx
+
+## Estabilidade (SQLite): o unit acima usa workers=1 — não voltar ao Gunicorn default
+
+ver status
 sudo systemctl status nginx --no-pager
 

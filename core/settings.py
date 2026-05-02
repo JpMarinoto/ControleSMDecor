@@ -134,6 +134,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        # Evita falhas sob carga leve com várias requisições ao mesmo tempo (espera em lock).
+        'OPTIONS': {
+            'timeout': _env_int('SQLITE_TIMEOUT_SECONDS', 30),
+        },
     }
 }
 

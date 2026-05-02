@@ -21,6 +21,9 @@ Para desativar:
   sudo systemctl disable --now financeiro-restart.timer
 
 Nota: cada reinício interrompe pedidos HTTP durante alguns segundos. Se o
-serviço principal já tiver Restart=on-failure no unit financeiro.service,
-isso complementa (reinício preventivo), não substitui corrigir vazamentos
-de memória ou configurar workers com recycle (ex.: gunicorn --max-requests).
+serviço principal já tiver Restart=always no unit financeiro.service (ver
+README_FINANCEIRO.txt e deploy/gunicorn.conf.py), os reinícios agendados
+passam a ser opcionais — com SQLite use sempre um único worker Gunicorn.
+
+README_FINANCEIRO.txt descreve o unit financeiro.service e o porquê de
+workers=1 com SQLite.
