@@ -1,13 +1,14 @@
 import React from "react";
 import { Link } from "react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { ArrowLeftRight, ArrowDownCircle, CreditCard, Wallet, Building2, PiggyBank } from "lucide-react";
+import { ArrowLeftRight, ArrowDownCircle, CreditCard, Wallet, Building2, PiggyBank, LayoutDashboard } from "lucide-react";
 import { Transactions } from "./Transactions";
 import { Saidas } from "./Saidas";
 import { DividasGerais } from "./DividasGerais";
 import { Caixa } from "./Caixa";
 import { ContaBancoList } from "./ContaBanco";
 import { FinancasLucros } from "./FinancasLucros";
+import { FinancasResumo } from "./FinancasResumo";
 
 export function Financas() {
   return (
@@ -21,8 +22,12 @@ export function Financas() {
         </div>
       </div>
 
-      <Tabs defaultValue="transacoes" className="w-full">
+      <Tabs defaultValue="visao-geral" className="w-full">
         <TabsList className="flex w-full flex-wrap gap-1 h-auto p-1 justify-start sm:justify-center max-w-5xl">
+          <TabsTrigger value="visao-geral" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
+            <LayoutDashboard className="size-4 shrink-0" />
+            Visão geral
+          </TabsTrigger>
           <TabsTrigger value="transacoes" className="flex items-center gap-1.5 shrink-0 px-2.5 text-xs sm:text-sm">
             <ArrowLeftRight className="size-4 shrink-0" />
             Transações
@@ -48,6 +53,9 @@ export function Financas() {
             Contas banco
           </TabsTrigger>
         </TabsList>
+        <TabsContent value="visao-geral" className="mt-6">
+          <FinancasResumo />
+        </TabsContent>
         <TabsContent value="transacoes" className="mt-6">
           <Transactions />
         </TabsContent>

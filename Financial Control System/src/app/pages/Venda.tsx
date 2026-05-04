@@ -314,9 +314,15 @@ export function Venda() {
       toast.error("Quantidade deve ser válida");
       return;
     }
+    const precoStr = editPreco.trim();
+    const preco = parseFloat(precoStr.replace(",", "."));
+    if (!precoStr || isNaN(preco) || preco <= 0) {
+      toast.error("Informe um preço unitário válido");
+      return;
+    }
     setItensForm((prev) =>
       prev.map((i) =>
-        i.id === editingItemId ? { ...i, quantidade: editQtd } : i
+        i.id === editingItemId ? { ...i, quantidade: editQtd.trim(), precoUnitario: precoStr } : i
       )
     );
     setEditingItemId(null);
