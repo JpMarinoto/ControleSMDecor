@@ -1,7 +1,7 @@
 import React, { Fragment, useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import { api } from "../lib/api";
-import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime } from "../lib/format";
+import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime, formatCurrencyBrl } from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { cn } from "../components/ui/utils";
@@ -323,9 +323,6 @@ export function FornecedorDetalhe() {
     api.getContas().then((list: any) => setContas(normalizarContas(list))).catch(() => setContas([]));
   };
 
-  const formatCurrency = (n: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
-
   const getLimites = (): { inicio: number; fim: number } | null => {
     const hoje = new Date();
     hoje.setHours(23, 59, 59, 999);
@@ -391,17 +388,17 @@ export function FornecedorDetalhe() {
       q != null && !Number.isNaN(Number(q)) ? String(q) : "—";
     const linhaPU = (linha: CompraLinhaFornecedor) =>
       linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-        ? formatCurrency(linha.preco_unitario)
+        ? formatCurrencyBrl(linha.preco_unitario)
         : "—";
     const comprasRows = gruposImpressao
       .map((g) => {
         if (g.ordemId != null) {
-          const cabecalho = `Ordem #${g.ordemId} · ${formatDateOnly(g.dataRef)} · ${g.lines.length} item(ns) · Total: ${formatCurrency(g.totalGrupo)}`;
+          const cabecalho = `Ordem #${g.ordemId} · ${formatDateOnly(g.dataRef)} · ${g.lines.length} item(ns) · Total: ${formatCurrencyBrl(g.totalGrupo)}`;
           const itens = g.lines
             .map((linha) => {
               const q = linhaQtd(linha.quantidade);
               const pu = linhaPU(linha);
-              return `<tr class="row-item-ordem"><td></td><td>${escapeHtml(linha.material)}</td><td class="num">${q}</td><td class="num">${pu}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
+              return `<tr class="row-item-ordem"><td></td><td>${escapeHtml(linha.material)}</td><td class="num">${q}</td><td class="num">${pu}</td><td class="num">${formatCurrencyBrl(linha.total)}</td></tr>`;
             })
             .join("");
           return `<tr class="row-ordem-cabecalho"><td colspan="5">${escapeHtml(cabecalho)}</td></tr>${itens}`;
@@ -409,11 +406,11 @@ export function FornecedorDetalhe() {
         const linha = g.lines[0];
         const qtd = linhaQtd(linha.quantidade);
         const pu = linhaPU(linha);
-        return `<tr><td>${formatDateOnly(linha.data)}</td><td>${escapeHtml(linha.material)}</td><td class="num">${qtd}</td><td class="num">${pu}</td><td class="num">${formatCurrency(linha.total)}</td></tr>`;
+        return `<tr><td>${formatDateOnly(linha.data)}</td><td>${escapeHtml(linha.material)}</td><td class="num">${qtd}</td><td class="num">${pu}</td><td class="num">${formatCurrencyBrl(linha.total)}</td></tr>`;
       })
       .join("");
     const pagRows = (limites ? pagamentosFiltrados : data.pagamentos)
-      .map((p) => `<tr><td>${formatDateOnly(p.data)}</td><td class="num">${formatCurrency(p.valor)}</td></tr>`)
+      .map((p) => `<tr><td>${formatDateOnly(p.data)}</td><td class="num">${formatCurrencyBrl(p.valor)}</td></tr>`)
       .join("");
     const totalComprasDoc = comprasParaImprimir.reduce((s, c) => s + c.total, 0);
     const ordensNoDoc = gruposImpressao.filter((g) => g.ordemId != null).length;
@@ -480,7 +477,7 @@ export function FornecedorDetalhe() {
           <p class="meta">Período: ${periodoLabel}</p>
           <div class="resumo-box">
             <div class="label">Total de compras neste período</div>
-            <div class="valor">${formatCurrency(totalComprasDoc)}</div>
+            <div class="valor">${formatCurrencyBrl(totalComprasDoc)}</div>
           </div>
           <h3 style="font-size:14px;margin:16px 0 8px;">Compras</h3>
           <table>
@@ -863,7 +860,7 @@ export function FornecedorDetalhe() {
             </div>
             <div className="text-xs text-muted-foreground">
               {ordensTotalmenteSelecionadas} ordem(ns) completa(s) · {comprasSelecionadas.length} linha(s) · Total{" "}
-              <span className="font-medium tabular-nums text-foreground">{formatCurrency(totalSelecionadoCompras)}</span>
+              <span className="font-medium tabular-nums text-foreground">{formatCurrencyBrl(totalSelecionadoCompras)}</span>
             </div>
           </div>
 
@@ -871,19 +868,19 @@ export function FornecedorDetalhe() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">Total selecionado</p>
-                <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionadoCompras)}</p>
+                <p className="text-xl font-bold text-primary">{formatCurrencyBrl(totalSelecionadoCompras)}</p>
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">Saldo atual do fornecedor</p>
                 <p
                   className={`text-xl font-bold ${saldo_devedor > 0 ? "text-destructive" : ""}`}
                 >
-                  {formatCurrency(saldo_devedor)}
+                  {formatCurrencyBrl(saldo_devedor)}
                 </p>
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">Pago no intervalo da seleção</p>
-                <p className="text-xl font-bold text-green-600">{formatCurrency(totalPagoNoIntervaloSelecao)}</p>
+                <p className="text-xl font-bold text-green-600">{formatCurrencyBrl(totalPagoNoIntervaloSelecao)}</p>
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Pagamentos entre a menor e a maior data das linhas selecionadas.
                 </p>
@@ -895,7 +892,7 @@ export function FornecedorDetalhe() {
                     aPagarDaSelecaoCompras > 0 ? "text-primary" : "text-muted-foreground"
                   }`}
                 >
-                  {formatCurrency(aPagarDaSelecaoCompras)}
+                  {formatCurrencyBrl(aPagarDaSelecaoCompras)}
                 </p>
               </div>
               <div className="rounded-lg border bg-background p-4 sm:col-span-2 lg:col-span-4">
@@ -905,7 +902,7 @@ export function FornecedorDetalhe() {
                     restanteBrutoComprasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"
                   }`}
                 >
-                  {formatCurrency(restanteBrutoComprasForaSelecao)}
+                  {formatCurrencyBrl(restanteBrutoComprasForaSelecao)}
                 </p>
               </div>
             </div>
@@ -924,10 +921,10 @@ export function FornecedorDetalhe() {
         <Card>
           <CardContent className="pt-4">
             <p className="text-muted-foreground">
-              No período: Compras {formatCurrency(totalComprasPeriodo)} | Pago {formatCurrency(totalPagoPeriodo)}
+              No período: Compras {formatCurrencyBrl(totalComprasPeriodo)} | Pago {formatCurrencyBrl(totalPagoPeriodo)}
             </p>
             <p className={`font-semibold ${saldoNoPeriodo > 0 ? "text-destructive" : ""}`}>
-              Saldo no período: {formatCurrency(saldoNoPeriodo)}
+              Saldo no período: {formatCurrencyBrl(saldoNoPeriodo)}
             </p>
           </CardContent>
         </Card>
@@ -941,7 +938,7 @@ export function FornecedorDetalhe() {
             <Receipt className="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatCurrency(total_compras)}</p>
+            <p className="text-2xl font-bold">{formatCurrencyBrl(total_compras)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -950,7 +947,7 @@ export function FornecedorDetalhe() {
             <CreditCard className="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-green-600">{formatCurrency(total_pago)}</p>
+            <p className="text-2xl font-bold text-green-600">{formatCurrencyBrl(total_pago)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -960,7 +957,7 @@ export function FornecedorDetalhe() {
           </CardHeader>
           <CardContent>
             <p className={`text-2xl font-bold ${saldo_devedor > 0 ? "text-destructive" : ""}`}>
-              {formatCurrency(saldo_devedor)}
+              {formatCurrencyBrl(saldo_devedor)}
             </p>
           </CardContent>
         </Card>
@@ -1002,7 +999,7 @@ export function FornecedorDetalhe() {
                     {produtos.map((p) => (
                       <TableRow key={p.id} className={p.ativo === false ? "opacity-60" : ""}>
                         <TableCell className="font-medium">{p.nome}</TableCell>
-                        <TableCell className="text-right tabular-nums">{formatCurrency(Number(p.preco_venda ?? 0))}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatCurrencyBrl(Number(p.preco_venda ?? 0))}</TableCell>
                         <TableCell className="text-right tabular-nums">{Number(p.estoque_atual ?? 0)}</TableCell>
                       </TableRow>
                     ))}
@@ -1164,7 +1161,7 @@ export function FornecedorDetalhe() {
                             )}
                             {isChefe && mostrarPrecosListaCompras && (
                               <TableCell className="text-right align-top font-medium tabular-nums text-foreground">
-                                {formatCurrency(g.totalGrupo)}
+                                {formatCurrencyBrl(g.totalGrupo)}
                               </TableCell>
                             )}
                           </TableRow>
@@ -1194,13 +1191,13 @@ export function FornecedorDetalhe() {
                               {mostrarPrecosListaCompras && (
                                 <TableCell className="text-right tabular-nums whitespace-nowrap">
                                   {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                                    ? formatCurrency(linha.preco_unitario)
+                                    ? formatCurrencyBrl(linha.preco_unitario)
                                     : "—"}
                                 </TableCell>
                               )}
                               {isChefe && mostrarPrecosListaCompras && (
                                 <TableCell className="text-right tabular-nums whitespace-nowrap text-red-600">
-                                  {formatCurrency(linha.total)}
+                                  {formatCurrencyBrl(linha.total)}
                                 </TableCell>
                               )}
                             </TableRow>
@@ -1259,13 +1256,13 @@ export function FornecedorDetalhe() {
                         {mostrarPrecosListaCompras && (
                           <TableCell className="text-right tabular-nums whitespace-nowrap align-top">
                             {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                              ? formatCurrency(linha.preco_unitario)
+                              ? formatCurrencyBrl(linha.preco_unitario)
                               : "—"}
                           </TableCell>
                         )}
                         {isChefe && mostrarPrecosListaCompras && (
                           <TableCell className="text-right tabular-nums whitespace-nowrap align-top text-red-600">
-                            {formatCurrency(linha.total)}
+                            {formatCurrencyBrl(linha.total)}
                           </TableCell>
                         )}
                       </TableRow>
@@ -1337,7 +1334,7 @@ export function FornecedorDetalhe() {
                                 )}
                                 {isChefe && mostrarPrecosListaCompras && (
                                   <TableCell className="text-right align-top font-medium tabular-nums">
-                                    {formatCurrency(g.totalGrupo)}
+                                    {formatCurrencyBrl(g.totalGrupo)}
                                   </TableCell>
                                 )}
                               </TableRow>
@@ -1357,13 +1354,13 @@ export function FornecedorDetalhe() {
                                   {mostrarPrecosListaCompras && (
                                     <TableCell className="text-right tabular-nums whitespace-nowrap">
                                       {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                                        ? formatCurrency(linha.preco_unitario)
+                                        ? formatCurrencyBrl(linha.preco_unitario)
                                         : "—"}
                                     </TableCell>
                                   )}
                                   {isChefe && mostrarPrecosListaCompras && (
                                     <TableCell className="text-right tabular-nums whitespace-nowrap text-red-600">
-                                      {formatCurrency(linha.total)}
+                                      {formatCurrencyBrl(linha.total)}
                                     </TableCell>
                                   )}
                                 </TableRow>
@@ -1384,13 +1381,13 @@ export function FornecedorDetalhe() {
                             {mostrarPrecosListaCompras && (
                               <TableCell className="text-right tabular-nums whitespace-nowrap align-top">
                                 {linha.preco_unitario != null && !Number.isNaN(Number(linha.preco_unitario))
-                                  ? formatCurrency(linha.preco_unitario)
+                                  ? formatCurrencyBrl(linha.preco_unitario)
                                   : "—"}
                               </TableCell>
                             )}
                             {isChefe && mostrarPrecosListaCompras && (
                               <TableCell className="text-right tabular-nums whitespace-nowrap align-top text-red-600">
-                                {formatCurrency(linha.total)}
+                                {formatCurrencyBrl(linha.total)}
                               </TableCell>
                             )}
                           </TableRow>
@@ -1435,7 +1432,7 @@ export function FornecedorDetalhe() {
                       </TableCell>
                       {isChefe && (
                         <TableCell className="text-right text-green-600 whitespace-nowrap tabular-nums">
-                          {formatCurrency(p.valor)}
+                          {formatCurrencyBrl(p.valor)}
                         </TableCell>
                       )}
                       {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
@@ -1477,7 +1474,7 @@ export function FornecedorDetalhe() {
         title="Excluir pagamento"
         description={
           pagamentoExcluir
-            ? `Pagamento de ${formatCurrency(pagamentoExcluir.valor)} em ${formatDateOnly(pagamentoExcluir.data)}. O saldo da conta (se houver) será ajustado. Informe o motivo e confirme com sua senha.`
+            ? `Pagamento de ${formatCurrencyBrl(pagamentoExcluir.valor)} em ${formatDateOnly(pagamentoExcluir.data)}. O saldo da conta (se houver) será ajustado. Informe o motivo e confirme com sua senha.`
             : ""
         }
         confirmLabel="Confirmar exclusão"

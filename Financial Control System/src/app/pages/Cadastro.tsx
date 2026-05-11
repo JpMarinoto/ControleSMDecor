@@ -11,7 +11,7 @@ import { Checkbox } from "../components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { UserPlus, Package, Pencil, Trash2, Tag, Truck, TreePine, Building2, Info } from "lucide-react";
+import { UserPlus, Package, Pencil, Trash2, Tag, Truck, TreePine, Building2, Info, Search } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { api } from "../lib/api";
@@ -148,6 +148,55 @@ function precoUnitarioInsumoMaterial(m: Material): number {
   return Number(m.precoUnitarioBase) || 0;
 }
 
+function normalizeTextSearch(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Qualquer campo contém o texto (normalizado, sem acento obrigatório no termo). */
+function cadastroCamposContemBusca(query: string, ...campos: (string | number | undefined | null)[]): boolean {
+  const q = normalizeTextSearch(query);
+  if (!q) return true;
+  return campos.some((c) => normalizeTextSearch(String(c ?? "")).includes(q));
+}
+
+function CadastroBuscaLista({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  /** Título exclusivo desta aba (cada lista tem a sua barra e o seu estado). */
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="mb-3 max-w-md space-y-1.5">
+      <Label htmlFor={id} className="text-sm font-medium">
+        {label}
+      </Label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id={id}
+          className="h-9 pl-8 text-sm"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function Cadastro() {
   // States
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -236,6 +285,12 @@ export function Cadastro() {
   /** Seleção na aba Fornecedores (preços em massa por vínculo). */
   const [idsFornecTabProdutos, setIdsFornecTabProdutos] = useState<Set<string>>(new Set());
   const [idsFornecTabMateriais, setIdsFornecTabMateriais] = useState<Set<string>>(new Set());
+  const [buscaClientes, setBuscaClientes] = useState("");
+  const [buscaProdutos, setBuscaProdutos] = useState("");
+  const [buscaCategorias, setBuscaCategorias] = useState("");
+  const [buscaFornecedores, setBuscaFornecedores] = useState("");
+  const [buscaMateriais, setBuscaMateriais] = useState("");
+  const [buscaContas, setBuscaContas] = useState("");
   const [bulkFornecPrecosOpen, setBulkFornecPrecosOpen] = useState(false);
   const [bulkFornecPrecoVenda, setBulkFornecPrecoVenda] = useState("");
   const [bulkFornecPrecoCusto, setBulkFornecPrecoCusto] = useState("");
@@ -943,8 +998,13 @@ export function Cadastro() {
     const catById = new Map<string, { id: string; nome: string }>();
     for (const c of categoriasProduto) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
 
+    const lista =
+      !normalizeTextSearch(buscaProdutos)
+        ? produtos
+        : produtos.filter((p) => cadastroCamposContemBusca(buscaProdutos, p.nome));
+
     const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof produtos }>();
-    for (const p of produtos) {
+    for (const p of lista) {
       const catId = p.categoria ? String(p.categoria) : "";
       const cat = catId ? catById.get(catId) : null;
       const k = cat ? `cat-${cat.id}` : "cat-sem";
@@ -957,14 +1017,19 @@ export function Cadastro() {
     out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
     out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
     return out;
-  }, [produtos, categoriasProduto]);
+  }, [produtos, categoriasProduto, buscaProdutos]);
 
   const materiaisAgrupados = useMemo(() => {
     const catById = new Map<string, { id: string; nome: string }>();
     for (const c of categoriasMaterial) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
 
+    const lista =
+      !normalizeTextSearch(buscaMateriais)
+        ? materiais
+        : materiais.filter((m) => cadastroCamposContemBusca(buscaMateriais, m.nome));
+
     const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof materiais }>();
-    for (const m of materiais) {
+    for (const m of lista) {
       const catId = m.categoria ? String(m.categoria) : "";
       const cat = catId ? catById.get(catId) : null;
       const k = cat ? `cat-${cat.id}` : "cat-sem";
@@ -977,7 +1042,68 @@ export function Cadastro() {
     out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
     out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
     return out;
-  }, [materiais, categoriasMaterial]);
+  }, [materiais, categoriasMaterial, buscaMateriais]);
+
+  const clientesFiltrados = useMemo(() => {
+    if (!normalizeTextSearch(buscaClientes)) return clientes;
+    return clientes.filter((c) =>
+      cadastroCamposContemBusca(
+        buscaClientes,
+        c.nome,
+        c.cpfCnpj,
+        c.telefone,
+        c.chavePix,
+        c.endereco,
+        c.logradouro,
+        c.bairro,
+        c.numero,
+        c.cidade,
+        c.estado,
+        c.cep,
+        c.pontoReferencia,
+      ),
+    );
+  }, [clientes, buscaClientes]);
+
+  const categoriasFiltradas = useMemo(() => {
+    if (!normalizeTextSearch(buscaCategorias)) return categorias;
+    return categorias.filter((cat) =>
+      cadastroCamposContemBusca(
+        buscaCategorias,
+        cat.nome,
+        cat.tipo,
+        cat.tipo === "material" ? "material" : "produto",
+        cat.tipo === "produto" ? "Produto" : "Material",
+        cat.descricao,
+      ),
+    );
+  }, [categorias, buscaCategorias]);
+
+  const fornecedoresFiltrados = useMemo(() => {
+    if (!normalizeTextSearch(buscaFornecedores)) return fornecedores;
+    return fornecedores.filter((f) =>
+      cadastroCamposContemBusca(
+        buscaFornecedores,
+        f.nomeRazaoSocial,
+        f.cpfCnpj,
+        f.telefone,
+        f.chavePix,
+        f.endereco,
+        f.logradouro,
+        f.bairro,
+        f.numero,
+        f.cidade,
+        f.estado,
+        f.cep,
+        f.pontoReferencia,
+      ),
+    );
+  }, [fornecedores, buscaFornecedores]);
+
+  const contasFiltradas = useMemo(() => {
+    if (!normalizeTextSearch(buscaContas)) return contas;
+    return contas.filter((c) => cadastroCamposContemBusca(buscaContas, c.nome, String(c.saldo)));
+  }, [contas, buscaContas]);
 
   const handleBulkProdCustoChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -1212,7 +1338,22 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {clientes.length > 0 ? (
-              clientes.map((cliente, index) => (
+              <>
+                <CadastroBuscaLista
+                  id="cadastro-busca-clientes"
+                  label="Pesquisar clientes"
+                  value={buscaClientes}
+                  onChange={setBuscaClientes}
+                  placeholder="Nome, CPF/CNPJ, telefone, PIX ou endereço…"
+                />
+                {clientesFiltrados.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      Nenhum cliente corresponde à busca.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  clientesFiltrados.map((cliente, index) => (
                 <motion.div
                   key={cliente.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -1270,7 +1411,9 @@ export function Cadastro() {
                     </CardContent>
                   </Card>
                 </motion.div>
-              ))
+                  ))
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
@@ -1627,6 +1770,21 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {produtos.length > 0 ? (
+              <>
+                <CadastroBuscaLista
+                  id="cadastro-busca-produtos"
+                  label="Pesquisar produtos"
+                  value={buscaProdutos}
+                  onChange={setBuscaProdutos}
+                  placeholder="Somente pelo nome do produto…"
+                />
+                {produtosAgrupados.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      Nenhum produto corresponde à busca.
+                    </CardContent>
+                  </Card>
+                ) : (
               produtosAgrupados.map((grupo, gi) => (
                 <div key={grupo.categoriaId ?? `sem-${gi}`} className="space-y-2">
                   <div className="rounded-lg border bg-muted/30 px-3 py-2">
@@ -1743,6 +1901,8 @@ export function Cadastro() {
                   </div>
                 </div>
               ))
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
@@ -1966,7 +2126,22 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {categorias.length > 0 ? (
-              categorias.map((categoria, index) => (
+              <>
+                <CadastroBuscaLista
+                  id="cadastro-busca-categorias"
+                  label="Pesquisar categorias"
+                  value={buscaCategorias}
+                  onChange={setBuscaCategorias}
+                  placeholder="Nome, tipo (produto/material) ou descrição…"
+                />
+                {categoriasFiltradas.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      Nenhuma categoria corresponde à busca.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  categoriasFiltradas.map((categoria, index) => (
                 <motion.div
                   key={categoria.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -2015,7 +2190,9 @@ export function Cadastro() {
                     </CardContent>
                   </Card>
                 </motion.div>
-              ))
+                  ))
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
@@ -2196,7 +2373,22 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {fornecedores.length > 0 ? (
-              fornecedores.map((fornecedor, index) => (
+              <>
+                <CadastroBuscaLista
+                  id="cadastro-busca-fornecedores"
+                  label="Pesquisar fornecedores"
+                  value={buscaFornecedores}
+                  onChange={setBuscaFornecedores}
+                  placeholder="Nome, CPF/CNPJ, telefone, PIX ou endereço…"
+                />
+                {fornecedoresFiltrados.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      Nenhum fornecedor corresponde à busca.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  fornecedoresFiltrados.map((fornecedor, index) => (
                 <motion.div
                   key={fornecedor.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -2402,7 +2594,9 @@ export function Cadastro() {
                     </CardContent>
                   </Card>
                 </motion.div>
-              ))
+                  ))
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
@@ -2819,6 +3013,21 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {materiais.length > 0 ? (
+              <>
+                <CadastroBuscaLista
+                  id="cadastro-busca-materiais"
+                  label="Pesquisar materiais"
+                  value={buscaMateriais}
+                  onChange={setBuscaMateriais}
+                  placeholder="Somente pelo nome do material…"
+                />
+                {materiaisAgrupados.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      Nenhum material corresponde à busca.
+                    </CardContent>
+                  </Card>
+                ) : (
               materiaisAgrupados.map((grupo, gi) => (
                 <div key={grupo.categoriaId ?? `sem-${gi}`} className="space-y-2">
                   <div className="rounded-lg border bg-muted/30 px-3 py-2">
@@ -2902,6 +3111,8 @@ export function Cadastro() {
                   </div>
                 </div>
               ))
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
@@ -2970,7 +3181,22 @@ export function Cadastro() {
 
           <div className="space-y-3">
             {contas.length > 0 ? (
-              contas.map((conta, index) => (
+              <>
+                <CadastroBuscaLista
+                  id="cadastro-busca-contas"
+                  label="Pesquisar contas"
+                  value={buscaContas}
+                  onChange={setBuscaContas}
+                  placeholder="Nome da conta ou valor do saldo…"
+                />
+                {contasFiltradas.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                      Nenhuma conta corresponde à busca.
+                    </CardContent>
+                  </Card>
+                ) : (
+                  contasFiltradas.map((conta, index) => (
                 <motion.div
                   key={conta.id}
                   initial={{ opacity: 0, y: 20 }}
@@ -3016,7 +3242,9 @@ export function Cadastro() {
                     </CardContent>
                   </Card>
                 </motion.div>
-              ))
+                  ))
+                )}
+              </>
             ) : (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">

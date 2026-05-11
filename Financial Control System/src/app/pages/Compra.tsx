@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef, type FormEvent } from "react";
+import React, { useState, useEffect, useMemo, useRef, type FormEvent } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
   ShoppingCart,
@@ -21,10 +23,18 @@ import {
   Ban,
   MessageSquare,
   PanelRightOpen,
+  ChevronsUpDown,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatDateOnly, parseDateOnlyToTime, parseLancamentoToTime, getTodayLocalISO } from "../lib/format";
+import {
+  formatDateOnly,
+  parseDateOnlyToTime,
+  parseLancamentoToTime,
+  getTodayLocalISO,
+  formatCurrencyBrl,
+} from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
@@ -58,6 +68,101 @@ interface OrdemCompra {
   ultima_alteracao_em?: string | null;
   itens: ItemCompra[];
   total: number;
+}
+
+function compraNormText(s: unknown) {
+  return String(s ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+type CompraPickOption = { id: string | number; nome: string };
+
+/** Lista de material ou produto com campo de pesquisa (aba Compra). */
+function CompraSearchableSelect({
+  value,
+  onValueChange,
+  options,
+  placeholder,
+  triggerId,
+  disabled,
+  emptyHint,
+  searchPlaceholder = "Pesquisar por nome…",
+}: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: CompraPickOption[];
+  placeholder: string;
+  triggerId?: string;
+  disabled?: boolean;
+  emptyHint?: string;
+  searchPlaceholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => {
+    const q = compraNormText(query);
+    if (!q) return options;
+    return options.filter((o) => compraNormText(o.nome).includes(q));
+  }, [options, query]);
+  const selected = options.find((o) => String(o.id) === value);
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setQuery("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          id={triggerId}
+          disabled={disabled || options.length === 0}
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate text-left">{selected?.nome ?? placeholder}</span>
+          <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[min(100%,20rem)] p-0" align="start">
+        <Command shouldFilter={false}>
+          <div className="flex items-center gap-2 border-b px-3 py-2">
+            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <CommandInput
+              placeholder={searchPlaceholder}
+              value={query}
+              onValueChange={setQuery}
+              className="h-9 border-0 shadow-none focus:ring-0"
+            />
+          </div>
+          <CommandList className="max-h-[280px]">
+            <CommandEmpty>{emptyHint ?? "Nenhum item encontrado."}</CommandEmpty>
+            <CommandGroup>
+              {filtered.map((o) => (
+                <CommandItem
+                  key={String(o.id)}
+                  value={String(o.id)}
+                  onSelect={() => {
+                    onValueChange(String(o.id));
+                    setOpen(false);
+                    setQuery("");
+                  }}
+                >
+                  <span className="truncate">{o.nome}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function OrdemAlteracaoMarker({
@@ -169,6 +274,7 @@ export function Compra() {
   const [searchFornecedor, setSearchFornecedor] = useState("");
   const [searchData, setSearchData] = useState("");
   const [searchProduto, setSearchProduto] = useState("");
+  const [searchNumero, setSearchNumero] = useState("");
   const [editingItem, setEditingItem] = useState<ItemCompra & { ordemId: string | number } | null>(null);
   const [editCompraQtd, setEditCompraQtd] = useState("");
   const [editCompraPreco, setEditCompraPreco] = useState("");
@@ -490,8 +596,8 @@ export function Compra() {
           return `<tr>
             <td>${getItemNome(i)}</td>
             <td class="num">${i.quantidade}</td>
-            <td class="num">${formatCurrency(i.preco_no_dia)}</td>
-            <td class="num">${formatCurrency(i.total)}</td>
+            <td class="num">${formatCurrencyBrl(i.preco_no_dia)}</td>
+            <td class="num">${formatCurrencyBrl(i.total)}</td>
           </tr>`;
         }
         return `<tr>
@@ -582,7 +688,7 @@ export function Compra() {
         mostrarValores
           ? `<div class="resumo-box">
               <div class="label">Total da ordem</div>
-              <div class="valor">${formatCurrency(ordem.total)}</div>
+              <div class="valor">${formatCurrencyBrl(ordem.total)}</div>
             </div>`
           : ""
       }
@@ -700,19 +806,16 @@ export function Compra() {
     setItensForm([]);
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    }).format(value);
-  };
-
   const getItemNome = (i: ItemCompra) =>
     i.produto_nome || i.material_nome || (i.produto ? `#${i.produto}` : `#${i.material}`);
 
   const totalCompras = ordens.reduce((sum, o) => sum + o.total, 0);
 
   const ordensFiltradas = ordens.filter((o) => {
+    if (searchNumero.trim()) {
+      const termo = searchNumero.trim().replace(/^#/, "");
+      if (!String(o.id ?? "").includes(termo)) return false;
+    }
     if (searchFornecedor.trim() && !(o.fornecedor || "").toLowerCase().includes(searchFornecedor.trim().toLowerCase()))
       return false;
     if (searchData) {
@@ -737,7 +840,7 @@ export function Compra() {
         {isChefe && ordens.length > 0 && (
           <Card className="shrink-0 px-6 py-3">
             <p className="text-sm text-muted-foreground">Total em Compras</p>
-            <p className="text-2xl font-semibold text-red-600">{formatCurrency(totalCompras)}</p>
+            <p className="text-2xl font-semibold text-red-600">{formatCurrencyBrl(totalCompras)}</p>
           </Card>
         )}
       </div>
@@ -810,36 +913,36 @@ export function Compra() {
 
                           {tipoItem === "material" ? (
                             materiaisDoFornecedor.length > 0 ? (
-                              <Select value={materialId} onValueChange={setMaterialId}>
-                                <SelectTrigger id="materialId">
-                                  <SelectValue placeholder="Selecione o material" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {materiaisDoFornecedor.map((m: any) => (
-                                    <SelectItem key={m.id} value={String(m.id)}>
-                                      {m.nome}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <CompraSearchableSelect
+                                value={materialId}
+                                onValueChange={setMaterialId}
+                                options={materiaisDoFornecedor.map((m: any) => ({
+                                  id: m.id,
+                                  nome: String(m.nome ?? "").trim() || `Material #${m.id}`,
+                                }))}
+                                placeholder="Selecione o material"
+                                triggerId="materialId"
+                                emptyHint="Nenhum material encontrado."
+                                searchPlaceholder="Pesquisar material…"
+                              />
                             ) : (
                               <p className="text-sm text-muted-foreground py-2">
                                 Nenhum material vinculado a este fornecedor. Vincule na aba Cadastro (materiais).
                               </p>
                             )
                           ) : produtosLista.length > 0 ? (
-                            <Select value={produtoId} onValueChange={setProdutoId}>
-                              <SelectTrigger id="produtoId">
-                                <SelectValue placeholder="Selecione o produto de revenda" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {produtosLista.map((p: any) => (
-                                  <SelectItem key={p.id} value={String(p.id)}>
-                                    {p.nome}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <CompraSearchableSelect
+                              value={produtoId}
+                              onValueChange={setProdutoId}
+                              options={produtosLista.map((p: any) => ({
+                                id: p.id,
+                                nome: String(p.nome ?? "").trim() || `Produto #${p.id}`,
+                              }))}
+                              placeholder="Selecione o produto de revenda"
+                              triggerId="produtoId"
+                              emptyHint="Nenhum produto encontrado."
+                              searchPlaceholder="Pesquisar produto…"
+                            />
                           ) : (
                             <p className="text-sm text-muted-foreground py-2">
                               Nenhum produto disponível para este fornecedor. No cadastro, marque revenda ou defina o
@@ -884,7 +987,7 @@ export function Compra() {
                   <Label>Total deste item</Label>
                   <div className="h-10 px-3 py-2 border rounded-md bg-muted flex items-center">
                     <span className="text-lg font-semibold">
-                      {formatCurrency(parseFloat(quantidade) * parseFloat(precoUnitario))}
+                      {formatCurrencyBrl(parseFloat(quantidade) * parseFloat(precoUnitario))}
                     </span>
                   </div>
                 </div>
@@ -1016,12 +1119,12 @@ export function Compra() {
                                 <TableCell className="text-right align-middle">{item.quantidade}</TableCell>
                                 {isChefe && (
                                   <TableCell className="text-right align-middle tabular-nums">
-                                    {formatCurrency(precoItem || 0)}
+                                    {formatCurrencyBrl(precoItem || 0)}
                                   </TableCell>
                                 )}
                                 {isChefe && (
                                   <TableCell className="text-right align-middle tabular-nums">
-                                    {formatCurrency(!isNaN(qtdItem * precoItem) ? qtdItem * precoItem : 0)}
+                                    {formatCurrencyBrl(!isNaN(qtdItem * precoItem) ? qtdItem * precoItem : 0)}
                                   </TableCell>
                                 )}
                                 <TableCell className="text-right align-middle">
@@ -1084,10 +1187,22 @@ export function Compra() {
           <Card>
             <CardHeader>
               <CardTitle>Histórico de compras</CardTitle>
-              <p className="text-sm text-muted-foreground">Filtre por fornecedor, data ou produto. Clique para ver detalhes, editar, copiar ou excluir.</p>
+              <p className="text-sm text-muted-foreground">
+                Filtre por número da ordem, fornecedor, data ou produto. Clique para ver detalhes, editar, copiar ou excluir.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="searchNumeroCompra">Nº da ordem</Label>
+                  <Input
+                    id="searchNumeroCompra"
+                    inputMode="numeric"
+                    placeholder="Ex.: 42"
+                    value={searchNumero}
+                    onChange={(e) => setSearchNumero(e.target.value)}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="searchFornecedor">Fornecedor</Label>
                   <Input
@@ -1160,7 +1275,7 @@ export function Compra() {
                           </TableCell>
                           {isChefe && (
                             <TableCell className="text-right font-medium text-red-600 tabular-nums whitespace-nowrap">
-                              {formatCurrency(ordem.total)}
+                              {formatCurrencyBrl(ordem.total)}
                             </TableCell>
                           )}
                           <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -1342,36 +1457,42 @@ export function Compra() {
                       <div className="space-y-2 md:col-span-1">
                         <Label>{addDetailTipo === "material" ? "Material" : "Produto"}</Label>
                         {addDetailTipo === "material" ? (
-                          <Select value={addDetailMaterialId} onValueChange={setAddDetailMaterialId}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {materiais
-                                .filter((m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === String(detailCompra.fornecedor_id))
-                                .map((m: any) => (
-                                  <SelectItem key={m.id} value={String(m.id)}>
-                                    {m.nome}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
+                          <CompraSearchableSelect
+                            value={addDetailMaterialId}
+                            onValueChange={setAddDetailMaterialId}
+                            options={materiais
+                              .filter(
+                                (m: any) =>
+                                  String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) ===
+                                  String(detailCompra.fornecedor_id),
+                              )
+                              .map((m: any) => ({
+                                id: m.id,
+                                nome: String(m.nome ?? "").trim() || `Material #${m.id}`,
+                              }))}
+                            placeholder="Selecione o material"
+                            emptyHint="Nenhum material encontrado."
+                            searchPlaceholder="Pesquisar material…"
+                          />
                         ) : (
-                          <Select value={addDetailProdutoId} onValueChange={setAddDetailProdutoId}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {produtosRevenda
-                                .filter((p: any) => produtoDisponivelParaFornecedor(p, String(detailCompra.fornecedor_id ?? "")))
-                                .sort((a: any, b: any) => String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"))
-                                .map((p: any) => (
-                                  <SelectItem key={p.id} value={String(p.id)}>
-                                    {p.nome}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
+                          <CompraSearchableSelect
+                            value={addDetailProdutoId}
+                            onValueChange={setAddDetailProdutoId}
+                            options={produtosRevenda
+                              .filter((p: any) =>
+                                produtoDisponivelParaFornecedor(p, String(detailCompra.fornecedor_id ?? "")),
+                              )
+                              .sort((a: any, b: any) =>
+                                String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"),
+                              )
+                              .map((p: any) => ({
+                                id: p.id,
+                                nome: String(p.nome ?? "").trim() || `Produto #${p.id}`,
+                              }))}
+                            placeholder="Selecione o produto"
+                            emptyHint="Nenhum produto encontrado."
+                            searchPlaceholder="Pesquisar produto…"
+                          />
                         )}
                       </div>
                       <div className="space-y-2 md:col-span-1">
@@ -1409,12 +1530,12 @@ export function Compra() {
                         <TableCell className="text-right tabular-nums align-top py-2 px-1">{item.quantidade}</TableCell>
                         {isChefe && (
                           <TableCell className="text-right tabular-nums align-top py-2 px-1 text-xs sm:text-sm whitespace-nowrap">
-                            {formatCurrency(item.preco_no_dia)}
+                            {formatCurrencyBrl(item.preco_no_dia)}
                           </TableCell>
                         )}
                         {isChefe && (
                           <TableCell className="text-right text-red-600 tabular-nums align-top py-2 px-1 text-xs sm:text-sm whitespace-nowrap">
-                            {formatCurrency(item.total)}
+                            {formatCurrencyBrl(item.total)}
                           </TableCell>
                         )}
                         <TableCell className="text-right align-top py-1.5 pl-1">
@@ -1455,7 +1576,7 @@ export function Compra() {
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/15 bg-primary/5 px-4 py-3.5">
                     <span className="text-sm font-medium text-muted-foreground">Total da ordem</span>
                     <span className="text-xl font-bold tabular-nums tracking-tight text-foreground">
-                      {formatCurrency(detailCompra.total)}
+                      {formatCurrencyBrl(detailCompra.total)}
                     </span>
                   </div>
                 )}

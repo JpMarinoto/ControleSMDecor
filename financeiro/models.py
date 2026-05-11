@@ -188,7 +188,7 @@ class ItemVenda(models.Model):
     venda = models.ForeignKey(Venda, on_delete=models.CASCADE, related_name='itens')
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT)
     quantidade = models.PositiveIntegerField(default=1)
-    preco_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    preco_unitario = models.DecimalField(max_digits=18, decimal_places=5)
     preco_custo_unitario = models.DecimalField(
         max_digits=14,
         decimal_places=4,
@@ -221,7 +221,7 @@ class PrecoClienteProduto(models.Model):
     """Preço específico que um cliente paga por um produto (cadastrado pelo chefe)."""
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='precos_produtos')
     produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='precos_por_cliente')
-    preco = models.DecimalField(max_digits=10, decimal_places=2)
+    preco = models.DecimalField(max_digits=18, decimal_places=5)
 
     class Meta:
         unique_together = [('cliente', 'produto')]
@@ -338,7 +338,7 @@ class CompraMaterial(models.Model):
     material = models.ForeignKey(Material, on_delete=models.CASCADE)
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras')
     quantidade = models.PositiveIntegerField()
-    preco_no_dia = models.DecimalField(max_digits=10, decimal_places=2)
+    preco_no_dia = models.DecimalField(max_digits=18, decimal_places=5)
     data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
     data_compra = models.DateTimeField(default=timezone.now, verbose_name='Data da compra')
     ordem = models.ForeignKey(
@@ -364,7 +364,7 @@ class CompraProduto(models.Model):
     produto = models.ForeignKey(Produto, on_delete=models.CASCADE)
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras_produtos')
     quantidade = models.PositiveIntegerField()
-    preco_no_dia = models.DecimalField(max_digits=10, decimal_places=2)
+    preco_no_dia = models.DecimalField(max_digits=18, decimal_places=5)
     data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
     data_compra = models.DateTimeField(default=timezone.now, verbose_name='Data da compra')
     ordem = models.ForeignKey(

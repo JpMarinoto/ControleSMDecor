@@ -41,3 +41,13 @@ export function getTodayLocalISO(): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+
+/** BRL: mínimo 2 casas (ex.: 10,50), até 5 quando necessário (ex.: 10,12345). */
+export function formatCurrencyBrl(value: number): string {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 5,
+  }).format(value);
+}

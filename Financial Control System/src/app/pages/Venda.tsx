@@ -39,7 +39,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
-import { formatDateOnly, parseDateOnlyToTime, parseLancamentoToTime, getTodayLocalISO } from "../lib/format";
+import {
+  formatDateOnly,
+  parseDateOnlyToTime,
+  parseLancamentoToTime,
+  getTodayLocalISO,
+  formatCurrencyBrl,
+} from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
@@ -111,6 +117,7 @@ export function Venda() {
   const [searchCliente, setSearchCliente] = useState("");
   const [searchItem, setSearchItem] = useState("");
   const [searchData, setSearchData] = useState("");
+  const [searchNumero, setSearchNumero] = useState("");
   const [copiarConfirmOpen, setCopiarConfirmOpen] = useState(false);
 
   const norm = (s: unknown) =>
@@ -449,8 +456,8 @@ export function Venda() {
           return `<tr>
             <td>${nomeProd}</td>
             <td class="num">${qtd}</td>
-            <td class="num">${formatCurrency(precoUnit)}</td>
-            <td class="num">${formatCurrency(totalItem)}</td>
+            <td class="num">${formatCurrencyBrl(precoUnit)}</td>
+            <td class="num">${formatCurrencyBrl(totalItem)}</td>
           </tr>`;
         }
         return `<tr>
@@ -498,7 +505,7 @@ export function Venda() {
               ${itensRows}
             </tbody>
           </table>
-          ${mostrarValoresNaFolha ? `<div class="total-venda"><strong>Total da venda: ${formatCurrency(totalVenda)}</strong></div>` : ""}
+          ${mostrarValoresNaFolha ? `<div class="total-venda"><strong>Total da venda: ${formatCurrencyBrl(totalVenda)}</strong></div>` : ""}
         </div>
 
         <div class="assinatura">
@@ -913,16 +920,13 @@ export function Venda() {
     setItensForm([]);
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    }).format(value);
-  };
-
   const totalVendas = vendas.reduce((sum, v) => sum + v.total, 0);
 
   const vendasFiltradas = vendas.filter((v) => {
+    if (searchNumero.trim()) {
+      const termo = searchNumero.trim().replace(/^#/, "");
+      if (!String(v.id ?? "").includes(termo)) return false;
+    }
     if (searchCliente.trim() && !(v.clienteNome || "").toLowerCase().includes(searchCliente.trim().toLowerCase()))
       return false;
     if (searchData) {
@@ -949,7 +953,7 @@ export function Venda() {
         {isChefe && vendas.length > 0 && (
           <Card className="shrink-0 px-6 py-3">
             <p className="text-sm text-muted-foreground">Total em Vendas</p>
-            <p className="text-2xl font-semibold text-green-600">{formatCurrency(totalVendas)}</p>
+            <p className="text-2xl font-semibold text-green-600">{formatCurrencyBrl(totalVendas)}</p>
           </Card>
         )}
       </div>
@@ -994,7 +998,13 @@ export function Venda() {
 
               <div className="space-y-2">
                 <Label htmlFor="produtoId">Produto para adicionar *</Label>
-                <Popover open={produtoPickerOpen} onOpenChange={setProdutoPickerOpen}>
+                <Popover
+                  open={produtoPickerOpen}
+                  onOpenChange={(open) => {
+                    setProdutoPickerOpen(open);
+                    if (!open) setProdutoPickerQuery("");
+                  }}
+                >
                   <PopoverTrigger asChild>
                     <Button
                       type="button"
@@ -1009,13 +1019,13 @@ export function Venda() {
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                    <Command>
+                    <Command shouldFilter={false}>
                       <div className="flex items-center gap-2 px-3 py-2 border-b">
                         <Search className="size-4 text-muted-foreground" />
                         <CommandInput
                           value={produtoPickerQuery}
                           onValueChange={setProdutoPickerQuery}
-                          placeholder="Pesquisar produto..."
+                          placeholder="Pesquisar produto…"
                         />
                       </div>
                       <CommandList className="max-h-[320px]">
@@ -1268,10 +1278,22 @@ export function Venda() {
           <Card>
             <CardHeader>
               <CardTitle>Histórico de vendas</CardTitle>
-              <p className="text-sm text-muted-foreground">Pesquise por cliente, item ou data. Clique em uma venda para ver detalhes ou copiar.</p>
+              <p className="text-sm text-muted-foreground">
+                Pesquise por número da venda, cliente, item ou data. Clique em uma venda para ver detalhes ou copiar.
+              </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="searchNumeroVenda">Nº da venda</Label>
+                  <Input
+                    id="searchNumeroVenda"
+                    inputMode="numeric"
+                    placeholder="Ex.: 42"
+                    value={searchNumero}
+                    onChange={(e) => setSearchNumero(e.target.value)}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="searchCliente">Cliente</Label>
                   <Input
@@ -1349,7 +1371,7 @@ export function Venda() {
                           </TableCell>
                           {isChefe && (
                             <TableCell className="text-right font-medium text-green-600 tabular-nums whitespace-nowrap">
-                              {formatCurrency(venda.total)}
+                              {formatCurrencyBrl(venda.total)}
                             </TableCell>
                           )}
                           <TableCell>
@@ -1500,7 +1522,7 @@ export function Venda() {
                               onChange={(e) => setEditVendaPreco(e.target.value)}
                             />
                           ) : (
-                            formatCurrency(item.preco_unitario)
+                            formatCurrencyBrl(item.preco_unitario)
                           )}
                         </TableCell>
                       )}
@@ -1511,9 +1533,9 @@ export function Venda() {
                                 const q = parseInt(editVendaQtd, 10);
                                 const p = parseFloat(String(editVendaPreco).replace(",", "."));
                                 if (!Number.isFinite(q) || !Number.isFinite(p)) return "—";
-                                return formatCurrency(q * p);
+                                return formatCurrencyBrl(q * p);
                               })()
-                            : formatCurrency(item.quantidade * item.preco_unitario)}
+                            : formatCurrencyBrl(item.quantidade * item.preco_unitario)}
                         </TableCell>
                       )}
                       <TableCell>
@@ -1585,7 +1607,7 @@ export function Venda() {
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/15 bg-primary/5 px-4 py-3.5">
                   <span className="text-sm font-medium text-muted-foreground">Total da venda</span>
                   <span className="text-xl font-bold tabular-nums tracking-tight text-foreground">
-                    {formatCurrency(detailVenda.total)}
+                    {formatCurrencyBrl(detailVenda.total)}
                   </span>
                 </div>
               )}
@@ -1593,7 +1615,13 @@ export function Venda() {
               <div className="mt-5 rounded-xl border bg-card p-4 shadow-sm space-y-3">
                 <Label className="text-sm font-semibold">Adicionar produto à mesma venda</Label>
                 <div className="flex gap-2 flex-wrap items-center">
-                  <Popover open={addItemPickerOpen} onOpenChange={setAddItemPickerOpen}>
+                  <Popover
+                    open={addItemPickerOpen}
+                    onOpenChange={(open) => {
+                      setAddItemPickerOpen(open);
+                      if (!open) setAddItemPickerQuery("");
+                    }}
+                  >
                     <PopoverTrigger asChild>
                       <Button type="button" variant="outline" className="w-48 justify-between">
                         <span className="truncate">
@@ -1603,13 +1631,13 @@ export function Venda() {
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[320px] p-0" align="start">
-                      <Command>
+                      <Command shouldFilter={false}>
                         <div className="flex items-center gap-2 px-3 py-2 border-b">
                           <Search className="size-4 text-muted-foreground" />
                           <CommandInput
                             value={addItemPickerQuery}
                             onValueChange={setAddItemPickerQuery}
-                            placeholder="Pesquisar produto..."
+                            placeholder="Pesquisar produto…"
                           />
                         </div>
                         <CommandList className="max-h-[320px]">
@@ -1633,7 +1661,7 @@ export function Venda() {
                                     <span className="truncate">{p.nome}</span>
                                     {isChefe && (
                                       <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                                        {formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}
+                                        {formatCurrencyBrl(Number(p.preco_venda ?? p.precoInicial ?? 0))}
                                       </span>
                                     )}
                                   </CommandItem>
@@ -1685,7 +1713,7 @@ export function Venda() {
                                           <span className="truncate">{p.nome}</span>
                                           {isChefe && (
                                             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                                              {formatCurrency(Number(p.preco_venda ?? p.precoInicial ?? 0))}
+                                              {formatCurrencyBrl(Number(p.preco_venda ?? p.precoInicial ?? 0))}
                                             </span>
                                           )}
                                         </CommandItem>

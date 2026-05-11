@@ -1,7 +1,13 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { api } from "../lib/api";
-import { formatDateOnly, getTodayLocalISO, parseDateOnlyToTime, parseLancamentoToTime } from "../lib/format";
+import {
+  formatDateOnly,
+  getTodayLocalISO,
+  parseDateOnlyToTime,
+  parseLancamentoToTime,
+  formatCurrencyBrl,
+} from "../lib/format";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { cn } from "../components/ui/utils";
@@ -72,9 +78,20 @@ const METODOS_PAGAMENTO_API = ["Pix", "Dinheiro", "Cartão crédito", "Cartão d
 
 const rowVendaMarcadaPaga =
   "border-l-[3px] border-l-emerald-500 bg-emerald-50/90 dark:border-l-emerald-400 dark:bg-emerald-950/35";
+const rowVendaMarcadaPagaFilha = "bg-emerald-50/55 dark:bg-emerald-950/25";
 const rowVendaSelecionada = "bg-primary/[0.07] dark:bg-primary/12 ring-1 ring-inset ring-primary/25";
 const rowVendaPagaSelecionada =
   "border-l-[3px] border-l-emerald-600 bg-emerald-100/95 dark:border-l-emerald-300 dark:bg-emerald-950/45 ring-2 ring-inset ring-emerald-500/30 dark:ring-emerald-400/25";
+const rowVendaPagaFilhaSelecionada =
+  "bg-emerald-100/75 dark:bg-emerald-950/35 ring-1 ring-inset ring-emerald-400/25 dark:ring-emerald-500/20";
+
+function totalItemVenda(item: ItemVenda): number {
+  if (typeof item.total_item === "number" && !Number.isNaN(item.total_item)) return item.total_item;
+  const qtd = Number(item.quantidade);
+  const preco = Number(item.preco_unitario);
+  if (!Number.isNaN(qtd) && !Number.isNaN(preco)) return qtd * preco;
+  return 0;
+}
 
 function parseData(s: string): number {
   return parseDateOnlyToTime(s);
@@ -355,9 +372,6 @@ export function ClienteDetalhe() {
   const totalVendasPeriodo = vendasFiltradas.reduce((s, v) => s + safeNum(v.total), 0);
   const saldoDevedorGeral = safeNum(data?.saldo_devedor);
 
-  const formatCurrency = (n: number) =>
-    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
-
   const getEmpresaHeaderHtml = () => {
     const doc = empresaDocumento();
     const endereco = empresaEnderecoLinha();
@@ -393,10 +407,10 @@ export function ClienteDetalhe() {
             : "Todo o período";
     const resumoBlock = comValores
       ? `<div class="resumo">
-            <div class="linha"><span>Valor das vendas neste período (soma das notas)</span><strong>${formatCurrency(totalVendasPeriodo)}</strong></div>
+            <div class="linha"><span>Valor das vendas neste período (soma das notas)</span><strong>${formatCurrencyBrl(totalVendasPeriodo)}</strong></div>
             ${
               isChefe
-                ? `<div class="linha total-a-pagar"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrency(saldoDevedorGeral)}</strong></div>`
+                ? `<div class="linha total-a-pagar"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrencyBrl(saldoDevedorGeral)}</strong></div>`
                 : ""
             }
             <div style="margin-top:10px;color:#64748b;font-size:11px;">
@@ -410,8 +424,8 @@ export function ClienteDetalhe() {
             </div>
           </div>`;
     const vendasThead = comValores
-      ? `<tr><th>Data</th><th>Itens (quantidade × produto)</th><th>Total</th></tr>`
-      : `<tr><th>Data</th><th>Itens (quantidade × produto)</th></tr>`;
+      ? `<tr><th>Nº</th><th>Data</th><th>Itens (quantidade × produto)</th><th>Total</th></tr>`
+      : `<tr><th>Nº</th><th>Data</th><th>Itens (quantidade × produto)</th></tr>`;
     const vendasTbody = vendasFiltradas
       .map((v) => {
         const itensHtml =
@@ -419,14 +433,14 @@ export function ClienteDetalhe() {
             ? v.itens
                 .map((i) =>
                   comValores
-                    ? `${i.quantidade}× ${i.produto} (${formatCurrency(i.preco_unitario)} un.)`
+                    ? `${i.quantidade}× ${i.produto} (${formatCurrencyBrl(i.preco_unitario)} un.)`
                     : `${i.quantidade}× ${i.produto}`
                 )
                 .join("<br/>")
             : "—";
         return comValores
-          ? `<tr><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td><td>${formatCurrency(v.total)}</td></tr>`
-          : `<tr><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td></tr>`;
+          ? `<tr><td>Venda #${v.id}</td><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td><td>${formatCurrencyBrl(v.total)}</td></tr>`
+          : `<tr><td>Venda #${v.id}</td><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td></tr>`;
       })
       .join("");
     const htmlFech = `
@@ -534,8 +548,8 @@ export function ClienteDetalhe() {
                   return `<tr>
                       <td>${i.produto}</td>
                       <td class="num">${i.quantidade}</td>
-                      <td class="num">${formatCurrency(i.preco_unitario)}</td>
-                      <td class="num">${formatCurrency(totalItem)}</td>
+                      <td class="num">${formatCurrencyBrl(i.preco_unitario)}</td>
+                      <td class="num">${formatCurrencyBrl(totalItem)}</td>
                     </tr>`;
                 })
                 .join("")
@@ -555,7 +569,7 @@ export function ClienteDetalhe() {
           return `
           <div class="nota">
             <div class="nota-header">
-              <div><strong>Nota #${v.id}</strong></div>
+              <div><strong>Venda #${v.id}</strong></div>
               <div><strong>Data:</strong> ${dataVenda}</div>
               <div><strong>Cliente:</strong> ${data.cliente.nome}</div>
             </div>
@@ -589,10 +603,10 @@ export function ClienteDetalhe() {
         return `
           <div class="nota">
             <div class="nota-header">
-              <div><strong>Nota #${v.id}</strong></div>
+              <div><strong>Venda #${v.id}</strong></div>
               <div><strong>Data:</strong> ${dataVenda}</div>
               <div><strong>Cliente:</strong> ${data.cliente.nome}</div>
-              <div><strong>Total da nota:</strong> ${formatCurrency(totalNota)}</div>
+              <div><strong>Total da nota:</strong> ${formatCurrencyBrl(totalNota)}</div>
             </div>
             <div class="nota-items">
               <table>
@@ -620,10 +634,10 @@ export function ClienteDetalhe() {
 
     const resumoSelecaoHtml = comValores
       ? `<div class="resumo-box">
-            <div class="linha"><span>Valor deste fechamento (soma das notas selecionadas)</span><strong>${formatCurrency(totalSelNum)}</strong></div>
+            <div class="linha"><span>Valor deste fechamento (soma das notas selecionadas)</span><strong>${formatCurrencyBrl(totalSelNum)}</strong></div>
             ${
               isChefe
-                ? `<div class="linha"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrency(saldoTotal)}</strong></div>`
+                ? `<div class="linha"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrencyBrl(saldoTotal)}</strong></div>`
                 : ""
             }
             <div style="margin-top:10px;color:#64748b;font-size:11px;">
@@ -877,6 +891,7 @@ export function ClienteDetalhe() {
   if (!data) return <p className="text-muted-foreground">Cliente não encontrado.</p>;
 
   const { cliente, total_vendas, total_pago, saldo_devedor } = data;
+  const vendasTableColSpan = isChefe ? 7 : 4;
 
   const selecionarTodasExibidas = () => setSelectedVendaIds(new Set(exibirVendas.map((v) => v.id)));
   const limparSelecao = () => setSelectedVendaIds(new Set());
@@ -1125,12 +1140,12 @@ export function ClienteDetalhe() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">Total selecionado (soma das notas)</p>
-                <p className="text-xl font-bold text-primary">{formatCurrency(totalSelecionado)}</p>
+                <p className="text-xl font-bold text-primary">{formatCurrencyBrl(totalSelecionado)}</p>
               </div>
               <div className="rounded-lg border bg-background p-4">
                 <p className="text-xs font-medium text-muted-foreground">Saldo atual do cliente</p>
                 <p className={`text-xl font-bold ${(data?.saldo_devedor ?? 0) > 0 ? "text-destructive" : ""}`}>
-                  {formatCurrency(data?.saldo_devedor ?? 0)}
+                  {formatCurrencyBrl(data?.saldo_devedor ?? 0)}
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Conferência geral no sistema; não vincula pagamentos a este fechamento.
@@ -1143,7 +1158,7 @@ export function ClienteDetalhe() {
                 <p
                   className={`text-xl font-bold ${restanteBrutoNotasForaSelecao > 0 ? "text-amber-600" : "text-muted-foreground"}`}
                 >
-                  {formatCurrency(restanteBrutoNotasForaSelecao)}
+                  {formatCurrencyBrl(restanteBrutoNotasForaSelecao)}
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-1">
                   Soma das notas listadas que não estão selecionadas (sem descontar pagamentos).
@@ -1175,7 +1190,7 @@ export function ClienteDetalhe() {
             <Receipt className="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatCurrency(total_vendas)}</p>
+            <p className="text-2xl font-bold">{formatCurrencyBrl(total_vendas)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -1184,7 +1199,7 @@ export function ClienteDetalhe() {
             <CreditCard className="size-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold text-green-600">{formatCurrency(total_pago)}</p>
+            <p className="text-2xl font-bold text-green-600">{formatCurrencyBrl(total_pago)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -1194,7 +1209,7 @@ export function ClienteDetalhe() {
           </CardHeader>
           <CardContent>
             <p className={`text-2xl font-bold ${saldo_devedor > 0 ? "text-destructive" : ""}`}>
-              {formatCurrency(saldo_devedor)}
+              {formatCurrencyBrl(saldo_devedor)}
             </p>
           </CardContent>
         </Card>
@@ -1394,7 +1409,7 @@ export function ClienteDetalhe() {
                         />
                       </TableCell>
                       <TableCell className="font-medium">{p.nome}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(preco)}</TableCell>
+                      <TableCell className="text-right">{formatCurrencyBrl(preco)}</TableCell>
                       <TableCell>
                         <span className={especifico ? "text-primary font-medium" : "text-muted-foreground"}>
                           {especifico ? "Específico" : "Valor inicial"}
@@ -1424,7 +1439,7 @@ export function ClienteDetalhe() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              Total das vendas no período: <strong className="text-foreground">{formatCurrency(totalVendasPeriodo)}</strong>
+              Total das vendas no período: <strong className="text-foreground">{formatCurrencyBrl(totalVendasPeriodo)}</strong>
             </p>
             <p className="text-sm text-muted-foreground mt-2">
               Pagamentos por período não são mostrados aqui: costumam misturar fechamentos. Use os cards{" "}
@@ -1441,20 +1456,31 @@ export function ClienteDetalhe() {
             <CardTitle>Vendas{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <div className="w-full rounded-md border border-border/50">
+            <Table className="w-full table-fixed text-sm">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10">Selecionar</TableHead>
-                  {isChefe && <TableHead className="w-[120px]">Marcada paga</TableHead>}
-                  <TableHead>Data</TableHead>
-                  <TableHead>Itens (quantidade × produto)</TableHead>
-                  {isChefe && <TableHead className="text-right">Total</TableHead>}
+                  <TableHead className="w-11 align-middle">Sel.</TableHead>
+                  {isChefe && (
+                    <TableHead className="w-[5.5rem] align-middle text-xs font-semibold leading-tight" title="Marcada paga (só visual)">
+                      Marcada
+                    </TableHead>
+                  )}
+                  <TableHead className="w-[5.25rem] whitespace-nowrap align-middle">Data</TableHead>
+                  <TableHead className="min-w-0 align-middle">Detalhe</TableHead>
+                  <TableHead className="w-[4.5rem] text-right align-middle tabular-nums">Qtd</TableHead>
+                  {isChefe && (
+                    <TableHead className="w-[5.25rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr uni</TableHead>
+                  )}
+                  {isChefe && (
+                    <TableHead className="w-[5.5rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr total</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {exibirVendas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isChefe ? 5 : 3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={vendasTableColSpan} className="text-center text-muted-foreground">
                       Nenhuma venda{limites ? " no período" : ""}
                     </TableCell>
                   </TableRow>
@@ -1462,68 +1488,125 @@ export function ClienteDetalhe() {
                   exibirVendas.map((v) => {
                     const sel = selectedVendaIds.has(v.id);
                     const paga = v.marcada_paga === true;
+                    const itens = Array.isArray(v.itens) ? v.itens : [];
+                    const qtdTotalVenda = itens.reduce((s, item) => {
+                      const q = item.quantidade;
+                      if (q == null || Number.isNaN(Number(q))) return s;
+                      return s + Number(q);
+                    }, 0);
                     return (
-                    <TableRow
-                      key={v.id}
-                      className={cn(
-                        "transition-[background-color,box-shadow,border-color] duration-150",
-                        paga && rowVendaMarcadaPaga,
-                        sel && !paga && rowVendaSelecionada,
-                        sel && paga && rowVendaPagaSelecionada,
-                      )}
-                    >
-                      <TableCell>
-                        <Checkbox
-                          checked={sel}
-                          onCheckedChange={() => toggleVendaSelection(v.id)}
-                        />
-                      </TableCell>
-                      {isChefe && (
-                        <TableCell>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {paga ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/12 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                                <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
-                                Paga
+                      <Fragment key={v.id}>
+                        <TableRow
+                          className={cn(
+                            "transition-[background-color,box-shadow,border-color] duration-150",
+                            paga && rowVendaMarcadaPaga,
+                            sel && !paga && rowVendaSelecionada,
+                            sel && paga && rowVendaPagaSelecionada,
+                          )}
+                        >
+                          <TableCell className="align-top">
+                            <Checkbox checked={sel} onCheckedChange={() => toggleVendaSelection(v.id)} />
+                          </TableCell>
+                          {isChefe && (
+                            <TableCell className="align-top">
+                              <div className="flex flex-wrap items-center gap-2">
+                                {paga ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/12 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                                    <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                                    Paga
+                                  </span>
+                                ) : null}
+                                <Checkbox
+                                  checked={paga}
+                                  disabled={marcacaoVendaSaving === v.id}
+                                  onCheckedChange={(checked) => void aplicarMarcacaoVenda(v.id, checked === true)}
+                                  aria-label={`Marcar venda ${v.id} como paga`}
+                                />
+                              </div>
+                            </TableCell>
+                          )}
+                          <TableCell className="text-muted-foreground align-top">{formatDateOnly(v.data)}</TableCell>
+                          <TableCell className="min-w-0 align-top">
+                            <div className="space-y-0.5">
+                              <span className="font-medium">Venda #{v.id}</span>
+                              <span className="block text-xs text-muted-foreground">
+                                {itens.length} item(ns) nesta venda
                               </span>
-                            ) : null}
-                            <Checkbox
-                              checked={paga}
-                              disabled={marcacaoVendaSaving === v.id}
-                              onCheckedChange={(checked) =>
-                                void aplicarMarcacaoVenda(v.id, checked === true)
-                              }
-                              aria-label={`Marcar venda ${v.id} como paga`}
-                            />
-                          </div>
-                        </TableCell>
-                      )}
-                      <TableCell className="text-muted-foreground whitespace-nowrap">
-                        {formatDateOnly(v.data)}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {v.itens && v.itens.length > 0 ? (
-                          <ul className="list-none space-y-1 py-0 my-0">
-                            {v.itens.map((item, idx) => (
-                              <li key={idx}>
-                                <span className="font-medium">{item.quantidade}×</span> {item.produto}
-                                <span className="text-muted-foreground ml-1">
-                                  ({formatCurrency(item.preco_unitario)} un.)
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right align-top tabular-nums text-muted-foreground">
+                            {qtdTotalVenda > 0 ? qtdTotalVenda : "—"}
+                          </TableCell>
+                          {isChefe && (
+                            <TableCell className="text-right align-top tabular-nums text-muted-foreground">—</TableCell>
+                          )}
+                          {isChefe && (
+                            <TableCell className="text-right align-top font-medium tabular-nums text-foreground">
+                              {formatCurrencyBrl(v.total)}
+                            </TableCell>
+                          )}
+                        </TableRow>
+                        {itens.length > 0 ? (
+                          itens.map((item, idx) => (
+                            <TableRow
+                              key={`${v.id}-${idx}`}
+                              className={cn(
+                                "transition-[background-color,box-shadow] duration-150",
+                                paga ? rowVendaMarcadaPagaFilha : "bg-muted/25",
+                                sel && !paga && rowVendaSelecionada,
+                                sel && paga && rowVendaPagaFilhaSelecionada,
+                              )}
+                            >
+                              <TableCell />
+                              {isChefe && <TableCell />}
+                              <TableCell />
+                              <TableCell className="min-w-0">
+                                <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground">
+                                  {item.produto}
                                 </span>
-                              </li>
-                            ))}
-                          </ul>
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {item.quantidade != null ? item.quantidade : "—"}
+                              </TableCell>
+                              {isChefe && (
+                                <TableCell className="text-right tabular-nums whitespace-nowrap">
+                                  {item.preco_unitario != null && !Number.isNaN(Number(item.preco_unitario))
+                                    ? formatCurrencyBrl(item.preco_unitario)
+                                    : "—"}
+                                </TableCell>
+                              )}
+                              {isChefe && (
+                                <TableCell className="text-right tabular-nums whitespace-nowrap text-red-600">
+                                  {formatCurrencyBrl(totalItemVenda(item))}
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          ))
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          <TableRow
+                            className={cn(
+                              "transition-[background-color,box-shadow] duration-150",
+                              paga ? rowVendaMarcadaPagaFilha : "bg-muted/25",
+                              sel && !paga && rowVendaSelecionada,
+                              sel && paga && rowVendaPagaFilhaSelecionada,
+                            )}
+                          >
+                            <TableCell />
+                            {isChefe && <TableCell />}
+                            <TableCell />
+                            <TableCell className="min-w-0 text-muted-foreground">Nenhum item registrado</TableCell>
+                            <TableCell className="text-right tabular-nums">—</TableCell>
+                            {isChefe && <TableCell className="text-right tabular-nums">—</TableCell>}
+                            {isChefe && <TableCell className="text-right tabular-nums">—</TableCell>}
+                          </TableRow>
                         )}
-                      </TableCell>
-                      {isChefe && <TableCell className="text-right font-medium">{formatCurrency(v.total)}</TableCell>}
-                    </TableRow>
+                      </Fragment>
                     );
                   })
                 )}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -1554,7 +1637,7 @@ export function ClienteDetalhe() {
                       <TableCell className="text-muted-foreground">
                         {formatDateOnly(p.data)}
                       </TableCell>
-                      {isChefe && <TableCell className="text-right text-green-600">{formatCurrency(p.valor)}</TableCell>}
+                      {isChefe && <TableCell className="text-right text-green-600">{formatCurrencyBrl(p.valor)}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
                       {isChefe && <TableCell className="text-muted-foreground">{p.conta_nome || "-"}</TableCell>}
                       {isChefe && (
@@ -1593,7 +1676,7 @@ export function ClienteDetalhe() {
         title="Excluir pagamento"
         description={
           pagamentoExcluir
-            ? `Pagamento de ${formatCurrency(pagamentoExcluir.valor)} em ${formatDateOnly(pagamentoExcluir.data)}. O saldo da conta (se houver) será ajustado. Informe o motivo e confirme com sua senha.`
+            ? `Pagamento de ${formatCurrencyBrl(pagamentoExcluir.valor)} em ${formatDateOnly(pagamentoExcluir.data)}. O saldo da conta (se houver) será ajustado. Informe o motivo e confirme com sua senha.`
             : ""
         }
         confirmLabel="Confirmar exclusão"

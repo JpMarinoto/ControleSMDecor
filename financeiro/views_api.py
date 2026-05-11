@@ -91,6 +91,19 @@ def _int_quantidade_item(qtd):
         raise ValueError
 
 
+def _parse_preco_unitario_venda(preco_enviado, preco_cadastro_produto):
+    """Preço unitário em venda: None usa cadastro; senão Decimal(str) para não perder casas nem herdar ruído de float JSON."""
+    if preco_enviado is None:
+        return preco_cadastro_produto
+    try:
+        p = Decimal(str(preco_enviado).replace(',', '.'))
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError('preço inválido')
+    if p < 0:
+        raise ValueError('preço negativo')
+    return p
+
+
 def _api_log(request, acao, tabela, detalhes=""):
     """Registra ação nos logs do sistema (usado pela API)."""
     user = None
@@ -884,11 +897,11 @@ class VendaListCreate(APIView):
         for item in itens:
             prod_id = item.get('produto') or item.get('produto_id')
             qty = item.get('quantidade', 1)
-            preco = item.get('preco_unitario')
             produto = Produto.objects.get(pk=prod_id)
-            # Snapshot: só usa preço do cadastro se o cliente não enviou preco_unitario (notas antigas nunca são atualizadas pelo PUT do produto).
-            if preco is None:
-                preco = produto.preco_venda
+            try:
+                preco = _parse_preco_unitario_venda(item.get('preco_unitario'), produto.preco_venda)
+            except ValueError as e:
+                return Response({'itens': [str(e)]}, status=status.HTTP_400_BAD_REQUEST)
             ItemVenda.objects.create(
                 venda=venda,
                 produto_id=prod_id,
@@ -1008,8 +1021,10 @@ class VendaAddItem(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if preco is None:
-            preco = produto.preco_venda
+        try:
+            preco = _parse_preco_unitario_venda(preco, produto.preco_venda)
+        except ValueError:
+            return Response({'preco_unitario': ['Preço inválido.']}, status=status.HTTP_400_BAD_REQUEST)
         # preco_unitario gravado na linha; alterar Produto.preco_venda depois não mexe neste registro.
         ItemVenda.objects.create(
             venda=venda,

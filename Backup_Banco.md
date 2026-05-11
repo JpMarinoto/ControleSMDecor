@@ -19,7 +19,7 @@ ls -1t backups/db/db-*.sqlite3 | head -1
 
 Depois dar o comando
 
-scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/NOMEBANCO"C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMEBANCO"
+scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/NOMEBANCO "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\NOMEBANCO"
 
 
 Se quiser pegar o banco do backup e colocar na localhost voce da
