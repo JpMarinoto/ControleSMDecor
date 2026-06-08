@@ -90,6 +90,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
     custo_materiais = serializers.SerializerMethodField(read_only=True)
     custo_total_fabricacao = serializers.SerializerMethodField(read_only=True)
     categoria_nome = serializers.SerializerMethodField(read_only=True)
+    fornecedor_nome = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Produto
@@ -102,6 +103,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
             'revenda',
             'fabricado',
             'fornecedor',
+            'fornecedor_nome',
             'preco_custo',
             'mao_obra_unitaria',
             'margem_lucro_percent',
@@ -115,6 +117,11 @@ class ProdutoSerializer(serializers.ModelSerializer):
     def get_categoria_nome(self, obj):
         if obj.categoria_id and obj.categoria:
             return obj.categoria.nome or ''
+        return ''
+
+    def get_fornecedor_nome(self, obj):
+        if obj.fornecedor_id and obj.fornecedor:
+            return obj.fornecedor.nome or ''
         return ''
 
     def get_insumos(self, obj):
@@ -152,10 +159,25 @@ class MaterialSerializer(serializers.ModelSerializer):
     precoFabricacao = serializers.DecimalField(
         source='preco_fabricacao', max_digits=12, decimal_places=4, required=False, allow_null=True
     )
+    fornecedor_padrao_nome = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Material
-        fields = ['id', 'nome', 'precoUnitarioBase', 'precoFabricacao', 'estoque_atual', 'categoria', 'fornecedor_padrao']
+        fields = [
+            'id',
+            'nome',
+            'precoUnitarioBase',
+            'precoFabricacao',
+            'estoque_atual',
+            'categoria',
+            'fornecedor_padrao',
+            'fornecedor_padrao_nome',
+        ]
+
+    def get_fornecedor_padrao_nome(self, obj):
+        if obj.fornecedor_padrao_id and obj.fornecedor_padrao:
+            return obj.fornecedor_padrao.nome or ''
+        return ''
 
 
 class ContaBancoSerializer(serializers.ModelSerializer):
@@ -273,7 +295,7 @@ class ItemCompraProdutoSerializer(serializers.ModelSerializer):
 
 class OrdemCompraSerializer(serializers.ModelSerializer):
     fornecedor = serializers.CharField(source='fornecedor.nome', read_only=True)
-    fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
+    fornecedor_id = serializers.IntegerField(source='fornecedor.id', read_only=True)
     data = serializers.SerializerMethodField()
     data_lancamento = serializers.SerializerMethodField()
     ultima_alteracao_em = serializers.SerializerMethodField()

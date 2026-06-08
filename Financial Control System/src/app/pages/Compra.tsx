@@ -5,8 +5,8 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
+import { SearchableSelect } from "../components/SearchableSelect";
+import { CadastroRapidoItemDialog, type CadastroRapidoModo } from "../components/CadastroRapidoItemDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
   ShoppingCart,
@@ -23,8 +23,6 @@ import {
   Ban,
   MessageSquare,
   PanelRightOpen,
-  ChevronsUpDown,
-  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -43,7 +41,6 @@ import { SimpleConfirmDialog, ConfirmacaoComSenhaDialog } from "../components/Co
 import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { cn } from "../components/ui/utils";
-
 interface ItemCompra {
   id: number;
   tipo?: "material" | "produto";
@@ -70,15 +67,52 @@ interface OrdemCompra {
   total: number;
 }
 
-function compraNormText(s: unknown) {
-  return String(s ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
+type CompraPickOption = { id: string | number; nome: string };
+
+function compraOptionRotulo(o: CompraPickOption): string {
+  return o.nome;
 }
 
-type CompraPickOption = { id: string | number; nome: string };
+function materialCompraOption(m: { id: number | string; nome?: string }): CompraPickOption {
+  return {
+    id: m.id,
+    nome: String(m.nome ?? "").trim() || `Material #${m.id}`,
+  };
+}
+
+function produtoCompraOption(p: { id: number | string; nome?: string }): CompraPickOption {
+  return {
+    id: p.id,
+    nome: String(p.nome ?? "").trim() || `Produto #${p.id}`,
+  };
+}
+
+function fornecedorSearchText(f: {
+  nome?: string;
+  nomeRazaoSocial?: string;
+  cpf?: string;
+  cnpj?: string;
+  telefone?: string;
+}): string {
+  return [f.nome ?? f.nomeRazaoSocial, f.cpf, f.cnpj, f.telefone].filter(Boolean).join(" ");
+}
+
+/** API de detalhe nem sempre trazia fornecedor_id; resolve pelo nome se necessário. */
+function fornecedorIdDaOrdem(
+  ordem: { fornecedor_id?: number | string | null; fornecedor?: string },
+  fornecedores: { id: number | string; nome?: string; nomeRazaoSocial?: string }[],
+): string {
+  if (ordem.fornecedor_id != null && ordem.fornecedor_id !== "") {
+    return String(ordem.fornecedor_id);
+  }
+  const nome = String(ordem.fornecedor ?? "").trim().toLowerCase();
+  if (!nome) return "";
+  const f = fornecedores.find((x) => {
+    const n = String(x.nome ?? x.nomeRazaoSocial ?? "").trim().toLowerCase();
+    return n === nome;
+  });
+  return f ? String(f.id) : "";
+}
 
 /** Lista de material ou produto com campo de pesquisa (aba Compra). */
 function CompraSearchableSelect({
@@ -100,68 +134,26 @@ function CompraSearchableSelect({
   emptyHint?: string;
   searchPlaceholder?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const filtered = useMemo(() => {
-    const q = compraNormText(query);
-    if (!q) return options;
-    return options.filter((o) => compraNormText(o.nome).includes(q));
-  }, [options, query]);
-  const selected = options.find((o) => String(o.id) === value);
+  const mapped = useMemo(
+    () =>
+      options.map((o) => {
+        const label = compraOptionRotulo(o);
+        return { id: o.id, label, searchText: label };
+      }),
+    [options],
+  );
   return (
-    <Popover
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (!o) setQuery("");
-      }}
-    >
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          id={triggerId}
-          disabled={disabled || options.length === 0}
-          className="w-full justify-between font-normal"
-        >
-          <span className="truncate text-left">{selected?.nome ?? placeholder}</span>
-          <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[min(100%,20rem)] p-0" align="start">
-        <Command shouldFilter={false}>
-          <div className="flex items-center gap-2 border-b px-3 py-2">
-            <Search className="size-4 shrink-0 text-muted-foreground" />
-            <CommandInput
-              placeholder={searchPlaceholder}
-              value={query}
-              onValueChange={setQuery}
-              className="h-9 border-0 shadow-none focus:ring-0"
-            />
-          </div>
-          <CommandList className="max-h-[280px]">
-            <CommandEmpty>{emptyHint ?? "Nenhum item encontrado."}</CommandEmpty>
-            <CommandGroup>
-              {filtered.map((o) => (
-                <CommandItem
-                  key={String(o.id)}
-                  value={String(o.id)}
-                  onSelect={() => {
-                    onValueChange(String(o.id));
-                    setOpen(false);
-                    setQuery("");
-                  }}
-                >
-                  <span className="truncate">{o.nome}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+    <SearchableSelect
+      value={value}
+      onValueChange={onValueChange}
+      options={mapped}
+      placeholder={placeholder}
+      triggerId={triggerId}
+      disabled={disabled}
+      emptyHint={emptyHint}
+      searchPlaceholder={searchPlaceholder}
+      listClassName="w-[min(36rem,95vw)] p-0"
+    />
   );
 }
 
@@ -224,6 +216,24 @@ function produtoDisponivelParaFornecedor(p: any, fid: string) {
   return String(pf) === String(fid);
 }
 
+function precoUniMaterial(m: {
+  precoUnitarioBase?: number | string | null;
+  preco_unitario_base?: number | string | null;
+} | null | undefined): string {
+  if (!m) return "";
+  const preco = m.precoUnitarioBase ?? m.preco_unitario_base;
+  return preco != null && preco !== "" ? String(preco) : "";
+}
+
+function precoUniProdutoCompra(p: {
+  preco_custo?: number | string | null;
+  precoCusto?: number | string | null;
+} | null | undefined): string {
+  if (!p) return "";
+  const preco = p.preco_custo ?? p.precoCusto;
+  return preco != null && preco !== "" ? String(preco) : "";
+}
+
 /** Mesma regra da API: compra como item pronto se não é fabricado e (revenda ou tem fornecedor no cadastro). */
 function produtoElegivelCompraPronta(p: any) {
   if (p.fabricado) return false;
@@ -258,10 +268,20 @@ export function Compra() {
   const [materiais, setMateriais] = useState<any[]>([]);
   const [produtosRevenda, setProdutosRevenda] = useState<any[]>([]);
   const [fornecedores, setFornecedores] = useState<any[]>([]);
-  
+
   const [materialId, setMaterialId] = useState('');
   const [produtoId, setProdutoId] = useState('');
   const [fornecedorId, setFornecedorId] = useState('');
+
+  const fornecedoresPorId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of fornecedores) {
+      m.set(String(f.id), String(f.nome ?? f.nomeRazaoSocial ?? "").trim());
+    }
+    return m;
+  }, [fornecedores]);
+
+  const fornecedorSelecionadoNome = fornecedorId ? (fornecedoresPorId.get(fornecedorId) ?? "") : "";
   const [quantidade, setQuantidade] = useState('');
   const [precoUnitario, setPrecoUnitario] = useState('');
   const [data, setData] = useState(getTodayLocalISO());
@@ -279,6 +299,28 @@ export function Compra() {
   const [editCompraQtd, setEditCompraQtd] = useState("");
   const [editCompraPreco, setEditCompraPreco] = useState("");
   const [detailCompra, setDetailCompra] = useState<OrdemCompra | null>(null);
+  const fornecedorIdDetalheCompra = useMemo(
+    () => (detailCompra ? fornecedorIdDaOrdem(detailCompra, fornecedores) : ""),
+    [detailCompra, fornecedores],
+  );
+  const materiaisDetalheCompra = useMemo(
+    () =>
+      fornecedorIdDetalheCompra
+        ? materiais.filter(
+            (m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === fornecedorIdDetalheCompra,
+          )
+        : [],
+    [materiais, fornecedorIdDetalheCompra],
+  );
+  const produtosDetalheCompra = useMemo(
+    () =>
+      fornecedorIdDetalheCompra
+        ? produtosRevenda
+            .filter((p: any) => produtoDisponivelParaFornecedor(p, fornecedorIdDetalheCompra))
+            .sort((a: any, b: any) => String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"))
+        : [],
+    [produtosRevenda, fornecedorIdDetalheCompra],
+  );
   const [simpleConfirm, setSimpleConfirm] = useState<{
     title: string;
     description: string;
@@ -301,6 +343,10 @@ export function Compra() {
   const [addDetailProdutoId, setAddDetailProdutoId] = useState("");
   const [addDetailQtd, setAddDetailQtd] = useState("");
   const [addDetailPreco, setAddDetailPreco] = useState("");
+  const [cadastroRapidoOpen, setCadastroRapidoOpen] = useState(false);
+  const [cadastroRapidoModo, setCadastroRapidoModo] = useState<CadastroRapidoModo>("material-compra");
+  const [cadastroRapidoFornecedorId, setCadastroRapidoFornecedorId] = useState("");
+  const cadastroRapidoOrigemRef = useRef<"nova" | "detalhe">("nova");
   const [addItemSenhaOpen, setAddItemSenhaOpen] = useState(false);
   const pendingAddItemRef = useRef<{
     ordemId: string;
@@ -323,6 +369,56 @@ export function Compra() {
   const pendingDataCompraRef = useRef<{ ordemId: string; data: string } | null>(null);
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
+
+  const abrirCadastroRapido = (origem: "nova" | "detalhe") => {
+    const fid = origem === "detalhe" ? fornecedorIdDetalheCompra : fornecedorId;
+    if (!fid) {
+      toast.error("Selecione o fornecedor primeiro");
+      return;
+    }
+    const modo: CadastroRapidoModo =
+      origem === "detalhe"
+        ? addDetailTipo === "produto"
+          ? "produto-compra"
+          : "material-compra"
+        : tipoItem === "produto"
+          ? "produto-compra"
+          : "material-compra";
+    cadastroRapidoOrigemRef.current = origem;
+    setCadastroRapidoModo(modo);
+    setCadastroRapidoFornecedorId(fid);
+    setCadastroRapidoOpen(true);
+  };
+
+  const handleItemCriadoRapido = async (created: Record<string, unknown>) => {
+    const { origem } = cadastroRapidoOrigemRef.current;
+    const id = String(created.id);
+    if (cadastroRapidoModo === "material-compra") {
+      const mats = await api.getMateriais().catch(() => []);
+      setMateriais(Array.isArray(mats) ? mats : []);
+      if (origem === "detalhe") {
+        setAddDetailMaterialId(id);
+        setAddDetailPreco(precoUniMaterial(created));
+      } else {
+        setTipoItem("material");
+        setMaterialId(id);
+        setPrecoUnitario(precoUniMaterial(created));
+      }
+    } else {
+      const prods = await api.getProdutos().catch(() => []);
+      const all = Array.isArray(prods) ? prods : [];
+      setProdutosRevenda(all.filter((p: any) => produtoElegivelCompraPronta(p)));
+      if (origem === "detalhe") {
+        setAddDetailProdutoId(id);
+        setAddDetailPreco(precoUniProdutoCompra(created));
+      } else {
+        setTipoItem("produto");
+        setProdutoId(id);
+        setPrecoUnitario(precoUniProdutoCompra(created));
+      }
+    }
+  };
+
   useEffect(() => {
     if (detailCompra?.data) setEditDetailDataCompra(String(detailCompra.data).slice(0, 10));
   }, [detailCompra?.id, detailCompra?.data]);
@@ -354,13 +450,28 @@ export function Compra() {
   }, []);
 
   useEffect(() => {
-    if (!fornecedorId || !materialId) return;
-    const mat = materiais.find((m: any) => String(m.id) === materialId);
-    if (mat && (String(mat.fornecedor_padrao ?? mat.fornecedor_padrao_id) === String(fornecedorId))) {
-      const preco = mat.precoUnitarioBase ?? mat.preco_unitario_base;
-      if (preco != null) setPrecoUnitario(String(preco));
+    if (tipoItem === "material" && materialId) {
+      const mat = materiais.find((m: any) => String(m.id) === materialId);
+      setPrecoUnitario(precoUniMaterial(mat));
+    } else if (tipoItem === "produto" && produtoId) {
+      const p = produtosRevenda.find((x: any) => String(x.id) === produtoId);
+      setPrecoUnitario(precoUniProdutoCompra(p));
+    } else {
+      setPrecoUnitario("");
     }
-  }, [fornecedorId, materialId, materiais]);
+  }, [tipoItem, materialId, produtoId, materiais, produtosRevenda]);
+
+  useEffect(() => {
+    if (addDetailTipo === "material" && addDetailMaterialId) {
+      const mat = materiais.find((m: any) => String(m.id) === addDetailMaterialId);
+      setAddDetailPreco(precoUniMaterial(mat));
+    } else if (addDetailTipo === "produto" && addDetailProdutoId) {
+      const p = produtosRevenda.find((x: any) => String(x.id) === addDetailProdutoId);
+      setAddDetailPreco(precoUniProdutoCompra(p));
+    } else {
+      setAddDetailPreco("");
+    }
+  }, [addDetailTipo, addDetailMaterialId, addDetailProdutoId, materiais, produtosRevenda]);
 
   // Ao trocar o fornecedor, limpar material selecionado se não estiver vinculado a ele
   useEffect(() => {
@@ -433,7 +544,14 @@ export function Compra() {
     }
     try {
       const d = await api.getCompraDetalhe(idStr);
-      setDetailCompra(d);
+      const fornecedorId = fornecedorIdDaOrdem(
+        { fornecedor_id: d.fornecedor_id ?? ordem.fornecedor_id, fornecedor: d.fornecedor ?? ordem.fornecedor },
+        fornecedores,
+      );
+      setDetailCompra({
+        ...d,
+        fornecedor_id: fornecedorId ? Number(fornecedorId) : d.fornecedor_id ?? ordem.fornecedor_id,
+      });
       setAddDetailTipo("material");
       setAddDetailMaterialId("");
       setAddDetailProdutoId("");
@@ -868,24 +986,39 @@ export function Compra() {
                   <div className="space-y-2">
                     <Label htmlFor="fornecedorId">Fornecedor *</Label>
                     {fornecedores.length > 0 ? (
-                      <Select value={fornecedorId} onValueChange={setFornecedorId}>
-                        <SelectTrigger id="fornecedorId">
-                          <SelectValue placeholder="Selecione o fornecedor" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {fornecedores.map((f: any) => (
-                            <SelectItem key={f.id} value={String(f.id)}>
-                              {f.nome ?? f.nomeRazaoSocial}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <SearchableSelect
+                        value={fornecedorId}
+                        onValueChange={setFornecedorId}
+                        triggerId="fornecedorId"
+                        placeholder="Selecione o fornecedor"
+                        searchPlaceholder="Pesquisar fornecedor"
+                        emptyHint="Nenhum fornecedor encontrado."
+                        options={fornecedores.map((f: any) => ({
+                          id: f.id,
+                          label: String(f.nome ?? f.nomeRazaoSocial ?? "").trim() || `Fornecedor #${f.id}`,
+                          searchText: fornecedorSearchText(f),
+                        }))}
+                      />
                     ) : (
                       <p className="text-sm text-muted-foreground">Cadastre fornecedores na aba Cadastro.</p>
                     )}
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="materialId">Material para adicionar *</Label>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="materialId" className="flex-1">Item para adicionar *</Label>
+                      {fornecedorId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          title={tipoItem === "material" ? "Cadastrar novo material" : "Cadastrar novo produto"}
+                          onClick={() => abrirCadastroRapido("nova")}
+                        >
+                          <Plus className="size-4" />
+                        </Button>
+                      ) : null}
+                    </div>
                     {!fornecedorId ? (
                       <p className="text-sm text-muted-foreground py-2">Selecione o fornecedor para ver os materiais vinculados.</p>
                     ) : (() => {
@@ -901,7 +1034,15 @@ export function Compra() {
                       return (
                         <div className="space-y-2">
                           <Label>Tipo de item</Label>
-                          <Select value={tipoItem} onValueChange={(v) => setTipoItem(v as "material" | "produto")}>
+                          <Select
+                            value={tipoItem}
+                            onValueChange={(v) => {
+                              const t = v as "material" | "produto";
+                              setTipoItem(t);
+                              if (t === "material") setProdutoId("");
+                              else setMaterialId("");
+                            }}
+                          >
                             <SelectTrigger>
                               <SelectValue placeholder="Selecione" />
                             </SelectTrigger>
@@ -915,11 +1056,12 @@ export function Compra() {
                             materiaisDoFornecedor.length > 0 ? (
                               <CompraSearchableSelect
                                 value={materialId}
-                                onValueChange={setMaterialId}
-                                options={materiaisDoFornecedor.map((m: any) => ({
-                                  id: m.id,
-                                  nome: String(m.nome ?? "").trim() || `Material #${m.id}`,
-                                }))}
+                                onValueChange={(id) => {
+                                  setMaterialId(id);
+                                  const mat = materiais.find((m: any) => String(m.id) === id);
+                                  setPrecoUnitario(precoUniMaterial(mat));
+                                }}
+                                options={materiaisDoFornecedor.map((m: any) => materialCompraOption(m))}
                                 placeholder="Selecione o material"
                                 triggerId="materialId"
                                 emptyHint="Nenhum material encontrado."
@@ -933,11 +1075,12 @@ export function Compra() {
                           ) : produtosLista.length > 0 ? (
                             <CompraSearchableSelect
                               value={produtoId}
-                              onValueChange={setProdutoId}
-                              options={produtosLista.map((p: any) => ({
-                                id: p.id,
-                                nome: String(p.nome ?? "").trim() || `Produto #${p.id}`,
-                              }))}
+                              onValueChange={(id) => {
+                                setProdutoId(id);
+                                const p = produtosRevenda.find((x: any) => String(x.id) === id);
+                                setPrecoUnitario(precoUniProdutoCompra(p));
+                              }}
+                              options={produtosLista.map((p: any) => produtoCompraOption(p))}
                               placeholder="Selecione o produto de revenda"
                               triggerId="produtoId"
                               emptyHint="Nenhum produto encontrado."
@@ -970,14 +1113,13 @@ export function Compra() {
 
               {isChefe && (
                 <div className="space-y-2">
-                  <Label htmlFor="precoUnitario">Preço Unitário *</Label>
+                  <Label htmlFor="precoUnitario">Vlr Uni</Label>
                   <Input
                     id="precoUnitario"
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={precoUnitario}
                     onChange={(e) => setPrecoUnitario(e.target.value)}
-                    placeholder="0.00"
                   />
                 </div>
               )}
@@ -1024,14 +1166,10 @@ export function Compra() {
                              materiais.find((m: any) => String(m.id) === selectedId)?.preco_unitario_base ??
                              0);
                       const precoParaItem = isChefe
-                        ? (parseFloat(String(precoUnitario).replace(',', '.')) || precoBase)
+                        ? (parseFloat(String(precoUnitario).replace(',', '.')) || Number(precoBase))
                         : Number(precoBase);
-                      if (isChefe && (isNaN(precoParaItem) || precoParaItem <= 0)) {
-                        toast.error('Informe o preço unitário');
-                        return;
-                      }
-                      if (!isChefe && (!precoParaItem || precoParaItem <= 0)) {
-                        toast.error('Material sem preço base. Peça ao chefe para cadastrar.');
+                      if (isNaN(precoParaItem) || precoParaItem <= 0) {
+                        toast.error('Preço não definido. Informe o preço ou cadastre o valor base.');
                         return;
                       }
                       setItensForm((prev) => [
@@ -1059,8 +1197,8 @@ export function Compra() {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="min-w-[200px]">Item</TableHead>
-                        <TableHead className="w-24 text-right">Qtd</TableHead>
-                        {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Preço un.</TableHead>}
+                        <TableHead className="w-20 text-right">Qtd</TableHead>
+                        {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Vlr Uni</TableHead>}
                         {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Total</TableHead>}
                         <TableHead className="w-[132px] text-right">Ações</TableHead>
                       </TableRow>
@@ -1070,8 +1208,16 @@ export function Compra() {
                         const isProd = item.materialId.startsWith("prod:");
                         const refId = item.materialId.replace("prod:", "").replace("mat:", "");
                         const label = isProd
-                          ? (produtosRevenda.find((p: any) => String(p.id) === refId)?.nome ?? `Produto #${refId}`)
-                          : (materiais.find((m: any) => String(m.id) === refId)?.nome ?? `Material #${refId}`);
+                          ? compraOptionRotulo(
+                              produtoCompraOption(
+                                produtosRevenda.find((p: any) => String(p.id) === refId) ?? { id: refId, nome: `Produto #${refId}` },
+                              ),
+                            )
+                          : compraOptionRotulo(
+                              materialCompraOption(
+                                materiais.find((m: any) => String(m.id) === refId) ?? { id: refId, nome: `Material #${refId}` },
+                              ),
+                            );
                         const qtdItem = parseQtdInteira(item.quantidade) ?? 0;
                         const precoItem = parseFloat(item.precoUnitario.replace(',', '.') || '0');
                         const isEditing = editingItemId === item.id;
@@ -1095,14 +1241,22 @@ export function Compra() {
                                     <Input
                                       type="text"
                                       inputMode="decimal"
-                                      className="h-8 w-full min-w-0 max-w-24 text-right text-sm tabular-nums ml-auto block"
+                                      className="h-8 w-full min-w-0 max-w-28 text-right text-sm tabular-nums ml-auto block"
                                       value={editPreco}
                                       onChange={(e) => setEditPreco(e.target.value)}
-                                      placeholder="0,00"
+                                      placeholder="Preço"
                                     />
                                   </TableCell>
                                 )}
-                                {isChefe && <TableCell className="align-middle" />}
+                                {isChefe && (
+                                  <TableCell className="text-right align-middle tabular-nums">
+                                    {formatCurrencyBrl(
+                                      !isNaN(parseFloat(editQtd.replace(",", ".")) * parseFloat(editPreco.replace(",", ".")))
+                                        ? parseFloat(editQtd.replace(",", ".")) * parseFloat(editPreco.replace(",", "."))
+                                        : 0
+                                    )}
+                                  </TableCell>
+                                )}
                                 <TableCell className="text-right align-middle py-2">
                                   <div className="flex items-center justify-end gap-0.5">
                                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-green-600 hover:bg-green-500/10 hover:text-green-700" onClick={salvarEdicaoItem} title="Salvar">
@@ -1116,10 +1270,12 @@ export function Compra() {
                               </>
                             ) : (
                               <>
-                                <TableCell className="text-right align-middle">{item.quantidade}</TableCell>
+                                <TableCell className="text-right align-middle tabular-nums font-medium">
+                                  {item.quantidade}
+                                </TableCell>
                                 {isChefe && (
                                   <TableCell className="text-right align-middle tabular-nums">
-                                    {formatCurrencyBrl(precoItem || 0)}
+                                    {formatCurrencyBrl(!isNaN(precoItem) ? precoItem : 0)}
                                   </TableCell>
                                 )}
                                 {isChefe && (
@@ -1444,7 +1600,16 @@ export function Compra() {
                     <div className="mt-3 grid gap-3 md:grid-cols-4">
                       <div className="space-y-2 md:col-span-1">
                         <Label>Tipo</Label>
-                        <Select value={addDetailTipo} onValueChange={(v) => setAddDetailTipo(v as any)}>
+                        <Select
+                          value={addDetailTipo}
+                          onValueChange={(v) => {
+                            const t = v as "material" | "produto";
+                            setAddDetailTipo(t);
+                            setAddDetailMaterialId("");
+                            setAddDetailProdutoId("");
+                            setAddDetailPreco("");
+                          }}
+                        >
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
@@ -1455,44 +1620,61 @@ export function Compra() {
                         </Select>
                       </div>
                       <div className="space-y-2 md:col-span-1">
-                        <Label>{addDetailTipo === "material" ? "Material" : "Produto"}</Label>
-                        {addDetailTipo === "material" ? (
-                          <CompraSearchableSelect
-                            value={addDetailMaterialId}
-                            onValueChange={setAddDetailMaterialId}
-                            options={materiais
-                              .filter(
-                                (m: any) =>
-                                  String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) ===
-                                  String(detailCompra.fornecedor_id),
-                              )
-                              .map((m: any) => ({
-                                id: m.id,
-                                nome: String(m.nome ?? "").trim() || `Material #${m.id}`,
-                              }))}
-                            placeholder="Selecione o material"
-                            emptyHint="Nenhum material encontrado."
-                            searchPlaceholder="Pesquisar material…"
-                          />
-                        ) : (
+                        <div className="flex items-center gap-2">
+                          <Label className="flex-1">{addDetailTipo === "material" ? "Material" : "Produto"}</Label>
+                          {fornecedorIdDetalheCompra ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8 shrink-0"
+                              title={addDetailTipo === "material" ? "Cadastrar novo material" : "Cadastrar novo produto"}
+                              onClick={() => abrirCadastroRapido("detalhe")}
+                            >
+                              <Plus className="size-4" />
+                            </Button>
+                          ) : null}
+                        </div>
+                        {!fornecedorIdDetalheCompra ? (
+                          <p className="text-sm text-muted-foreground py-2">
+                            Fornecedor da ordem não identificado. Feche e abra o detalhe novamente.
+                          </p>
+                        ) : addDetailTipo === "material" ? (
+                          materiaisDetalheCompra.length > 0 ? (
+                            <CompraSearchableSelect
+                              value={addDetailMaterialId}
+                              onValueChange={(id) => {
+                                setAddDetailMaterialId(id);
+                                const mat = materiais.find((m: any) => String(m.id) === id);
+                                setAddDetailPreco(precoUniMaterial(mat));
+                              }}
+                              options={materiaisDetalheCompra.map((m: any) => materialCompraOption(m))}
+                              placeholder="Selecione o material"
+                              emptyHint="Nenhum material encontrado."
+                              searchPlaceholder="Pesquisar material…"
+                            />
+                          ) : (
+                            <p className="text-sm text-muted-foreground py-2">
+                              Nenhum material vinculado a este fornecedor.
+                            </p>
+                          )
+                        ) : produtosDetalheCompra.length > 0 ? (
                           <CompraSearchableSelect
                             value={addDetailProdutoId}
-                            onValueChange={setAddDetailProdutoId}
-                            options={produtosRevenda
-                              .filter((p: any) =>
-                                produtoDisponivelParaFornecedor(p, String(detailCompra.fornecedor_id ?? "")),
-                              )
-                              .sort((a: any, b: any) =>
-                                String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"),
-                              )
-                              .map((p: any) => ({
-                                id: p.id,
-                                nome: String(p.nome ?? "").trim() || `Produto #${p.id}`,
-                              }))}
+                            onValueChange={(id) => {
+                              setAddDetailProdutoId(id);
+                              const p = produtosRevenda.find((x: any) => String(x.id) === id);
+                              setAddDetailPreco(precoUniProdutoCompra(p));
+                            }}
+                            options={produtosDetalheCompra.map((p: any) => produtoCompraOption(p))}
                             placeholder="Selecione o produto"
                             emptyHint="Nenhum produto encontrado."
                             searchPlaceholder="Pesquisar produto…"
                           />
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-2">
+                            Nenhum produto disponível para este fornecedor.
+                          </p>
                         )}
                       </div>
                       <div className="space-y-2 md:col-span-1">
@@ -1500,7 +1682,7 @@ export function Compra() {
                         <Input value={addDetailQtd} onChange={(e) => setAddDetailQtd(e.target.value)} type="number" min={1} />
                       </div>
                       <div className="space-y-2 md:col-span-1">
-                        <Label>Preço unitário</Label>
+                        <Label>Vlr Uni</Label>
                         <Input value={addDetailPreco} onChange={(e) => setAddDetailPreco(e.target.value)} inputMode="decimal" />
                       </div>
                     </div>
@@ -1854,6 +2036,15 @@ export function Compra() {
             pendingEditItemRef.current = null;
           }
         }}
+      />
+
+      <CadastroRapidoItemDialog
+        modo={cadastroRapidoModo}
+        open={cadastroRapidoOpen}
+        onOpenChange={setCadastroRapidoOpen}
+        onCreated={(item) => void handleItemCriadoRapido(item)}
+        fornecedorId={cadastroRapidoFornecedorId}
+        isChefe={isChefe}
       />
 
       <DocumentPrintPreview

@@ -39,6 +39,30 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
+import { SearchableSelect } from "../components/SearchableSelect";
+import { CadastroRapidoItemDialog } from "../components/CadastroRapidoItemDialog";
+
+function clienteSearchText(c: {
+  nome?: string;
+  cpf?: string;
+  cnpj?: string;
+  telefone?: string;
+}): string {
+  return [c.nome, c.cpf, c.cnpj, c.telefone].filter(Boolean).join(" ");
+}
+
+function produtoRotulo(p: { nome?: string; id?: number | string }): string {
+  return String(p.nome ?? "").trim() || `Produto #${p.id}`;
+}
+
+function precoUniProdutoVenda(p: {
+  preco_venda?: number | string | null;
+  precoInicial?: number | string | null;
+} | null | undefined): string {
+  if (!p) return "";
+  const preco = p.preco_venda ?? p.precoInicial;
+  return preco != null && preco !== "" ? String(preco) : "";
+}
 import {
   formatDateOnly,
   parseDateOnlyToTime,
@@ -107,6 +131,8 @@ export function Venda() {
   const [formaPagamento, setFormaPagamento] = useState("");
   const [data, setData] = useState(getTodayLocalISO());
   const [observacaoNova, setObservacaoNova] = useState("");
+  const [cadastroRapidoOpen, setCadastroRapidoOpen] = useState(false);
+  const [cadastroRapidoOrigem, setCadastroRapidoOrigem] = useState<"nova" | "detalhe">("nova");
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editQtd, setEditQtd] = useState("");
   const [editPreco, setEditPreco] = useState("");
@@ -174,20 +200,61 @@ export function Venda() {
     loadData();
   }, []);
 
-  // Cada cliente tem seu preço: buscar último preço cobrado para este cliente neste produto
-  useEffect(() => {
-    if (!clienteId || !produtoId) {
-      const prod = produtos.find((p: any) => String(p.id) === produtoId);
-      setPrecoUnitario(prod ? String(prod.preco_venda ?? prod.precoInicial ?? "") : "");
+  const aplicarPrecoUniVenda = (pid: string, cliente?: string) => {
+    if (!pid) {
+      setPrecoUnitario("");
       return;
     }
-    api.getUltimoPrecoClienteProduto(clienteId, produtoId).then((preco) => {
-      if (preco != null) setPrecoUnitario(String(preco));
-      else {
-        const prod = produtos.find((p: any) => String(p.id) === produtoId);
-        setPrecoUnitario(prod ? String(prod.preco_venda ?? prod.precoInicial ?? "") : "");
-      }
-    });
+    const prod = produtos.find((p: any) => String(p.id) === pid);
+    setPrecoUnitario(precoUniProdutoVenda(prod));
+    const cid = cliente ?? clienteId;
+    if (!cid) return;
+    api.getUltimoPrecoClienteProduto(cid, pid).then((preco) => {
+      if (preco != null && preco > 0) setPrecoUnitario(String(preco));
+    }).catch(() => {});
+  };
+
+  const selecionarProdutoVenda = (pid: string) => {
+    setProdutoId(pid);
+    aplicarPrecoUniVenda(pid);
+  };
+
+  const aplicarAddItemPrecoVenda = (pid: string) => {
+    if (!pid) {
+      setAddItemPreco("");
+      return;
+    }
+    const prod = produtos.find((p: any) => String(p.id) === pid);
+    setAddItemPreco(precoUniProdutoVenda(prod));
+    const clienteVenda = detailVenda?.cliente;
+    if (!clienteVenda) return;
+    api.getUltimoPrecoClienteProduto(String(clienteVenda), pid).then((preco) => {
+      if (preco != null && preco > 0) setAddItemPreco(String(preco));
+    }).catch(() => {});
+  };
+
+
+  const abrirCadastroRapidoProduto = (origem: "nova" | "detalhe") => {
+    setCadastroRapidoOrigem(origem);
+    setCadastroRapidoOpen(true);
+  };
+
+  const handleProdutoCriadoRapido = async (created: Record<string, unknown>) => {
+    const list = await api.getProdutos().catch(() => []);
+    const all = Array.isArray(list) ? list : [];
+    setProdutos(all);
+    const id = String(created.id);
+    if (cadastroRapidoOrigem === "detalhe") {
+      setAddItemProdutoId(id);
+      if (isChefe) aplicarAddItemPrecoVenda(id);
+    } else {
+      selecionarProdutoVenda(id);
+    }
+  };
+
+  // Cada cliente tem seu preço: buscar último preço cobrado para este cliente neste produto
+  useEffect(() => {
+    aplicarPrecoUniVenda(produtoId);
   }, [clienteId, produtoId, produtos]);
 
   const loadData = async () => {
@@ -739,7 +806,7 @@ export function Venda() {
     const q = norm(produtoPickerQuery);
     if (!q) return produtosAgrupados;
     return produtosAgrupados
-      .map(([cat, list]) => [cat, list.filter((p: any) => norm(p.nome).includes(q))] as const)
+      .map(([cat, list]) => [cat, list.filter((p: any) => norm(produtoRotulo(p)).includes(q))] as const)
       .filter(([, list]) => list.length > 0);
   }, [produtosAgrupados, produtoPickerQuery]);
 
@@ -747,7 +814,7 @@ export function Venda() {
     const q = norm(addItemPickerQuery);
     if (!q) return produtosAgrupados;
     return produtosAgrupados
-      .map(([cat, list]) => [cat, list.filter((p: any) => norm(p.nome).includes(q))] as const)
+      .map(([cat, list]) => [cat, list.filter((p: any) => norm(produtoRotulo(p)).includes(q))] as const)
       .filter(([, list]) => list.length > 0);
   }, [produtosAgrupados, addItemPickerQuery]);
   const precoNum = precoUnitario
@@ -768,13 +835,8 @@ export function Venda() {
 
     let precoParaItem = precoNum;
     if (isNaN(precoParaItem) || precoParaItem <= 0) {
-      if (isChefe) {
-        toast.error("Informe o preço unitário para este cliente");
-        return;
-      }
-      // Funcionário deixou em branco: usar valor definido pelo chefe (API)
       if (!clienteId) {
-        toast.error("Selecione o cliente para usar o valor automático.");
+        toast.error("Selecione o cliente para usar o preço automático.");
         return;
       }
       try {
@@ -786,11 +848,11 @@ export function Venda() {
           precoParaItem = Number(prod?.preco_venda ?? prod?.precoInicial ?? 0) || 0;
         }
         if (precoParaItem <= 0) {
-          toast.error("Preço não definido para este cliente/produto. Peça ao chefe ou informe o valor.");
+          toast.error("Preço não definido para este cliente/produto. Informe o preço ou cadastre o valor.");
           return;
         }
       } catch {
-        toast.error("Erro ao obter preço. Tente informar o valor ou peça ao chefe.");
+        toast.error("Erro ao obter preço. Tente informar o valor manualmente.");
         return;
       }
     }
@@ -979,25 +1041,38 @@ export function Venda() {
                   <div className="space-y-2">
                     <Label htmlFor="clienteId">Cliente *</Label>
                 {clientes.length > 0 ? (
-                  <Select value={clienteId} onValueChange={setClienteId}>
-                    <SelectTrigger id="clienteId">
-                      <SelectValue placeholder="Selecione o cliente" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clientes.map((cliente: any) => (
-                        <SelectItem key={cliente.id} value={String(cliente.id)}>
-                          {cliente.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={clienteId}
+                    onValueChange={setClienteId}
+                    triggerId="clienteId"
+                    placeholder="Selecione o cliente"
+                    searchPlaceholder="Pesquisar cliente"
+                    emptyHint="Nenhum cliente encontrado."
+                    options={clientes.map((cliente: any) => ({
+                      id: cliente.id,
+                      label: String(cliente.nome ?? "").trim() || `Cliente #${cliente.id}`,
+                      searchText: clienteSearchText(cliente),
+                    }))}
+                  />
                 ) : (
                   <p className="text-sm text-muted-foreground">Cadastre clientes na aba Cadastro.</p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="produtoId">Produto para adicionar *</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="produtoId" className="flex-1">Produto para adicionar *</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    title="Cadastrar novo produto"
+                    onClick={() => abrirCadastroRapidoProduto("nova")}
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                </div>
                 <Popover
                   open={produtoPickerOpen}
                   onOpenChange={(open) => {
@@ -1013,12 +1088,12 @@ export function Venda() {
                       aria-expanded={produtoPickerOpen}
                     >
                       <span className="truncate">
-                        {produtoSelecionado?.nome || "Selecione um produto"}
+                        {produtoSelecionado ? produtoRotulo(produtoSelecionado) : "Selecione um produto"}
                       </span>
                       <ChevronsUpDown className="size-4 opacity-60" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <PopoverContent className="w-[min(36rem,95vw)] p-0" align="start">
                     <Command shouldFilter={false}>
                       <div className="flex items-center gap-2 px-3 py-2 border-b">
                         <Search className="size-4 text-muted-foreground" />
@@ -1042,11 +1117,11 @@ export function Venda() {
                                   key={p.id}
                                   value={p.nome}
                                   onSelect={() => {
-                                    setProdutoId(String(p.id));
+                                    selecionarProdutoVenda(String(p.id));
                                     setProdutoPickerOpen(false);
                                   }}
                                 >
-                                  {p.nome}
+                                  {produtoRotulo(p)}
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -1085,11 +1160,11 @@ export function Venda() {
                                         key={p.id}
                                         value={p.nome}
                                         onSelect={() => {
-                                          setProdutoId(String(p.id));
+                                          selecionarProdutoVenda(String(p.id));
                                           setProdutoPickerOpen(false);
                                         }}
                                       >
-                                        {p.nome}
+                                        {produtoRotulo(p)}
                                       </CommandItem>
                                     ))}
                                   </div>
@@ -1123,6 +1198,19 @@ export function Venda() {
                 )}
               </div>
 
+              {isChefe && (
+                <div className="space-y-2">
+                  <Label htmlFor="precoUnitarioVenda">Vlr Uni</Label>
+                  <Input
+                    id="precoUnitarioVenda"
+                    type="text"
+                    inputMode="decimal"
+                    value={precoUnitario}
+                    onChange={(e) => setPrecoUnitario(e.target.value)}
+                  />
+                </div>
+              )}
+
               <div className="space-y-2 md:col-span-2">
                 <Label>Itens desta venda</Label>
                 <p className="text-xs text-muted-foreground">
@@ -1136,21 +1224,27 @@ export function Venda() {
                 </div>
                 {itensForm.length > 0 ? (
                   <div className="w-full overflow-x-auto rounded-md border border-border/60">
-                  <Table className="min-w-[640px] text-sm">
+                  <Table className="min-w-[720px] text-sm">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="min-w-[200px]">Produto</TableHead>
-                        <TableHead className="w-24 text-right">Qtd</TableHead>
+                        <TableHead className="w-20 text-right">Qtd</TableHead>
+                        {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Vlr Uni</TableHead>}
+                        {isChefe && <TableHead className="w-32 text-right whitespace-nowrap">Total</TableHead>}
                         <TableHead className="w-[132px] text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {itensForm.map((item) => {
                         const produto = produtos.find((p: any) => String(p.id) === item.produtoId);
+                        const qtdItem = parseFloat(item.quantidade.replace(",", "."));
+                        const precoItem = parseFloat(item.precoUnitario.replace(",", "."));
                         const isEditing = editingItemId === item.id;
                         return (
                           <TableRow key={item.id} className={isEditing ? "bg-primary/5 border-l-2 border-l-primary" : ""}>
-                            <TableCell className="align-middle truncate">{produto ? produto.nome : `#${item.produtoId}`}</TableCell>
+                            <TableCell className="align-middle truncate">
+                              {produto ? produtoRotulo(produto) : `#${item.produtoId}`}
+                            </TableCell>
                             {isEditing ? (
                               <>
                                 <TableCell className="text-right align-middle py-2">
@@ -1163,6 +1257,27 @@ export function Venda() {
                                     placeholder="Qtd"
                                   />
                                 </TableCell>
+                                {isChefe && (
+                                  <TableCell className="text-right align-middle py-2">
+                                    <Input
+                                      type="text"
+                                      inputMode="decimal"
+                                      className="h-8 w-full min-w-0 max-w-28 text-right text-sm tabular-nums ml-auto block"
+                                      value={editPreco}
+                                      onChange={(e) => setEditPreco(e.target.value)}
+                                      placeholder="Preço"
+                                    />
+                                  </TableCell>
+                                )}
+                                {isChefe && (
+                                  <TableCell className="text-right align-middle tabular-nums">
+                                    {formatCurrencyBrl(
+                                      !isNaN(parseFloat(editQtd.replace(",", ".")) * parseFloat(editPreco.replace(",", ".")))
+                                        ? parseFloat(editQtd.replace(",", ".")) * parseFloat(editPreco.replace(",", "."))
+                                        : 0
+                                    )}
+                                  </TableCell>
+                                )}
                                 <TableCell className="text-right align-middle py-2">
                                   <div className="flex items-center justify-end gap-0.5">
                                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-green-600 hover:bg-green-500/10 hover:text-green-700" onClick={salvarEdicaoItem} title="Salvar">
@@ -1176,7 +1291,19 @@ export function Venda() {
                               </>
                             ) : (
                               <>
-                                <TableCell className="text-right">{item.quantidade}</TableCell>
+                                <TableCell className="text-right align-middle tabular-nums font-medium">
+                                  {item.quantidade}
+                                </TableCell>
+                                {isChefe && (
+                                  <TableCell className="text-right align-middle tabular-nums">
+                                    {formatCurrencyBrl(!isNaN(precoItem) ? precoItem : 0)}
+                                  </TableCell>
+                                )}
+                                {isChefe && (
+                                  <TableCell className="text-right align-middle tabular-nums">
+                                    {formatCurrencyBrl(!isNaN(qtdItem * precoItem) ? qtdItem * precoItem : 0)}
+                                  </TableCell>
+                                )}
                                 <TableCell className="text-right align-middle">
                                   <div className="flex items-center justify-end gap-0.5">
                                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => iniciarEdicaoItem(item)} title="Editar">
@@ -1497,7 +1624,12 @@ export function Venda() {
                 <TableBody>
                   {(detailVenda.itens || []).map((item) => (
                     <TableRow key={item.id} className="border-border/60">
-                      <TableCell className="font-medium break-words">{item.produto_nome || `#${item.produto}`}</TableCell>
+                      <TableCell className="font-medium break-words">
+                        {(() => {
+                          const p = produtos.find((x: any) => String(x.id) === String(item.produto));
+                          return item.produto_nome || p?.nome || `#${item.produto}`;
+                        })()}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {isChefe && editingVendaItemId === item.id ? (
                           <Input
@@ -1613,7 +1745,20 @@ export function Venda() {
               )}
 
               <div className="mt-5 rounded-xl border bg-card p-4 shadow-sm space-y-3">
-                <Label className="text-sm font-semibold">Adicionar produto à mesma venda</Label>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-semibold flex-1">Adicionar produto à mesma venda</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    title="Cadastrar novo produto"
+                    onClick={() => abrirCadastroRapidoProduto("detalhe")}
+                    disabled={!!detailVenda.cancelada}
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                </div>
                 <div className="flex gap-2 flex-wrap items-center">
                   <Popover
                     open={addItemPickerOpen}
@@ -1625,12 +1770,15 @@ export function Venda() {
                     <PopoverTrigger asChild>
                       <Button type="button" variant="outline" className="w-48 justify-between">
                         <span className="truncate">
-                          {produtos.find((p: any) => String(p.id) === String(addItemProdutoId))?.nome || "Produto"}
+                          {(() => {
+                            const p = produtos.find((x: any) => String(x.id) === String(addItemProdutoId));
+                            return p ? produtoRotulo(p) : "Produto";
+                          })()}
                         </span>
                         <ChevronsUpDown className="size-4 opacity-60" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[320px] p-0" align="start">
+                    <PopoverContent className="w-[min(36rem,95vw)] p-0" align="start">
                       <Command shouldFilter={false}>
                         <div className="flex items-center gap-2 px-3 py-2 border-b">
                           <Search className="size-4 text-muted-foreground" />
@@ -1650,15 +1798,13 @@ export function Venda() {
                                     key={p.id}
                                     value={p.nome}
                                     onSelect={() => {
-                                      setAddItemProdutoId(String(p.id));
-                                      const precoProd = Number(p.preco_venda ?? p.precoInicial ?? 0);
-                                      if (isChefe && precoProd > 0) {
-                                        setAddItemPreco(precoProd.toFixed(2).replace(".", ","));
-                                      }
+                                      const pid = String(p.id);
+                                      setAddItemProdutoId(pid);
+                                      if (isChefe) aplicarAddItemPrecoVenda(pid);
                                       setAddItemPickerOpen(false);
                                     }}
                                   >
-                                    <span className="truncate">{p.nome}</span>
+                                    <span className="truncate">{produtoRotulo(p)}</span>
                                     {isChefe && (
                                       <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                                         {formatCurrencyBrl(Number(p.preco_venda ?? p.precoInicial ?? 0))}
@@ -1702,15 +1848,13 @@ export function Venda() {
                                           key={p.id}
                                           value={p.nome}
                                           onSelect={() => {
-                                            setAddItemProdutoId(String(p.id));
-                                            const precoProd = Number(p.preco_venda ?? p.precoInicial ?? 0);
-                                            if (isChefe && precoProd > 0) {
-                                              setAddItemPreco(precoProd.toFixed(2).replace(".", ","));
-                                            }
+                                            const pid = String(p.id);
+                                            setAddItemProdutoId(pid);
+                                            if (isChefe) aplicarAddItemPrecoVenda(pid);
                                             setAddItemPickerOpen(false);
                                           }}
                                         >
-                                          <span className="truncate">{p.nome}</span>
+                                          <span className="truncate">{produtoRotulo(p)}</span>
                                           {isChefe && (
                                             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                                               {formatCurrencyBrl(Number(p.preco_venda ?? p.precoInicial ?? 0))}
@@ -1838,6 +1982,14 @@ export function Venda() {
           await loadData();
           setDetailVenda(null);
         }}
+      />
+
+      <CadastroRapidoItemDialog
+        modo="produto-venda"
+        open={cadastroRapidoOpen}
+        onOpenChange={setCadastroRapidoOpen}
+        onCreated={(item) => void handleProdutoCriadoRapido(item)}
+        isChefe={isChefe}
       />
 
       <DocumentPrintPreview

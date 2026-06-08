@@ -25,3 +25,8 @@ sudo systemctl restart nginx
 ver status
 sudo systemctl status nginx --no-pager
 
+
+
+Se der erro "504 Gateway Time-out"
+
+ssh deploy@129.121.53.239

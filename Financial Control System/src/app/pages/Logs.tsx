@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Badge } from "../components/ui/badge";
 import { FileText } from "lucide-react";
 import { motion } from "motion/react";
+import { OrdensListPagination } from "../components/OrdensListPagination";
+
+const LOGS_PAGE_SIZE = 50;
 
 interface Log {
   id: number;
@@ -18,13 +21,28 @@ interface Log {
 export function Logs() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.getLogs()
-      .then((data) => setLogs(Array.isArray(data) ? data : []))
-      .catch(() => setLogs([]))
+      .then((data) => {
+        setLogs(Array.isArray(data) ? data : []);
+        setPage(1);
+      })
+      .catch(() => {
+        setLogs([]);
+        setPage(1);
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  const totalPages = Math.max(1, Math.ceil(logs.length / LOGS_PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+
+  const logsPagina = useMemo(() => {
+    const start = (safePage - 1) * LOGS_PAGE_SIZE;
+    return logs.slice(start, start + LOGS_PAGE_SIZE);
+  }, [logs, safePage]);
 
   const getAcaoVariant = (acao: string | undefined) => {
     if (!acao) return "outline" as const;
@@ -82,7 +100,7 @@ export function Logs() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    logs.map((log) => (
+                    logsPagina.map((log) => (
                       <TableRow key={log.id}>
                         <TableCell className="text-muted-foreground whitespace-nowrap">
                           {log.data ? new Date(log.data).toLocaleString('pt-BR') : '-'}
@@ -104,6 +122,16 @@ export function Logs() {
                   )}
                 </TableBody>
               </Table>
+            )}
+            {!loading && logs.length > 0 && (
+              <OrdensListPagination
+                className="mt-4 border-t pt-4"
+                page={safePage}
+                totalItems={logs.length}
+                pageSize={LOGS_PAGE_SIZE}
+                onPageChange={setPage}
+                itemLabel="registros"
+              />
             )}
           </CardContent>
         </Card>

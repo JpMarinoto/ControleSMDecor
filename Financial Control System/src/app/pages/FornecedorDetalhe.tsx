@@ -42,6 +42,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../components/ui/dialog";
+import { OrdensListPagination, ORDENS_PAGE_SIZE } from "../components/OrdensListPagination";
 
 type CompraLinhaFornecedor = {
   id: string;
@@ -139,6 +140,8 @@ export function FornecedorDetalhe() {
   const [editingMaterialPreco, setEditingMaterialPreco] = useState("");
   const [savingMaterialId, setSavingMaterialId] = useState<number | null>(null);
   const [selectedCompraIds, setSelectedCompraIds] = useState<Set<string>>(new Set());
+  const [comprasPage, setComprasPage] = useState(1);
+  const [historicoPage, setHistoricoPage] = useState(1);
   const [marcacaoSaving, setMarcacaoSaving] = useState<string | null>(null);
   const [editPagamentoOpen, setEditPagamentoOpen] = useState(false);
   const [editPagamentoId, setEditPagamentoId] = useState<number | null>(null);
@@ -204,6 +207,11 @@ export function FornecedorDetalhe() {
   useEffect(() => {
     if (id) loadProdutos();
   }, [id]);
+
+  useEffect(() => {
+    setComprasPage(1);
+    setHistoricoPage(1);
+  }, [periodo, dataInicio, dataFim]);
 
   const handleSaveMaterialPreco = async (materialId: number, novoValorStr: string) => {
     const v = parseFloat(novoValorStr.replace(",", "."));
@@ -523,6 +531,13 @@ export function FornecedorDetalhe() {
 
   const gruposCompras = agruparComprasPorOrdem(exibirCompras, parseData);
   const gruposComprasHistorico = agruparComprasPorOrdem(exibirComprasHistorico, parseData);
+  const comprasPageStart = (comprasPage - 1) * ORDENS_PAGE_SIZE;
+  const gruposComprasPaginados = gruposCompras.slice(comprasPageStart, comprasPageStart + ORDENS_PAGE_SIZE);
+  const historicoPageStart = (historicoPage - 1) * ORDENS_PAGE_SIZE;
+  const gruposComprasHistoricoPaginados = gruposComprasHistorico.slice(
+    historicoPageStart,
+    historicoPageStart + ORDENS_PAGE_SIZE
+  );
 
   const toggleOrdemGrupo = (lineIds: string[]) => {
     setSelectedCompraIds((prev) => {
@@ -1096,7 +1111,7 @@ export function FornecedorDetalhe() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  gruposCompras.map((g) => {
+                  gruposComprasPaginados.map((g) => {
                     const ids = g.lines.map((l) => l.id);
                     const allSel = ids.length > 0 && ids.every((id) => selectedCompraIds.has(id));
                     const someSel = ids.some((id) => selectedCompraIds.has(id)) && !allSel;
@@ -1272,6 +1287,13 @@ export function FornecedorDetalhe() {
               </TableBody>
             </Table>
             </div>
+            <OrdensListPagination
+              className="mt-4"
+              page={comprasPage}
+              totalItems={gruposCompras.length}
+              onPageChange={setComprasPage}
+              itemLabel="ordens"
+            />
 
             {exibirComprasHistorico.length > 0 ? (
               <Collapsible defaultOpen={false} className="group mt-8 border-t pt-6">
@@ -1304,7 +1326,7 @@ export function FornecedorDetalhe() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {gruposComprasHistorico.map((g) => {
+                      {gruposComprasHistoricoPaginados.map((g) => {
                         const qtdHistGrupo = g.lines.reduce((s, l) => {
                           const q = l.quantidade;
                           if (q == null || Number.isNaN(Number(q))) return s;
@@ -1396,6 +1418,13 @@ export function FornecedorDetalhe() {
                     </TableBody>
                   </Table>
                   </div>
+                  <OrdensListPagination
+                    className="mt-4"
+                    page={historicoPage}
+                    totalItems={gruposComprasHistorico.length}
+                    onPageChange={setHistoricoPage}
+                    itemLabel="ordens canceladas"
+                  />
                 </CollapsibleContent>
               </Collapsible>
             ) : null}

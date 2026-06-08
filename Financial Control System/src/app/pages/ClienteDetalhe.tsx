@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { empresa, empresaEnderecoLinha, empresaDocumento } from "../data/empresa";
 import { ConfirmacaoComSenhaDialog } from "../components/ConfirmacaoDialog";
 import { DocumentPrintPreview } from "../components/DocumentPrintPreview";
+import { OrdensListPagination, ORDENS_PAGE_SIZE } from "../components/OrdensListPagination";
 
 interface ItemVenda {
   produto: string;
@@ -156,6 +157,7 @@ export function ClienteDetalhe() {
   const [selectedPrecoBulkIds, setSelectedPrecoBulkIds] = useState<Set<number>>(new Set());
   const [bulkPrecoComum, setBulkPrecoComum] = useState("");
   const [bulkPrecoLoading, setBulkPrecoLoading] = useState(false);
+  const [vendasPage, setVendasPage] = useState(1);
 
   const loadDetalhe = () => {
     if (!id) return;
@@ -183,6 +185,10 @@ export function ClienteDetalhe() {
     if (!isChefe) return;
     loadContas();
   }, [isChefe]);
+
+  useEffect(() => {
+    setVendasPage(1);
+  }, [periodo, dataInicio, dataFim]);
 
   useEffect(() => {
     if (!precoProdutoId) {
@@ -867,6 +873,10 @@ export function ClienteDetalhe() {
   );
   const exibirVendas = limites ? vendasFiltradas : vendasOrdenadas;
   const exibirPagamentos = limites ? pagamentosFiltrados : pagamentosRaw;
+  const vendasPaginadas = useMemo(() => {
+    const start = (vendasPage - 1) * ORDENS_PAGE_SIZE;
+    return exibirVendas.slice(start, start + ORDENS_PAGE_SIZE);
+  }, [exibirVendas, vendasPage]);
   const vendasSelecionadas = useMemo(
     () =>
       [...exibirVendas.filter((v) => selectedVendaIds.has(v.id))].sort(
@@ -1485,7 +1495,7 @@ export function ClienteDetalhe() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  exibirVendas.map((v) => {
+                  vendasPaginadas.map((v) => {
                     const sel = selectedVendaIds.has(v.id);
                     const paga = v.marcada_paga === true;
                     const itens = Array.isArray(v.itens) ? v.itens : [];
@@ -1607,6 +1617,13 @@ export function ClienteDetalhe() {
               </TableBody>
             </Table>
             </div>
+            <OrdensListPagination
+              className="mt-4"
+              page={vendasPage}
+              totalItems={exibirVendas.length}
+              onPageChange={setVendasPage}
+              itemLabel="vendas"
+            />
           </CardContent>
         </Card>
         <Card>

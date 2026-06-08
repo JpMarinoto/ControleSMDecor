@@ -400,7 +400,12 @@ class ProdutoListCreate(APIView):
 
     def get(self, request):
         incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
-        qs = Produto.objects.select_related('categoria').prefetch_related('insumos__material').all().order_by('nome')
+        qs = (
+            Produto.objects.select_related('categoria', 'fornecedor')
+            .prefetch_related('insumos__material')
+            .all()
+            .order_by('nome')
+        )
         if not incluir_inativos:
             qs = qs.filter(ativo=True)
         serializer = ProdutoSerializer(qs, many=True)
@@ -700,7 +705,7 @@ class MaterialBulkPrecos(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class MaterialListCreate(APIView):
     def get(self, request):
-        qs = Material.objects.all().order_by('nome')
+        qs = Material.objects.select_related('fornecedor_padrao').all().order_by('nome')
         serializer = MaterialSerializer(qs, many=True)
         return Response(serializer.data)
 
@@ -2955,7 +2960,7 @@ class ClienteDetalhe(APIView):
         total_pago = _safe_float(sum(_safe_float(p.valor) for p in pagamentos))
         saldo = _safe_float(total_vendas - total_pago)
         vendas_data = []
-        for v in vendas[:50]:
+        for v in vendas:
             itens = [{'produto': item.produto.nome, 'quantidade': item.quantidade, 'preco_unitario': _safe_float(item.preco_unitario), 'total_item': _safe_float(item.quantidade * item.preco_unitario)} for item in v.itens.all()]
             vendas_data.append({
                 'id': v.id,
@@ -3259,7 +3264,7 @@ class FornecedorDetalhe(APIView):
                 key=lambda x: x["sort_dt"].timestamp() if x["sort_dt"] is not None else 0.0,
                 reverse=True,
             )
-            compras_data = [{k: v for k, v in row.items() if k != 'sort_dt'} for row in linhas[:50]]
+            compras_data = [{k: v for k, v in row.items() if k != 'sort_dt'} for row in linhas]
             return Response({
                 'fornecedor': {'id': fornecedor.id, 'nome': fornecedor.nome, 'telefone': fornecedor.telefone or ''},
                 'total_compras': total_compras, 'total_pago': total_pago, 'saldo_devedor': saldo,

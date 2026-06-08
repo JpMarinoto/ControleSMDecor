@@ -17,6 +17,7 @@ import { Users, Plus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
+import { SimpleConfirmDialog } from "../components/ConfirmacaoDialog";
 
 interface Usuario {
   id: number;
@@ -37,6 +38,9 @@ export function Usuarios() {
   const [nomeExibicao, setNomeExibicao] = useState("");
   const [role, setRole] = useState("2");
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [usuarioToDelete, setUsuarioToDelete] = useState<Usuario | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -111,14 +115,23 @@ export function Usuarios() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm("Desativar este usuário?")) return;
+  const openDeleteConfirm = (u: Usuario) => {
+    setUsuarioToDelete(u);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!usuarioToDelete) return;
+    setDeleting(true);
     try {
-      await api.deleteUsuario(id);
+      await api.deleteUsuario(usuarioToDelete.id);
       toast.success("Usuário desativado");
+      setUsuarioToDelete(null);
       load();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Erro ao excluir");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -184,7 +197,7 @@ export function Usuarios() {
                           variant="ghost"
                           size="icon"
                           className="text-destructive"
-                          onClick={() => handleDelete(u.id)}
+                          onClick={() => openDeleteConfirm(u)}
                           disabled={u.id === currentUser?.id}
                         >
                           <Trash2 className="size-4" />
@@ -270,6 +283,24 @@ export function Usuarios() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SimpleConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(open) => {
+          setDeleteConfirmOpen(open);
+          if (!open) setUsuarioToDelete(null);
+        }}
+        title="Desativar usuário?"
+        description={
+          usuarioToDelete
+            ? `Deseja desativar o usuário "${usuarioToDelete.username}"${
+                usuarioToDelete.nome ? ` (${usuarioToDelete.nome})` : ""
+              }? Ele não poderá mais fazer login no sistema.`
+            : "Deseja desativar este usuário?"
+        }
+        confirmLabel={deleting ? "Desativando..." : "Desativar"}
+        onConfirm={() => void handleConfirmDelete()}
+      />
     </div>
   );
 }

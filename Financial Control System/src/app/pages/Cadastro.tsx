@@ -197,6 +197,140 @@ function CadastroBuscaLista({
   );
 }
 
+const FILTRO_TODAS = "__todas__";
+const FILTRO_TODOS = "__todos__";
+const FILTRO_SEM_FORNECEDOR = "__sem__";
+
+function filtraItemPorCadastro(
+  item: { nome?: string; categoria?: string; fornecedor?: string },
+  filtros: { nome: string; categoriaId: string; fornecedorId: string },
+  extras?: { categoriaNome?: string; fornecedorNome?: string },
+): boolean {
+  if (filtros.categoriaId && String(item.categoria ?? "") !== filtros.categoriaId) return false;
+  if (filtros.fornecedorId) {
+    if (filtros.fornecedorId === FILTRO_SEM_FORNECEDOR) {
+      if (item.fornecedor) return false;
+    } else if (String(item.fornecedor ?? "") !== filtros.fornecedorId) return false;
+  }
+  if (normalizeTextSearch(filtros.nome)) {
+    return cadastroCamposContemBusca(
+      filtros.nome,
+      item.nome,
+      extras?.categoriaNome,
+      extras?.fornecedorNome,
+    );
+  }
+  return true;
+}
+
+function CadastroFiltroItens({
+  idPrefix,
+  titulo,
+  nome,
+  onNomeChange,
+  categoriaId,
+  onCategoriaChange,
+  categorias,
+  fornecedorId,
+  onFornecedorChange,
+  fornecedores,
+  onLimpar,
+  mostrarFornecedor = true,
+}: {
+  idPrefix: string;
+  titulo: string;
+  nome: string;
+  onNomeChange: (v: string) => void;
+  categoriaId: string;
+  onCategoriaChange: (v: string) => void;
+  categorias: Categoria[];
+  fornecedorId: string;
+  onFornecedorChange: (v: string) => void;
+  fornecedores: Fornecedor[];
+  onLimpar: () => void;
+  mostrarFornecedor?: boolean;
+}) {
+  const temFiltro = Boolean(nome.trim() || categoriaId || fornecedorId);
+  return (
+    <div className="mb-4 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Label className="text-sm font-medium">{titulo}</Label>
+        {temFiltro && (
+          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={onLimpar}>
+            Limpar filtros
+          </Button>
+        )}
+      </div>
+      <div className={`grid gap-3 max-w-4xl ${mostrarFornecedor ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2"}`}>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${idPrefix}-nome`} className="text-xs text-muted-foreground">
+            Nome
+          </Label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id={`${idPrefix}-nome`}
+              className="h-9 pl-8 text-sm"
+              placeholder="Buscar por nome…"
+              value={nome}
+              onChange={(e) => onNomeChange(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${idPrefix}-categoria`} className="text-xs text-muted-foreground">
+            Categoria
+          </Label>
+          <Select
+            value={categoriaId || FILTRO_TODAS}
+            onValueChange={(v) => onCategoriaChange(v === FILTRO_TODAS ? "" : v)}
+          >
+            <SelectTrigger id={`${idPrefix}-categoria`} className="h-9">
+              <SelectValue placeholder="Todas" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FILTRO_TODAS}>Todas as categorias</SelectItem>
+              {categorias.map((c) => (
+                <SelectItem key={c.id} value={String(c.id)}>
+                  {c.nome || "(Sem nome)"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {mostrarFornecedor && (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-fornecedor`} className="text-xs text-muted-foreground">
+              Fornecedor
+            </Label>
+            <Select
+              value={fornecedorId || FILTRO_TODOS}
+              onValueChange={(v) => {
+                if (v === FILTRO_TODOS) onFornecedorChange("");
+                else onFornecedorChange(v);
+              }}
+            >
+              <SelectTrigger id={`${idPrefix}-fornecedor`} className="h-9">
+                <SelectValue placeholder="Todos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={FILTRO_TODOS}>Todos os fornecedores</SelectItem>
+                <SelectItem value={FILTRO_SEM_FORNECEDOR}>Sem fornecedor</SelectItem>
+                {fornecedores.map((f) => (
+                  <SelectItem key={f.id} value={String(f.id)}>
+                    {f.nomeRazaoSocial || "(Sem nome)"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Cadastro() {
   // States
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -286,10 +420,15 @@ export function Cadastro() {
   const [idsFornecTabProdutos, setIdsFornecTabProdutos] = useState<Set<string>>(new Set());
   const [idsFornecTabMateriais, setIdsFornecTabMateriais] = useState<Set<string>>(new Set());
   const [buscaClientes, setBuscaClientes] = useState("");
-  const [buscaProdutos, setBuscaProdutos] = useState("");
+  const [filtroProdutoNome, setFiltroProdutoNome] = useState("");
+  const [filtroProdutoCategoria, setFiltroProdutoCategoria] = useState("");
+  const [filtroProdutoFornecedor, setFiltroProdutoFornecedor] = useState("");
+  const [filtroMaterialNome, setFiltroMaterialNome] = useState("");
+  const [filtroMaterialCategoria, setFiltroMaterialCategoria] = useState("");
+  const [filtroMaterialFornecedor, setFiltroMaterialFornecedor] = useState("");
   const [buscaCategorias, setBuscaCategorias] = useState("");
+  const [filtroCategoriaTipo, setFiltroCategoriaTipo] = useState("");
   const [buscaFornecedores, setBuscaFornecedores] = useState("");
-  const [buscaMateriais, setBuscaMateriais] = useState("");
   const [buscaContas, setBuscaContas] = useState("");
   const [bulkFornecPrecosOpen, setBulkFornecPrecosOpen] = useState(false);
   const [bulkFornecPrecoVenda, setBulkFornecPrecoVenda] = useState("");
@@ -994,14 +1133,28 @@ export function Cadastro() {
 
   const categoriasProduto = categorias.filter(c => c.tipo === 'produto');
   const categoriasMaterial = categorias.filter(c => c.tipo === 'material');
+  const fornecedorNomePorId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of fornecedores) {
+      m.set(String(f.id), f.nomeRazaoSocial || "");
+    }
+    return m;
+  }, [fornecedores]);
+
   const produtosAgrupados = useMemo(() => {
     const catById = new Map<string, { id: string; nome: string }>();
     for (const c of categoriasProduto) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
 
-    const lista =
-      !normalizeTextSearch(buscaProdutos)
-        ? produtos
-        : produtos.filter((p) => cadastroCamposContemBusca(buscaProdutos, p.nome));
+    const filtros = {
+      nome: filtroProdutoNome,
+      categoriaId: filtroProdutoCategoria,
+      fornecedorId: filtroProdutoFornecedor,
+    };
+    const lista = produtos.filter((p) => {
+      const catNome = p.categoria ? catById.get(String(p.categoria))?.nome : "";
+      const fornNome = p.fornecedor ? fornecedorNomePorId.get(String(p.fornecedor)) ?? "" : "";
+      return filtraItemPorCadastro(p, filtros, { categoriaNome: catNome, fornecedorNome: fornNome });
+    });
 
     const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof produtos }>();
     for (const p of lista) {
@@ -1017,16 +1170,22 @@ export function Cadastro() {
     out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
     out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
     return out;
-  }, [produtos, categoriasProduto, buscaProdutos]);
+  }, [produtos, categoriasProduto, filtroProdutoNome, filtroProdutoCategoria, filtroProdutoFornecedor, fornecedorNomePorId]);
 
   const materiaisAgrupados = useMemo(() => {
     const catById = new Map<string, { id: string; nome: string }>();
     for (const c of categoriasMaterial) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
 
-    const lista =
-      !normalizeTextSearch(buscaMateriais)
-        ? materiais
-        : materiais.filter((m) => cadastroCamposContemBusca(buscaMateriais, m.nome));
+    const filtros = {
+      nome: filtroMaterialNome,
+      categoriaId: filtroMaterialCategoria,
+      fornecedorId: filtroMaterialFornecedor,
+    };
+    const lista = materiais.filter((m) => {
+      const catNome = m.categoria ? catById.get(String(m.categoria))?.nome : "";
+      const fornNome = m.fornecedor ? fornecedorNomePorId.get(String(m.fornecedor)) ?? "" : "";
+      return filtraItemPorCadastro(m, filtros, { categoriaNome: catNome, fornecedorNome: fornNome });
+    });
 
     const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof materiais }>();
     for (const m of lista) {
@@ -1042,7 +1201,7 @@ export function Cadastro() {
     out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
     out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
     return out;
-  }, [materiais, categoriasMaterial, buscaMateriais]);
+  }, [materiais, categoriasMaterial, filtroMaterialNome, filtroMaterialCategoria, filtroMaterialFornecedor, fornecedorNomePorId]);
 
   const clientesFiltrados = useMemo(() => {
     if (!normalizeTextSearch(buscaClientes)) return clientes;
@@ -1066,8 +1225,11 @@ export function Cadastro() {
   }, [clientes, buscaClientes]);
 
   const categoriasFiltradas = useMemo(() => {
-    if (!normalizeTextSearch(buscaCategorias)) return categorias;
-    return categorias.filter((cat) =>
+    let lista = categorias;
+    if (filtroCategoriaTipo === "produto") lista = lista.filter((c) => c.tipo === "produto");
+    else if (filtroCategoriaTipo === "material") lista = lista.filter((c) => c.tipo === "material");
+    if (!normalizeTextSearch(buscaCategorias)) return lista;
+    return lista.filter((cat) =>
       cadastroCamposContemBusca(
         buscaCategorias,
         cat.nome,
@@ -1077,7 +1239,7 @@ export function Cadastro() {
         cat.descricao,
       ),
     );
-  }, [categorias, buscaCategorias]);
+  }, [categorias, buscaCategorias, filtroCategoriaTipo]);
 
   const fornecedoresFiltrados = useMemo(() => {
     if (!normalizeTextSearch(buscaFornecedores)) return fornecedores;
@@ -1771,17 +1933,27 @@ export function Cadastro() {
           <div className="space-y-3">
             {produtos.length > 0 ? (
               <>
-                <CadastroBuscaLista
-                  id="cadastro-busca-produtos"
-                  label="Pesquisar produtos"
-                  value={buscaProdutos}
-                  onChange={setBuscaProdutos}
-                  placeholder="Somente pelo nome do produto…"
+                <CadastroFiltroItens
+                  idPrefix="cadastro-produtos"
+                  titulo="Filtrar produtos"
+                  nome={filtroProdutoNome}
+                  onNomeChange={setFiltroProdutoNome}
+                  categoriaId={filtroProdutoCategoria}
+                  onCategoriaChange={setFiltroProdutoCategoria}
+                  categorias={categoriasProduto}
+                  fornecedorId={filtroProdutoFornecedor}
+                  onFornecedorChange={setFiltroProdutoFornecedor}
+                  fornecedores={fornecedores}
+                  onLimpar={() => {
+                    setFiltroProdutoNome("");
+                    setFiltroProdutoCategoria("");
+                    setFiltroProdutoFornecedor("");
+                  }}
                 />
                 {produtosAgrupados.length === 0 ? (
                   <Card>
                     <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      Nenhum produto corresponde à busca.
+                      Nenhum produto corresponde aos filtros.
                     </CardContent>
                   </Card>
                 ) : (
@@ -2127,17 +2299,65 @@ export function Cadastro() {
           <div className="space-y-3">
             {categorias.length > 0 ? (
               <>
-                <CadastroBuscaLista
-                  id="cadastro-busca-categorias"
-                  label="Pesquisar categorias"
-                  value={buscaCategorias}
-                  onChange={setBuscaCategorias}
-                  placeholder="Nome, tipo (produto/material) ou descrição…"
-                />
+                <div className="mb-4 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label className="text-sm font-medium">Filtrar categorias</Label>
+                    {(buscaCategorias.trim() || filtroCategoriaTipo) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={() => {
+                          setBuscaCategorias("");
+                          setFiltroCategoriaTipo("");
+                        }}
+                      >
+                        Limpar filtros
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid gap-3 max-w-2xl sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cadastro-busca-categorias-nome" className="text-xs text-muted-foreground">
+                        Nome
+                      </Label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          id="cadastro-busca-categorias-nome"
+                          className="h-9 pl-8 text-sm"
+                          placeholder="Buscar por nome…"
+                          value={buscaCategorias}
+                          onChange={(e) => setBuscaCategorias(e.target.value)}
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="cadastro-filtro-categoria-tipo" className="text-xs text-muted-foreground">
+                        Tipo
+                      </Label>
+                      <Select
+                        value={filtroCategoriaTipo || FILTRO_TODAS}
+                        onValueChange={(v) => setFiltroCategoriaTipo(v === FILTRO_TODAS ? "" : v)}
+                      >
+                        <SelectTrigger id="cadastro-filtro-categoria-tipo" className="h-9">
+                          <SelectValue placeholder="Todos" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FILTRO_TODAS}>Produto e material</SelectItem>
+                          <SelectItem value="produto">Produto</SelectItem>
+                          <SelectItem value="material">Material</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
                 {categoriasFiltradas.length === 0 ? (
                   <Card>
                     <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      Nenhuma categoria corresponde à busca.
+                      Nenhuma categoria corresponde aos filtros.
                     </CardContent>
                   </Card>
                 ) : (
@@ -3014,17 +3234,27 @@ export function Cadastro() {
           <div className="space-y-3">
             {materiais.length > 0 ? (
               <>
-                <CadastroBuscaLista
-                  id="cadastro-busca-materiais"
-                  label="Pesquisar materiais"
-                  value={buscaMateriais}
-                  onChange={setBuscaMateriais}
-                  placeholder="Somente pelo nome do material…"
+                <CadastroFiltroItens
+                  idPrefix="cadastro-materiais"
+                  titulo="Filtrar materiais"
+                  nome={filtroMaterialNome}
+                  onNomeChange={setFiltroMaterialNome}
+                  categoriaId={filtroMaterialCategoria}
+                  onCategoriaChange={setFiltroMaterialCategoria}
+                  categorias={categoriasMaterial}
+                  fornecedorId={filtroMaterialFornecedor}
+                  onFornecedorChange={setFiltroMaterialFornecedor}
+                  fornecedores={fornecedores}
+                  onLimpar={() => {
+                    setFiltroMaterialNome("");
+                    setFiltroMaterialCategoria("");
+                    setFiltroMaterialFornecedor("");
+                  }}
                 />
                 {materiaisAgrupados.length === 0 ? (
                   <Card>
                     <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      Nenhum material corresponde à busca.
+                      Nenhum material corresponde aos filtros.
                     </CardContent>
                   </Card>
                 ) : (

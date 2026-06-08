@@ -1,7 +1,7 @@
 export const empresa = {
   nome: "JOAO PEDRO DOS SANTOS MARINOTO ME",
   nomeFantasia: "S M Decor",
-  cnpj: "61.578.303/0001-01",
+  cnpj: "61.578.303/0001-80",
   cpf: "",
   ie: "191053530110",
   endereco: "Rua José Barbosa",
