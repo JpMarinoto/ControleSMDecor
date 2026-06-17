@@ -305,8 +305,8 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrdemCompra
         fields = [
-            'id', 'fornecedor_id', 'fornecedor', 'data', 'data_lancamento', 'cancelada',
-            'marcada_paga', 'ultima_alteracao_observacao', 'ultima_alteracao_em', 'itens', 'total',
+            'id', 'fornecedor_id', 'fornecedor', 'numero_venda_fornecedor', 'data', 'data_lancamento',
+            'cancelada', 'marcada_paga', 'ultima_alteracao_observacao', 'ultima_alteracao_em', 'itens', 'total',
         ]
 
     def get_ultima_alteracao_em(self, obj):

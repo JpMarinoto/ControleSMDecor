@@ -57,6 +57,7 @@ interface OrdemCompra {
   id: string | number;
   fornecedor: string;
   fornecedor_id?: number;
+  numero_venda_fornecedor?: string;
   data: string;
   data_lancamento?: string;
   cancelada?: boolean;
@@ -112,6 +113,24 @@ function fornecedorIdDaOrdem(
     return n === nome;
   });
   return f ? String(f.id) : "";
+}
+
+function ordemDuplicadaNumeroVenda(
+  ordens: OrdemCompra[],
+  fornecedorId: string,
+  numero: string,
+  excludeOrdemId?: string | number,
+): OrdemCompra | undefined {
+  const n = numero.trim();
+  if (!n || !fornecedorId) return undefined;
+  return ordens.find(
+    (o) =>
+      !o.cancelada &&
+      /^\d+$/.test(String(o.id)) &&
+      (excludeOrdemId == null || String(o.id) !== String(excludeOrdemId)) &&
+      String(o.fornecedor_id ?? "") === String(fornecedorId) &&
+      String(o.numero_venda_fornecedor ?? "").trim().toLowerCase() === n.toLowerCase(),
+  );
 }
 
 /** Lista de material ou produto com campo de pesquisa (aba Compra). */
@@ -284,6 +303,7 @@ export function Compra() {
   const fornecedorSelecionadoNome = fornecedorId ? (fornecedoresPorId.get(fornecedorId) ?? "") : "";
   const [quantidade, setQuantidade] = useState('');
   const [precoUnitario, setPrecoUnitario] = useState('');
+  const [numeroVendaFornecedor, setNumeroVendaFornecedor] = useState('');
   const [data, setData] = useState(getTodayLocalISO());
   const [tipoItem, setTipoItem] = useState<"material" | "produto">("material");
 
@@ -295,6 +315,7 @@ export function Compra() {
   const [searchData, setSearchData] = useState("");
   const [searchProduto, setSearchProduto] = useState("");
   const [searchNumero, setSearchNumero] = useState("");
+  const [searchNumeroVendaFornecedor, setSearchNumeroVendaFornecedor] = useState("");
   const [editingItem, setEditingItem] = useState<ItemCompra & { ordemId: string | number } | null>(null);
   const [editCompraQtd, setEditCompraQtd] = useState("");
   const [editCompraPreco, setEditCompraPreco] = useState("");
@@ -338,6 +359,7 @@ export function Compra() {
     downloadBaseName: string;
   } | null>(null);
   const [editDetailDataCompra, setEditDetailDataCompra] = useState("");
+  const [editDetailNumeroVendaFornecedor, setEditDetailNumeroVendaFornecedor] = useState("");
   const [addDetailTipo, setAddDetailTipo] = useState<"material" | "produto">("material");
   const [addDetailMaterialId, setAddDetailMaterialId] = useState("");
   const [addDetailProdutoId, setAddDetailProdutoId] = useState("");
@@ -366,9 +388,31 @@ export function Compra() {
     tipo: 'material' | 'produto';
   } | null>(null);
   const [dataCompraSenhaOpen, setDataCompraSenhaOpen] = useState(false);
-  const pendingDataCompraRef = useRef<{ ordemId: string; data: string } | null>(null);
+  const [ordemPatchSenhaTitulo, setOrdemPatchSenhaTitulo] = useState("");
+  const [ordemPatchSenhaDescricao, setOrdemPatchSenhaDescricao] = useState("");
+  const pendingOrdemPatchRef = useRef<{
+    ordemId: string;
+    data?: string;
+    numero_venda_fornecedor?: string;
+  } | null>(null);
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
+
+  const avisoNumeroVendaDuplicada = useMemo(() => {
+    const dup = ordemDuplicadaNumeroVenda(ordens, fornecedorId, numeroVendaFornecedor);
+    return dup ? `Já existe a ordem #${dup.id} com este nº para este fornecedor.` : null;
+  }, [ordens, fornecedorId, numeroVendaFornecedor]);
+
+  const avisoDetalheNumeroDuplicada = useMemo(() => {
+    if (!detailCompra || !fornecedorIdDetalheCompra) return null;
+    const dup = ordemDuplicadaNumeroVenda(
+      ordens,
+      fornecedorIdDetalheCompra,
+      editDetailNumeroVendaFornecedor,
+      detailCompra.id,
+    );
+    return dup ? `Já existe a ordem #${dup.id} com este nº para este fornecedor.` : null;
+  }, [ordens, fornecedorIdDetalheCompra, editDetailNumeroVendaFornecedor, detailCompra]);
 
   const abrirCadastroRapido = (origem: "nova" | "detalhe") => {
     const fid = origem === "detalhe" ? fornecedorIdDetalheCompra : fornecedorId;
@@ -421,7 +465,8 @@ export function Compra() {
 
   useEffect(() => {
     if (detailCompra?.data) setEditDetailDataCompra(String(detailCompra.data).slice(0, 10));
-  }, [detailCompra?.id, detailCompra?.data]);
+    setEditDetailNumeroVendaFornecedor(String(detailCompra?.numero_venda_fornecedor ?? "").trim());
+  }, [detailCompra?.id, detailCompra?.data, detailCompra?.numero_venda_fornecedor]);
 
   const getEmpresaHeaderHtml = () => {
     const doc = empresaDocumento();
@@ -577,7 +622,43 @@ export function Compra() {
       toast.info("Data já é esta.");
       return;
     }
-    pendingDataCompraRef.current = { ordemId: String(detailCompra.id), data: trimmed };
+    pendingOrdemPatchRef.current = { ordemId: String(detailCompra.id), data: trimmed };
+    setOrdemPatchSenhaTitulo("Alterar data da compra");
+    setOrdemPatchSenhaDescricao(
+      "A data da operação será atualizada nesta ordem e em todos os itens. A data de lançamento não muda. Informe a observação e confirme com sua senha.",
+    );
+    setDataCompraSenhaOpen(true);
+  };
+
+  const salvarNumeroVendaNoDetalhe = () => {
+    if (!detailCompra || !/^\d+$/.test(String(detailCompra.id))) return;
+    if (detailCompra.cancelada) {
+      toast.error("Esta ordem está cancelada.");
+      return;
+    }
+    const trimmed = editDetailNumeroVendaFornecedor.trim().slice(0, 64);
+    const atual = String(detailCompra.numero_venda_fornecedor ?? "").trim();
+    if (trimmed === atual) {
+      toast.info("Nº venda do fornecedor já é este.");
+      return;
+    }
+    if (trimmed && fornecedorIdDetalheCompra) {
+      const dup = ordemDuplicadaNumeroVenda(
+        ordens,
+        fornecedorIdDetalheCompra,
+        trimmed,
+        detailCompra.id,
+      );
+      if (dup) {
+        toast.error(`Já existe a ordem #${dup.id} com este nº de venda do fornecedor.`);
+        return;
+      }
+    }
+    pendingOrdemPatchRef.current = { ordemId: String(detailCompra.id), numero_venda_fornecedor: trimmed };
+    setOrdemPatchSenhaTitulo("Alterar nº venda do fornecedor");
+    setOrdemPatchSenhaDescricao(
+      "O número informado pelo fornecedor será atualizado nesta ordem. Informe a observação e confirme com sua senha.",
+    );
     setDataCompraSenhaOpen(true);
   };
 
@@ -799,6 +880,7 @@ export function Compra() {
       <div class="info">
         <div><strong>Fornecedor:</strong> ${ordem.fornecedor}</div>
         <div><strong>Data da ordem:</strong> ${dataFormatada}</div>
+        ${ordem.numero_venda_fornecedor ? `<div><strong>Nº venda fornecedor:</strong> ${ordem.numero_venda_fornecedor}</div>` : ""}
         <div><strong>Lançado por:</strong> ${usuarioNome || "-"}</div>
       </div>
 
@@ -889,6 +971,12 @@ export function Compra() {
       toast.error("Adicione itens válidos (material, quantidade e preço)");
       return;
     }
+    const numeroTrim = numeroVendaFornecedor.trim().slice(0, 64);
+    const dupNumero = numeroTrim ? ordemDuplicadaNumeroVenda(ordens, fornecedorId, numeroTrim) : undefined;
+    if (dupNumero) {
+      toast.error(`Já existe a ordem #${dupNumero.id} com este nº de venda do fornecedor.`);
+      return;
+    }
     const fornId = Number(fornecedorId);
     setSimpleConfirm({
       title: "Registrar compra",
@@ -902,6 +990,7 @@ export function Compra() {
               itens: itensPayload,
               data: dataCompra,
               data_compra: dataCompra,
+              ...(numeroTrim ? { numero_venda_fornecedor: numeroTrim } : {}),
             });
             toast.success("Compra registrada com sucesso");
             await loadData();
@@ -920,6 +1009,7 @@ export function Compra() {
     setFornecedorId('');
     setQuantidade('');
     setPrecoUnitario('');
+    setNumeroVendaFornecedor('');
     setData(getTodayLocalISO());
     setItensForm([]);
   };
@@ -944,6 +1034,11 @@ export function Compra() {
       const termo = searchProduto.trim().toLowerCase();
       const temMatch = (o.itens || []).some((i) => getItemNome(i).toLowerCase().includes(termo));
       if (!temMatch) return false;
+    }
+    if (searchNumeroVendaFornecedor.trim()) {
+      const termo = searchNumeroVendaFornecedor.trim().toLowerCase();
+      const nv = String(o.numero_venda_fornecedor ?? "").toLowerCase();
+      if (!nv.includes(termo)) return false;
     }
     return true;
   });
@@ -1319,14 +1414,32 @@ export function Compra() {
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="data">Data *</Label>
-                <Input
-                  id="data"
-                  type="date"
-                  value={data}
-                  onChange={(e) => setData(e.target.value)}
-                />
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,11rem)_minmax(0,11rem)] sm:items-end">
+                <div className="space-y-2">
+                  <Label htmlFor="numeroVendaFornecedor">Nº venda fornecedor</Label>
+                  <Input
+                    id="numeroVendaFornecedor"
+                    className="max-w-[11rem]"
+                    value={numeroVendaFornecedor}
+                    onChange={(e) => setNumeroVendaFornecedor(e.target.value.slice(0, 64))}
+                    placeholder="Opcional"
+                    disabled={!fornecedorId}
+                  />
+                  {avisoNumeroVendaDuplicada ? (
+                    <p className="text-xs text-destructive">{avisoNumeroVendaDuplicada}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="data">Data *</Label>
+                  <Input
+                    id="data"
+                    className="max-w-[11rem]"
+                    type="date"
+                    value={data}
+                    onChange={(e) => setData(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
 
@@ -1344,11 +1457,11 @@ export function Compra() {
             <CardHeader>
               <CardTitle>Histórico de compras</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Filtre por número da ordem, fornecedor, data ou produto. Clique para ver detalhes, editar, copiar ou excluir.
+                Filtre por número da ordem, nº venda do fornecedor, fornecedor, data ou produto. Clique para ver detalhes, editar, copiar ou excluir.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <div className="space-y-2">
                   <Label htmlFor="searchNumeroCompra">Nº da ordem</Label>
                   <Input
@@ -1357,6 +1470,16 @@ export function Compra() {
                     placeholder="Ex.: 42"
                     value={searchNumero}
                     onChange={(e) => setSearchNumero(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="searchNumeroVendaFornecedor">Nº venda forn.</Label>
+                  <Input
+                    id="searchNumeroVendaFornecedor"
+                    className="max-w-[11rem]"
+                    placeholder="Pedido/nota"
+                    value={searchNumeroVendaFornecedor}
+                    onChange={(e) => setSearchNumeroVendaFornecedor(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1389,10 +1512,11 @@ export function Compra() {
               </div>
               {ordensFiltradas.length > 0 ? (
                 <div className="w-full overflow-x-auto rounded-md border border-border/60">
-                <Table className="min-w-[800px] text-sm">
+                <Table className="min-w-[920px] text-sm">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="min-w-[160px]">Fornecedor</TableHead>
+                      <TableHead className="min-w-[140px]">Fornecedor</TableHead>
+                      <TableHead className="w-32 whitespace-nowrap">Nº venda forn.</TableHead>
                       <TableHead className="w-28 whitespace-nowrap">Data</TableHead>
                       <TableHead className="min-w-[220px]">Itens</TableHead>
                       {isChefe && <TableHead className="w-36 text-right whitespace-nowrap">Total</TableHead>}
@@ -1418,6 +1542,9 @@ export function Compra() {
                               </span>
                               <OrdemAlteracaoMarker observacao={ordem.ultima_alteracao_observacao} className="shrink-0" />
                             </span>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
+                            {ordem.numero_venda_fornecedor?.trim() || "—"}
                           </TableCell>
                           <TableCell className="text-muted-foreground whitespace-nowrap">
                             {formatDateOnly(ordem.data)}
@@ -1488,7 +1615,7 @@ export function Compra() {
                       <OrdemAlteracaoMarker observacao={detailCompra.ultima_alteracao_observacao} />
                     </DialogTitle>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5" title="Data da operação de compra">
+                      <span className="inline-flex items-center gap-1.5">
                         <Calendar className="size-3.5 shrink-0" />
                         {formatDateOnly(detailCompra.data)}
                       </span>
@@ -1496,6 +1623,12 @@ export function Compra() {
                         <Hash className="size-3.5 shrink-0" />
                         {/^\d+$/.test(String(detailCompra.id)) ? `Nº ${detailCompra.id}` : `Rascunho (${detailCompra.id})`}
                       </span>
+                      {detailCompra.numero_venda_fornecedor?.trim() ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <ShoppingCart className="size-3.5 shrink-0" />
+                          Venda forn.: {detailCompra.numero_venda_fornecedor.trim()}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1522,20 +1655,37 @@ export function Compra() {
                     </span>
                   </div>
                   {/^\d+$/.test(String(detailCompra.id)) && !detailCompra.cancelada && (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                      <div className="space-y-1.5 min-w-[180px]">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+                      <div className="space-y-1.5">
                         <Label htmlFor="detalhe-data-compra">Data da compra (operação)</Label>
                         <Input
                           id="detalhe-data-compra"
                           name="compra-operacao-data-uid"
                           type="date"
                           autoComplete="off"
+                          className="max-w-[11rem]"
                           value={editDetailDataCompra}
                           onChange={(e) => setEditDetailDataCompra(e.target.value.slice(0, 10))}
                         />
                       </div>
                       <Button type="button" variant="secondary" onClick={() => salvarDataCompraNoDetalhe()}>
                         Guardar data
+                      </Button>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="detalhe-numero-venda-fornecedor">Nº venda fornecedor</Label>
+                        <Input
+                          id="detalhe-numero-venda-fornecedor"
+                          className="max-w-[11rem]"
+                          value={editDetailNumeroVendaFornecedor}
+                          onChange={(e) => setEditDetailNumeroVendaFornecedor(e.target.value.slice(0, 64))}
+                          placeholder="Opcional"
+                        />
+                        {avisoDetalheNumeroDuplicada ? (
+                          <p className="text-xs text-destructive">{avisoDetalheNumeroDuplicada}</p>
+                        ) : null}
+                      </div>
+                      <Button type="button" variant="secondary" onClick={() => salvarNumeroVendaNoDetalhe()}>
+                        Guardar nº venda
                       </Button>
                     </div>
                   )}
@@ -1855,19 +2005,22 @@ export function Compra() {
         open={dataCompraSenhaOpen}
         onOpenChange={(o) => {
           setDataCompraSenhaOpen(o);
-          if (!o) pendingDataCompraRef.current = null;
+          if (!o) pendingOrdemPatchRef.current = null;
         }}
-        title="Alterar data da compra"
-        description="A data da operação será atualizada nesta ordem e em todos os itens. A data de lançamento não muda. Informe a observação e confirme com sua senha."
+        title={ordemPatchSenhaTitulo || "Alterar ordem de compra"}
+        description={ordemPatchSenhaDescricao}
         confirmLabel="Confirmar alteração"
         requireObservacao
         observacaoLabel="Motivo da alteração"
         onVerified={async ({ password, observacao }) => {
-          const p = pendingDataCompraRef.current;
+          const p = pendingOrdemPatchRef.current;
           if (!p) return;
           try {
             const raw = await api.patchCompraOrdemData(p.ordemId, {
-              data: p.data,
+              ...(p.data ? { data: p.data } : {}),
+              ...(p.numero_venda_fornecedor !== undefined
+                ? { numero_venda_fornecedor: p.numero_venda_fornecedor }
+                : {}),
               password,
               observacao,
             });
@@ -1878,7 +2031,11 @@ export function Compra() {
                     id: r.id as string | number,
                     fornecedor: (r.fornecedor as string) || (detailCompra?.fornecedor || ""),
                     fornecedor_id: (r.fornecedor_id as number) ?? detailCompra?.fornecedor_id,
-                    data: (r.data as string) || p.data,
+                    numero_venda_fornecedor:
+                      typeof r.numero_venda_fornecedor === "string"
+                        ? r.numero_venda_fornecedor
+                        : p.numero_venda_fornecedor ?? detailCompra?.numero_venda_fornecedor,
+                    data: (r.data as string) || p.data || detailCompra?.data || "",
                     data_lancamento: (r.data_lancamento as string) || detailCompra?.data_lancamento,
                     cancelada: (r.cancelada as boolean) === true,
                     ultima_alteracao_observacao:
@@ -1897,7 +2054,8 @@ export function Compra() {
                 String(x.id) === String(p.ordemId)
                   ? {
                       ...x,
-                      data: next.data || p.data,
+                      data: next.data,
+                      numero_venda_fornecedor: next.numero_venda_fornecedor,
                       data_lancamento: next.data_lancamento,
                       cancelada: next.cancelada,
                       ultima_alteracao_observacao: next.ultima_alteracao_observacao,
@@ -1906,11 +2064,15 @@ export function Compra() {
                   : x
               )
             );
-            toast.success("Data da compra atualizada");
+            toast.success(
+              p.numero_venda_fornecedor !== undefined
+                ? "Nº venda do fornecedor atualizado"
+                : "Data da compra atualizada",
+            );
           } catch (e: unknown) {
-            toast.error(e instanceof Error ? e.message : "Erro ao atualizar data");
+            toast.error(e instanceof Error ? e.message : "Erro ao atualizar ordem");
           } finally {
-            pendingDataCompraRef.current = null;
+            pendingOrdemPatchRef.current = null;
           }
         }}
       />

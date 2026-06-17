@@ -53,9 +53,30 @@ type CompraLinhaFornecedor = {
   preco_unitario?: number;
   total: number;
   ordem_id?: number | null;
+  ordem_numero_venda_fornecedor?: string;
   ordem_cancelada?: boolean;
   marcada_paga?: boolean;
 };
+
+function rotuloOrdemFornecedor(ordemId: number, numeroVenda?: string | null): string {
+  const nv = String(numeroVenda ?? "").trim();
+  return nv ? `Ordem #${ordemId} · Venda forn. ${nv}` : `Ordem #${ordemId}`;
+}
+
+function htmlCabecalhoOrdemImpressao(g: {
+  ordemId: number;
+  numeroVendaFornecedor: string;
+  dataRef: string;
+  lines: unknown[];
+  totalGrupo: number;
+}): string {
+  const esq = `Ordem #${g.ordemId} · ${formatDateOnly(g.dataRef)} · ${g.lines.length} item(ns) · Total: ${formatCurrencyBrl(g.totalGrupo)}`;
+  const nv = g.numeroVendaFornecedor.trim();
+  const dir = nv
+    ? `<span class="ordem-cabecalho-dir">Venda Fornecedor: ${escapeHtml(nv)}</span>`
+    : "";
+  return `<div class="ordem-cabecalho"><span class="ordem-cabecalho-esq">${escapeHtml(esq)}</span>${dir}</div>`;
+}
 
 function escapeHtml(s: string): string {
   return String(s)
@@ -68,7 +89,7 @@ function escapeHtml(s: string): string {
 function agruparComprasPorOrdem(
   exibirCompras: CompraLinhaFornecedor[],
   parseDataFn: (s: string) => number
-): { key: string; ordemId: number | null; lines: CompraLinhaFornecedor[]; totalGrupo: number; dataRef: string }[] {
+): { key: string; ordemId: number | null; numeroVendaFornecedor: string; lines: CompraLinhaFornecedor[]; totalGrupo: number; dataRef: string }[] {
   const map = new Map<string, CompraLinhaFornecedor[]>();
   for (const c of exibirCompras) {
     const k = c.ordem_id != null && c.ordem_id !== undefined ? `ordem-${c.ordem_id}` : `solo-${c.id}`;
@@ -78,9 +99,10 @@ function agruparComprasPorOrdem(
   const groups = Array.from(map.entries()).map(([key, lines]) => {
     const sorted = [...lines].sort((a, b) => parseDataFn(b.data) - parseDataFn(a.data));
     const ordemId = sorted[0]?.ordem_id ?? null;
+    const numeroVendaFornecedor = String(sorted[0]?.ordem_numero_venda_fornecedor ?? "").trim();
     const totalGrupo = sorted.reduce((s, x) => s + x.total, 0);
     const dataRef = sorted[0]?.data ?? "";
-    return { key, ordemId, lines: sorted, totalGrupo, dataRef };
+    return { key, ordemId, numeroVendaFornecedor, lines: sorted, totalGrupo, dataRef };
   });
   groups.sort((a, b) => parseDataFn(b.dataRef) - parseDataFn(a.dataRef));
   return groups;
@@ -157,6 +179,10 @@ export function FornecedorDetalhe() {
     titulo: string;
     downloadBaseName: string;
   } | null>(null);
+  const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const [printDialogUsarSelecao, setPrintDialogUsarSelecao] = useState(false);
+  const [printVencimento, setPrintVencimento] = useState("");
+  const [printMostrarPagamentos, setPrintMostrarPagamentos] = useState(false);
 
   const getEmpresaHeaderHtml = () => {
     const doc = empresaDocumento();
@@ -382,9 +408,23 @@ export function FornecedorDetalhe() {
   const totalPagoPeriodo = pagamentosFiltrados.reduce((s, p) => s + p.valor, 0);
   const saldoNoPeriodo = totalComprasPeriodo - totalPagoPeriodo;
 
-  const imprimirFechamento = (usarSelecao?: boolean) => {
+  const abrirDialogImpressao = (usarSelecao: boolean) => {
+    setPrintDialogUsarSelecao(usarSelecao);
+    setPrintVencimento("");
+    setPrintMostrarPagamentos(false);
+    setPrintDialogOpen(true);
+  };
+
+  const imprimirFechamento = (opts: {
+    usarSelecao?: boolean;
+    vencimento?: string;
+    mostrarPagamentos?: boolean;
+  }) => {
     if (!data) return;
-    const usarComprasSelecionadas = usarSelecao && comprasSelecionadas.length > 0;
+    const usarComprasSelecionadas = opts.usarSelecao === true && comprasSelecionadas.length > 0;
+    const mostrarPagamentos = opts.mostrarPagamentos === true;
+    const vencimentoRaw = (opts.vencimento ?? "").trim().slice(0, 10);
+    const vencimentoLabel = vencimentoRaw.length >= 10 ? formatDateOnly(vencimentoRaw) : "";
     const comprasAtivasDoc = data.compras.filter((c) => c.ordem_cancelada !== true);
     const comprasParaImprimir = usarComprasSelecionadas
       ? comprasSelecionadas
@@ -401,7 +441,13 @@ export function FornecedorDetalhe() {
     const comprasRows = gruposImpressao
       .map((g) => {
         if (g.ordemId != null) {
-          const cabecalho = `Ordem #${g.ordemId} · ${formatDateOnly(g.dataRef)} · ${g.lines.length} item(ns) · Total: ${formatCurrencyBrl(g.totalGrupo)}`;
+          const cabecalho = htmlCabecalhoOrdemImpressao({
+            ordemId: g.ordemId,
+            numeroVendaFornecedor: g.numeroVendaFornecedor,
+            dataRef: g.dataRef,
+            lines: g.lines,
+            totalGrupo: g.totalGrupo,
+          });
           const itens = g.lines
             .map((linha) => {
               const q = linhaQtd(linha.quantidade);
@@ -409,7 +455,7 @@ export function FornecedorDetalhe() {
               return `<tr class="row-item-ordem"><td></td><td>${escapeHtml(linha.material)}</td><td class="num">${q}</td><td class="num">${pu}</td><td class="num">${formatCurrencyBrl(linha.total)}</td></tr>`;
             })
             .join("");
-          return `<tr class="row-ordem-cabecalho"><td colspan="5">${escapeHtml(cabecalho)}</td></tr>${itens}`;
+          return `<tr class="row-ordem-cabecalho"><td colspan="5">${cabecalho}</td></tr>${itens}`;
         }
         const linha = g.lines[0];
         const qtd = linhaQtd(linha.quantidade);
@@ -420,6 +466,14 @@ export function FornecedorDetalhe() {
     const pagRows = (limites ? pagamentosFiltrados : data.pagamentos)
       .map((p) => `<tr><td>${formatDateOnly(p.data)}</td><td class="num">${formatCurrencyBrl(p.valor)}</td></tr>`)
       .join("");
+    const pagamentosHtml = mostrarPagamentos
+      ? `
+          <h3 style="font-size:14px;margin:20px 0 8px;">Pagamentos</h3>
+          <table>
+            <thead><tr><th>Data</th><th class="num">Valor</th></tr></thead>
+            <tbody>${pagRows || `<tr><td colspan="2" class="muted-cell">Nenhum pagamento registrado.</td></tr>`}</tbody>
+          </table>`
+      : "";
     const totalComprasDoc = comprasParaImprimir.reduce((s, c) => s + c.total, 0);
     const ordensNoDoc = gruposImpressao.filter((g) => g.ordemId != null).length;
     const avulsasNoDoc = gruposImpressao.filter((g) => g.ordemId == null).length;
@@ -460,8 +514,21 @@ export function FornecedorDetalhe() {
             th { background: #f1f5f9; font-weight: 600; color: #334155; }
             .num { text-align: right; white-space: nowrap; }
             tr.row-ordem-cabecalho td { background: #e2e8f0; font-weight: 600; color: #0f172a; padding: 10px 12px; }
+            .ordem-cabecalho { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+            .ordem-cabecalho-esq { flex: 1; min-width: 0; }
+            .ordem-cabecalho-dir { flex-shrink: 0; text-align: right; font-weight: 600; white-space: nowrap; }
             tr.row-item-ordem td { background: #f8fafc; }
             tr.row-item-ordem td:nth-child(2) { padding-left: 18px; }
+            .muted-cell { color: #64748b; font-style: italic; text-align: center; }
+            .vencimento-box {
+              margin: 0 0 16px;
+              padding: 8px 12px;
+              border: 1px solid #cbd5e1;
+              border-radius: 8px;
+              background: #f8fafc;
+              font-size: 12px;
+            }
+            .vencimento-box strong { color: #0f172a; }
             .resumo-box {
               background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
               border: 1px solid #facc15;
@@ -483,6 +550,7 @@ export function FornecedorDetalhe() {
           ${getEmpresaHeaderHtml()}
           <h1>Fechamento – ${data.fornecedor.nome}</h1>
           <p class="meta">Período: ${periodoLabel}</p>
+          ${vencimentoLabel ? `<div class="vencimento-box"><strong>Vencimento:</strong> ${vencimentoLabel}</div>` : ""}
           <div class="resumo-box">
             <div class="label">Total de compras neste período</div>
             <div class="valor">${formatCurrencyBrl(totalComprasDoc)}</div>
@@ -492,11 +560,7 @@ export function FornecedorDetalhe() {
             <thead><tr><th>Data</th><th>Item</th><th class="num">Qtd</th><th class="num">V. unit.</th><th class="num">Total</th></tr></thead>
             <tbody>${comprasRows}</tbody>
           </table>
-          <h3 style="font-size:14px;margin:20px 0 8px;">Pagamentos</h3>
-          <table>
-            <thead><tr><th>Data</th><th class="num">Valor</th></tr></thead>
-            <tbody>${pagRows}</tbody>
-          </table>
+          ${pagamentosHtml}
           <p class="muted">Impresso em ${hojeStr}</p>
         </body>
       </html>`;
@@ -680,7 +744,7 @@ export function FornecedorDetalhe() {
               />
             </>
           )}
-          <Button variant="outline" size="sm" onClick={() => imprimirFechamento(false)}>
+          <Button variant="outline" size="sm" onClick={() => abrirDialogImpressao(false)}>
             <Printer className="size-4 mr-2" />
             Imprimir fechamento (período)
           </Button>
@@ -688,7 +752,7 @@ export function FornecedorDetalhe() {
             variant="default"
             size="sm"
             disabled={comprasSelecionadas.length === 0}
-            onClick={() => imprimirFechamento(true)}
+            onClick={() => abrirDialogImpressao(true)}
             title={comprasSelecionadas.length === 0 ? "Selecione itens na tabela abaixo" : "Imprimir só a seleção"}
           >
             <Printer className="size-4 mr-2" />
@@ -924,7 +988,7 @@ export function FornecedorDetalhe() {
           )}
 
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => imprimirFechamento(true)} disabled={comprasSelecionadas.length === 0}>
+            <Button size="sm" onClick={() => abrirDialogImpressao(true)} disabled={comprasSelecionadas.length === 0}>
               <Printer className="size-4 mr-2" />
               Imprimir seleção
             </Button>
@@ -1164,7 +1228,7 @@ export function FornecedorDetalhe() {
                             <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
                             <TableCell className="min-w-0 align-top">
                               <div className="space-y-0.5">
-                                <span className="font-medium">Ordem #{g.ordemId}</span>
+                                <span className="font-medium">{rotuloOrdemFornecedor(g.ordemId!, g.numeroVendaFornecedor)}</span>
                                 <span className="block text-xs text-muted-foreground">{g.lines.length} item(ns) nesta compra</span>
                               </div>
                             </TableCell>
@@ -1343,7 +1407,7 @@ export function FornecedorDetalhe() {
                                   <div className="space-y-0.5">
                                     <span className="inline-flex items-center gap-1.5 font-medium">
                                       <Ban className="size-3.5 shrink-0 text-destructive" aria-hidden />
-                                      Ordem #{g.ordemId}
+                                      {rotuloOrdemFornecedor(g.ordemId!, g.numeroVendaFornecedor)}
                                     </span>
                                     <span className="block text-xs text-muted-foreground">{g.lines.length} item(ns) — cancelada</span>
                                   </div>
@@ -1531,6 +1595,61 @@ export function FornecedorDetalhe() {
         titulo={printPreview?.titulo ?? ""}
         downloadBaseName={printPreview?.downloadBaseName}
       />
+
+      <Dialog open={printDialogOpen} onOpenChange={setPrintDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Opções de impressão</DialogTitle>
+            <DialogDescription>
+              {printDialogUsarSelecao
+                ? "Configure o fechamento das compras selecionadas."
+                : "Configure o fechamento do período filtrado."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="print-vencimento">Vencimento</Label>
+              <Input
+                id="print-vencimento"
+                type="date"
+                value={printVencimento}
+                onChange={(e) => setPrintVencimento(e.target.value.slice(0, 10))}
+                className="max-w-[11rem]"
+              />
+              <p className="text-xs text-muted-foreground">Opcional. Aparece destacado no documento impresso.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="print-mostrar-pagamentos"
+                checked={printMostrarPagamentos}
+                onCheckedChange={(v) => setPrintMostrarPagamentos(v === true)}
+              />
+              <Label htmlFor="print-mostrar-pagamentos" className="cursor-pointer font-normal">
+                Mostrar pagamentos
+              </Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPrintDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setPrintDialogOpen(false);
+                imprimirFechamento({
+                  usarSelecao: printDialogUsarSelecao,
+                  vencimento: printVencimento,
+                  mostrarPagamentos: printMostrarPagamentos,
+                });
+              }}
+            >
+              <Printer className="size-4 mr-2" />
+              Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

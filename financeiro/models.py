@@ -305,6 +305,13 @@ class OrdemCompra(models.Model):
         help_text='Data da operação de compra (pode ser ajustada após salvar).',
     )
     cancelada = models.BooleanField(default=False, verbose_name='Cancelada')
+    numero_venda_fornecedor = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        verbose_name='Nº venda do fornecedor',
+        help_text='Número do pedido/nota de venda emitida pelo fornecedor (controle anti-duplicidade).',
+    )
     marcada_paga = models.BooleanField(
         default=False,
         verbose_name='Marcada como paga',

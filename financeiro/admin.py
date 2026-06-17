@@ -16,7 +16,7 @@ class ProdutoAdmin(admin.ModelAdmin):
 
 @admin.register(OrdemCompra)
 class OrdemCompraAdmin(admin.ModelAdmin):
-    list_display = ('id', 'fornecedor', 'data_compra', 'cancelada')
+    list_display = ('id', 'fornecedor', 'numero_venda_fornecedor', 'data_compra', 'cancelada')
     list_filter = ('fornecedor', 'cancelada')
 
 @admin.register(CompraMaterial)

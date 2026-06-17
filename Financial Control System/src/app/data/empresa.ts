@@ -9,7 +9,7 @@ export const empresa = {
   /** Nome fantasia (opcional) */
   nomeFantasia: "S M Decor",
   /** CNPJ (deixe "" se usar CPF) */
-  cnpj: "61.578.303/0001-01",
+  cnpj: "61.578.303/0001-80",
   /** CPF (para MEI/autônomo; deixe "" se usar CNPJ) */
   cpf: "",
   /** Inscrição estadual */

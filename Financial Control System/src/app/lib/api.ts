@@ -575,7 +575,13 @@ export const api = {
 
   patchCompraOrdemData: async (
     id: string,
-    body: { data?: string; data_compra?: string; password: string; observacao: string }
+    body: {
+      data?: string;
+      data_compra?: string;
+      numero_venda_fornecedor?: string;
+      password: string;
+      observacao: string;
+    }
   ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
       method: 'PATCH',
@@ -664,7 +670,11 @@ export const api = {
     });
     const body = await response.json();
     if (!response.ok) {
-      const msg = body?.fornecedor_id?.[0] ?? body?.detail ?? (typeof body === 'object' ? undefined : String(body));
+      const msg =
+        body?.numero_venda_fornecedor?.[0] ??
+        body?.fornecedor_id?.[0] ??
+        body?.detail ??
+        (typeof body === 'object' ? undefined : String(body));
       throw new Error(msg || 'Erro ao criar compra');
     }
     return body;

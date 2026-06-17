@@ -170,6 +170,37 @@ def _set_ultima_alteracao_ordem(ordem_pk, observacao):
     )
 
 
+def _normalizar_numero_venda_fornecedor(val):
+    if val is None:
+        return ''
+    return str(val).strip()[:64]
+
+
+def _validar_numero_venda_fornecedor_unico(fornecedor, numero, exclude_ordem_id=None):
+    """Impede duas ordens ativas do mesmo fornecedor com o mesmo nº de venda."""
+    numero = _normalizar_numero_venda_fornecedor(numero)
+    if not numero:
+        return None
+    qs = OrdemCompra.objects.filter(
+        fornecedor=fornecedor,
+        cancelada=False,
+        numero_venda_fornecedor__iexact=numero,
+    )
+    if exclude_ordem_id is not None:
+        qs = qs.exclude(pk=exclude_ordem_id)
+    if qs.exists():
+        existente = qs.first()
+        return Response(
+            {
+                'numero_venda_fornecedor': [
+                    f'Já existe a ordem #{existente.id} ativa com este número para este fornecedor.',
+                ],
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
 def _resolve_compra_linha_por_pk(pk, tipo_hint=None):
     """
     CompraMaterial e CompraProduto têm sequências de ID independentes; o mesmo número pode
@@ -1438,7 +1469,15 @@ class CompraListCreate(APIView):
             )
         else:
             _, data_hora_compra = _data_hora_negocio()
-        ordem = OrdemCompra.objects.create(fornecedor=fornecedor, data_compra=data_hora_compra)
+        numero_venda = _normalizar_numero_venda_fornecedor(request.data.get('numero_venda_fornecedor'))
+        dup_err = _validar_numero_venda_fornecedor_unico(fornecedor, numero_venda)
+        if dup_err:
+            return dup_err
+        ordem = OrdemCompra.objects.create(
+            fornecedor=fornecedor,
+            data_compra=data_hora_compra,
+            numero_venda_fornecedor=numero_venda,
+        )
         created = []
         for item in itens:
             item_tipo = (item.get('tipo') or '').strip().lower()
@@ -1570,35 +1609,53 @@ class CompraDetail(APIView):
             return err
         data = request.data or {}
         data_raw = data.get('data') or data.get('data_compra')
-        if not data_raw:
+        alterar_data = bool(data_raw)
+        alterar_numero = 'numero_venda_fornecedor' in data
+        if not alterar_data and not alterar_numero:
             return Response(
-                {'data': ['Informe data ou data_compra (YYYY-MM-DD).']},
+                {'detail': 'Informe data (ou data_compra) e/ou numero_venda_fornecedor.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        data_enviada = _parse_data_request(str(data_raw).strip())
-        if not data_enviada:
-            return Response(
-                {'data': ['Data inválida. Use YYYY-MM-DD.']},
-                status=status.HTTP_400_BAD_REQUEST,
+        update_fields = ['ultima_alteracao_observacao', 'ultima_alteracao_em']
+        log_partes = []
+        if alterar_data:
+            data_enviada = _parse_data_request(str(data_raw).strip())
+            if not data_enviada:
+                return Response(
+                    {'data': ['Data inválida. Use YYYY-MM-DD.']},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            tz_br = ZoneInfo('America/Sao_Paulo')
+            data_hora = datetime.combine(
+                data_enviada,
+                datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0),
+                tzinfo=tz_br,
             )
-        tz_br = ZoneInfo('America/Sao_Paulo')
-        data_hora = datetime.combine(
-            data_enviada,
-            datetime.min.time().replace(hour=12, minute=0, second=0, microsecond=0),
-            tzinfo=tz_br,
-        )
-        data_antiga = ordem.data_compra.date().isoformat() if ordem.data_compra else ''
-        ordem.data_compra = data_hora
+            data_antiga = ordem.data_compra.date().isoformat() if ordem.data_compra else ''
+            ordem.data_compra = data_hora
+            update_fields.append('data_compra')
+            log_partes.append(f'data da compra {data_antiga} → {data_enviada.isoformat()}')
+            ordem.itens.update(data_compra=data_hora)
+            ordem.itens_produtos.update(data_compra=data_hora)
+        if alterar_numero:
+            numero_venda = _normalizar_numero_venda_fornecedor(data.get('numero_venda_fornecedor'))
+            dup_err = _validar_numero_venda_fornecedor_unico(
+                ordem.fornecedor, numero_venda, exclude_ordem_id=pk_int,
+            )
+            if dup_err:
+                return dup_err
+            antigo = ordem.numero_venda_fornecedor or ''
+            ordem.numero_venda_fornecedor = numero_venda
+            update_fields.append('numero_venda_fornecedor')
+            log_partes.append(f'nº venda fornecedor "{antigo}" → "{numero_venda}"')
         ordem.ultima_alteracao_observacao = observacao[:2000]
         ordem.ultima_alteracao_em = timezone.now()
-        ordem.save(update_fields=['data_compra', 'ultima_alteracao_observacao', 'ultima_alteracao_em'])
-        ordem.itens.update(data_compra=data_hora)
-        ordem.itens_produtos.update(data_compra=data_hora)
+        ordem.save(update_fields=list(dict.fromkeys(update_fields)))
         _api_log(
             request,
             "Editar",
             "Compra",
-            f"Ordem #{pk_int} - data da compra {data_antiga} → {data_enviada.isoformat()}. Obs.: {observacao}",
+            f"Ordem #{pk_int} - {'; '.join(log_partes)}. Obs.: {observacao}",
         )
         ordem = OrdemCompra.objects.prefetch_related(
             'itens__material', 'itens_produtos__produto'
@@ -3233,6 +3290,10 @@ class FornecedorDetalhe(APIView):
                         'id': f'mat-{c.id}',
                         'ordem_id': c.ordem_id,
                         'ordem_cancelada': bool(c.ordem_id and c.ordem.cancelada),
+                        'ordem_numero_venda_fornecedor': (
+                            (c.ordem.numero_venda_fornecedor or '').strip()
+                            if c.ordem_id and c.ordem else ''
+                        ),
                         'data': c.data_compra.date().isoformat() if c.data_compra else '',
                         'material': c.material.nome,
                         'quantidade': int(c.quantidade),
@@ -3252,6 +3313,10 @@ class FornecedorDetalhe(APIView):
                         'id': f'prod-{c.id}',
                         'ordem_id': c.ordem_id,
                         'ordem_cancelada': bool(c.ordem_id and c.ordem.cancelada),
+                        'ordem_numero_venda_fornecedor': (
+                            (c.ordem.numero_venda_fornecedor or '').strip()
+                            if c.ordem_id and c.ordem else ''
+                        ),
                         'data': c.data_compra.date().isoformat() if c.data_compra else '',
                         'material': c.produto.nome,
                         'quantidade': int(c.quantidade),
