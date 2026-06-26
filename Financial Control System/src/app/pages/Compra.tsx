@@ -369,32 +369,7 @@ export function Compra() {
   const [cadastroRapidoModo, setCadastroRapidoModo] = useState<CadastroRapidoModo>("material-compra");
   const [cadastroRapidoFornecedorId, setCadastroRapidoFornecedorId] = useState("");
   const cadastroRapidoOrigemRef = useRef<"nova" | "detalhe">("nova");
-  const [addItemSenhaOpen, setAddItemSenhaOpen] = useState(false);
-  const pendingAddItemRef = useRef<{
-    ordemId: string;
-    tipo: "material" | "produto";
-    material?: number;
-    produto?: number;
-    quantidade: number;
-    preco_no_dia: number;
-  } | null>(null);
-  const [editItemSenhaOpen, setEditItemSenhaOpen] = useState(false);
-  const pendingEditItemRef = useRef<{
-    itemId: string;
-    ordemIdRef: string | number;
-    detId: string | null;
-    qtd: number;
-    preco: number;
-    tipo: 'material' | 'produto';
-  } | null>(null);
-  const [dataCompraSenhaOpen, setDataCompraSenhaOpen] = useState(false);
-  const [ordemPatchSenhaTitulo, setOrdemPatchSenhaTitulo] = useState("");
-  const [ordemPatchSenhaDescricao, setOrdemPatchSenhaDescricao] = useState("");
-  const pendingOrdemPatchRef = useRef<{
-    ordemId: string;
-    data?: string;
-    numero_venda_fornecedor?: string;
-  } | null>(null);
+  const [detailSaving, setDetailSaving] = useState(false);
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
 
@@ -607,6 +582,71 @@ export function Compra() {
     }
   };
 
+  const aplicarPatchOrdem = async (patch: {
+    ordemId: string;
+    data?: string;
+    numero_venda_fornecedor?: string;
+  }) => {
+    setDetailSaving(true);
+    try {
+      const raw = await api.patchCompraOrdemData(patch.ordemId, {
+        ...(patch.data ? { data: patch.data } : {}),
+        ...(patch.numero_venda_fornecedor !== undefined
+          ? { numero_venda_fornecedor: patch.numero_venda_fornecedor }
+          : {}),
+      });
+      const r = raw as Record<string, unknown>;
+      const next: OrdemCompra =
+        raw && typeof raw === "object"
+          ? {
+              id: r.id as string | number,
+              fornecedor: (r.fornecedor as string) || (detailCompra?.fornecedor || ""),
+              fornecedor_id: (r.fornecedor_id as number) ?? detailCompra?.fornecedor_id,
+              numero_venda_fornecedor:
+                typeof r.numero_venda_fornecedor === "string"
+                  ? r.numero_venda_fornecedor
+                  : patch.numero_venda_fornecedor ?? detailCompra?.numero_venda_fornecedor,
+              data: (r.data as string) || patch.data || detailCompra?.data || "",
+              data_lancamento: (r.data_lancamento as string) || detailCompra?.data_lancamento,
+              cancelada: (r.cancelada as boolean) === true,
+              ultima_alteracao_observacao:
+                typeof r.ultima_alteracao_observacao === "string"
+                  ? r.ultima_alteracao_observacao
+                  : detailCompra?.ultima_alteracao_observacao,
+              ultima_alteracao_em:
+                (r.ultima_alteracao_em as string | null | undefined) ?? detailCompra?.ultima_alteracao_em,
+              itens: (r.itens as ItemCompra[]) || detailCompra?.itens || [],
+              total: Number(r.total) || detailCompra?.total || 0,
+            }
+          : (detailCompra as OrdemCompra);
+      setDetailCompra(next);
+      setOrdens((prev) =>
+        prev.map((x) =>
+          String(x.id) === String(patch.ordemId)
+            ? {
+                ...x,
+                data: next.data,
+                numero_venda_fornecedor: next.numero_venda_fornecedor,
+                data_lancamento: next.data_lancamento,
+                cancelada: next.cancelada,
+                ultima_alteracao_observacao: next.ultima_alteracao_observacao,
+                ultima_alteracao_em: next.ultima_alteracao_em,
+              }
+            : x
+        )
+      );
+      toast.success(
+        patch.numero_venda_fornecedor !== undefined
+          ? "Nº venda do fornecedor atualizado"
+          : "Data da compra atualizada",
+      );
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar ordem");
+    } finally {
+      setDetailSaving(false);
+    }
+  };
+
   const salvarDataCompraNoDetalhe = () => {
     if (!detailCompra || !/^\d+$/.test(String(detailCompra.id))) return;
     if (detailCompra.cancelada) {
@@ -622,12 +662,7 @@ export function Compra() {
       toast.info("Data já é esta.");
       return;
     }
-    pendingOrdemPatchRef.current = { ordemId: String(detailCompra.id), data: trimmed };
-    setOrdemPatchSenhaTitulo("Alterar data da compra");
-    setOrdemPatchSenhaDescricao(
-      "A data da operação será atualizada nesta ordem e em todos os itens. A data de lançamento não muda. Informe a observação e confirme com sua senha.",
-    );
-    setDataCompraSenhaOpen(true);
+    void aplicarPatchOrdem({ ordemId: String(detailCompra.id), data: trimmed });
   };
 
   const salvarNumeroVendaNoDetalhe = () => {
@@ -654,12 +689,10 @@ export function Compra() {
         return;
       }
     }
-    pendingOrdemPatchRef.current = { ordemId: String(detailCompra.id), numero_venda_fornecedor: trimmed };
-    setOrdemPatchSenhaTitulo("Alterar nº venda do fornecedor");
-    setOrdemPatchSenhaDescricao(
-      "O número informado pelo fornecedor será atualizado nesta ordem. Informe a observação e confirme com sua senha.",
-    );
-    setDataCompraSenhaOpen(true);
+    void aplicarPatchOrdem({
+      ordemId: String(detailCompra.id),
+      numero_venda_fornecedor: trimmed,
+    });
   };
 
   const handleCopiarOrdem = () => {
@@ -760,7 +793,7 @@ export function Compra() {
     setEditCompraPreco(String(item.preco_no_dia));
   };
 
-  const salvarEdicaoItemCompra = () => {
+  const salvarEdicaoItemCompra = async () => {
     if (!editingItem) return;
     const qtd = parseQtdInteira(editCompraQtd);
     if (qtd === null) {
@@ -776,8 +809,25 @@ export function Compra() {
     const ordemIdRef = editingItem.ordemId;
     const detId = detailCompra ? String(detailCompra.id) : null;
     const tipo: 'material' | 'produto' = editingItem.tipo === 'produto' ? 'produto' : 'material';
-    pendingEditItemRef.current = { itemId, ordemIdRef, detId, qtd, preco, tipo };
-    setEditItemSenhaOpen(true);
+    setDetailSaving(true);
+    try {
+      await api.updateCompra(itemId, {
+        quantidade: qtd,
+        preco_no_dia: preco,
+        tipo,
+      });
+      toast.success("Item atualizado");
+      await loadData();
+      setEditingItem(null);
+      if (detId && detId === String(ordemIdRef)) {
+        const d = await api.getCompraDetalhe(String(ordemIdRef));
+        setDetailCompra(d as OrdemCompra);
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Erro ao atualizar item");
+    } finally {
+      setDetailSaving(false);
+    }
   };
 
   const imprimirCompra = (ordem: OrdemCompra) => {
@@ -1668,7 +1718,7 @@ export function Compra() {
                           onChange={(e) => setEditDetailDataCompra(e.target.value.slice(0, 10))}
                         />
                       </div>
-                      <Button type="button" variant="secondary" onClick={() => salvarDataCompraNoDetalhe()}>
+                      <Button type="button" variant="secondary" disabled={detailSaving} onClick={() => salvarDataCompraNoDetalhe()}>
                         Guardar data
                       </Button>
                       <div className="space-y-1.5">
@@ -1684,7 +1734,7 @@ export function Compra() {
                           <p className="text-xs text-destructive">{avisoDetalheNumeroDuplicada}</p>
                         ) : null}
                       </div>
-                      <Button type="button" variant="secondary" onClick={() => salvarNumeroVendaNoDetalhe()}>
+                      <Button type="button" variant="secondary" disabled={detailSaving} onClick={() => salvarNumeroVendaNoDetalhe()}>
                         Guardar nº venda
                       </Button>
                     </div>
@@ -1695,51 +1745,73 @@ export function Compra() {
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="font-medium">Adicionar item</h3>
-                        <p className="text-xs text-muted-foreground">
-                          Será pedido senha e observação e ficará registrado nos logs.
-                        </p>
                       </div>
                       <Button
                         type="button"
                         variant="secondary"
+                        disabled={detailSaving}
                         onClick={() => {
-                          const ordemId = String(detailCompra.id);
-                          const qtd = parseQtdInteira(addDetailQtd);
-                          if (!qtd) {
-                            toast.error("Informe a quantidade");
-                            return;
-                          }
-                          const preco = parseFloat(String(addDetailPreco).replace(",", "."));
-                          if (!Number.isFinite(preco) || preco < 0) {
-                            toast.error("Informe o preço unitário");
-                            return;
-                          }
-                          if (addDetailTipo === "material") {
-                            if (!addDetailMaterialId) {
-                              toast.error("Selecione o material");
+                          void (async () => {
+                            const ordemId = String(detailCompra.id);
+                            const qtd = parseQtdInteira(addDetailQtd);
+                            if (!qtd) {
+                              toast.error("Informe a quantidade");
                               return;
                             }
-                            pendingAddItemRef.current = {
-                              ordemId,
-                              tipo: "material",
-                              material: Number(addDetailMaterialId),
-                              quantidade: qtd,
-                              preco_no_dia: preco,
-                            };
-                          } else {
-                            if (!addDetailProdutoId) {
+                            const preco = parseFloat(String(addDetailPreco).replace(",", "."));
+                            if (!Number.isFinite(preco) || preco < 0) {
+                              toast.error("Informe o preço unitário");
+                              return;
+                            }
+                            const payload =
+                              addDetailTipo === "material"
+                                ? {
+                                    ordemId,
+                                    tipo: "material" as const,
+                                    material: Number(addDetailMaterialId),
+                                    quantidade: qtd,
+                                    preco_no_dia: preco,
+                                  }
+                                : {
+                                    ordemId,
+                                    tipo: "produto" as const,
+                                    produto: Number(addDetailProdutoId),
+                                    quantidade: qtd,
+                                    preco_no_dia: preco,
+                                  };
+                            if (addDetailTipo === "material") {
+                              if (!addDetailMaterialId) {
+                                toast.error("Selecione o material");
+                                return;
+                              }
+                            } else if (!addDetailProdutoId) {
                               toast.error("Selecione o produto");
                               return;
                             }
-                            pendingAddItemRef.current = {
-                              ordemId,
-                              tipo: "produto",
-                              produto: Number(addDetailProdutoId),
-                              quantidade: qtd,
-                              preco_no_dia: preco,
-                            };
-                          }
-                          setAddItemSenhaOpen(true);
+                            setDetailSaving(true);
+                            try {
+                              const updated = await api.addCompraItem(payload.ordemId, {
+                                tipo: payload.tipo,
+                                material: payload.tipo === "material" ? payload.material : undefined,
+                                produto: payload.tipo === "produto" ? payload.produto : undefined,
+                                quantidade: payload.quantidade,
+                                preco_no_dia: payload.preco_no_dia,
+                              });
+                              toast.success("Item adicionado");
+                              await loadData();
+                              if (detailCompra && String(detailCompra.id) === ordemId) {
+                                setDetailCompra(updated as OrdemCompra);
+                              }
+                              setAddDetailMaterialId("");
+                              setAddDetailProdutoId("");
+                              setAddDetailQtd("");
+                              setAddDetailPreco("");
+                            } catch (e: unknown) {
+                              toast.error(e instanceof Error ? e.message : "Erro ao adicionar item");
+                            } finally {
+                              setDetailSaving(false);
+                            }
+                          })();
                         }}
                       >
                         <Plus className="size-4 mr-2" />
@@ -2002,82 +2074,6 @@ export function Compra() {
       ) : null}
 
       <ConfirmacaoComSenhaDialog
-        open={dataCompraSenhaOpen}
-        onOpenChange={(o) => {
-          setDataCompraSenhaOpen(o);
-          if (!o) pendingOrdemPatchRef.current = null;
-        }}
-        title={ordemPatchSenhaTitulo || "Alterar ordem de compra"}
-        description={ordemPatchSenhaDescricao}
-        confirmLabel="Confirmar alteração"
-        requireObservacao
-        observacaoLabel="Motivo da alteração"
-        onVerified={async ({ password, observacao }) => {
-          const p = pendingOrdemPatchRef.current;
-          if (!p) return;
-          try {
-            const raw = await api.patchCompraOrdemData(p.ordemId, {
-              ...(p.data ? { data: p.data } : {}),
-              ...(p.numero_venda_fornecedor !== undefined
-                ? { numero_venda_fornecedor: p.numero_venda_fornecedor }
-                : {}),
-              password,
-              observacao,
-            });
-            const r = raw as Record<string, unknown>;
-            const next: OrdemCompra =
-              raw && typeof raw === "object"
-                ? {
-                    id: r.id as string | number,
-                    fornecedor: (r.fornecedor as string) || (detailCompra?.fornecedor || ""),
-                    fornecedor_id: (r.fornecedor_id as number) ?? detailCompra?.fornecedor_id,
-                    numero_venda_fornecedor:
-                      typeof r.numero_venda_fornecedor === "string"
-                        ? r.numero_venda_fornecedor
-                        : p.numero_venda_fornecedor ?? detailCompra?.numero_venda_fornecedor,
-                    data: (r.data as string) || p.data || detailCompra?.data || "",
-                    data_lancamento: (r.data_lancamento as string) || detailCompra?.data_lancamento,
-                    cancelada: (r.cancelada as boolean) === true,
-                    ultima_alteracao_observacao:
-                      typeof r.ultima_alteracao_observacao === "string"
-                        ? r.ultima_alteracao_observacao
-                        : detailCompra?.ultima_alteracao_observacao,
-                    ultima_alteracao_em:
-                      (r.ultima_alteracao_em as string | null | undefined) ?? detailCompra?.ultima_alteracao_em,
-                    itens: (r.itens as ItemCompra[]) || detailCompra?.itens || [],
-                    total: Number(r.total) || detailCompra?.total || 0,
-                  }
-                : (detailCompra as OrdemCompra);
-            setDetailCompra(next);
-            setOrdens((prev) =>
-              prev.map((x) =>
-                String(x.id) === String(p.ordemId)
-                  ? {
-                      ...x,
-                      data: next.data,
-                      numero_venda_fornecedor: next.numero_venda_fornecedor,
-                      data_lancamento: next.data_lancamento,
-                      cancelada: next.cancelada,
-                      ultima_alteracao_observacao: next.ultima_alteracao_observacao,
-                      ultima_alteracao_em: next.ultima_alteracao_em,
-                    }
-                  : x
-              )
-            );
-            toast.success(
-              p.numero_venda_fornecedor !== undefined
-                ? "Nº venda do fornecedor atualizado"
-                : "Data da compra atualizada",
-            );
-          } catch (e: unknown) {
-            toast.error(e instanceof Error ? e.message : "Erro ao atualizar ordem");
-          } finally {
-            pendingOrdemPatchRef.current = null;
-          }
-        }}
-      />
-
-      <ConfirmacaoComSenhaDialog
         open={excluirCompraOpen}
         onOpenChange={setExcluirCompraOpen}
         title="Cancelar ordem de compra"
@@ -2119,84 +2115,6 @@ export function Compra() {
           const { id: idDel, tipo } = excluirItemCompra;
           setExcluirItemCompra(null);
           await handleDeleteCompra(idDel, password, observacao, tipo);
-        }}
-      />
-
-      <ConfirmacaoComSenhaDialog
-        open={addItemSenhaOpen}
-        onOpenChange={(o) => {
-          setAddItemSenhaOpen(o);
-          if (!o) pendingAddItemRef.current = null;
-        }}
-        title="Adicionar item na ordem"
-        description="Informe a observação (motivo) e confirme com sua senha."
-        confirmLabel="Adicionar item"
-        requireObservacao
-        observacaoLabel="Motivo da alteração"
-        onVerified={async ({ password, observacao }) => {
-          const p = pendingAddItemRef.current;
-          if (!p) return;
-          try {
-            const updated = await api.addCompraItem(p.ordemId, {
-              tipo: p.tipo,
-              material: p.material,
-              produto: p.produto,
-              quantidade: p.quantidade,
-              preco_no_dia: p.preco_no_dia,
-              password,
-              observacao,
-            });
-            toast.success("Item adicionado");
-            await loadData();
-            if (detailCompra && String(detailCompra.id) === String(p.ordemId)) {
-              setDetailCompra(updated as OrdemCompra);
-            }
-            setAddDetailMaterialId("");
-            setAddDetailProdutoId("");
-            setAddDetailQtd("");
-            setAddDetailPreco("");
-          } catch (e: unknown) {
-            toast.error(e instanceof Error ? e.message : "Erro ao adicionar item");
-          } finally {
-            pendingAddItemRef.current = null;
-          }
-        }}
-      />
-
-      <ConfirmacaoComSenhaDialog
-        open={editItemSenhaOpen}
-        onOpenChange={(o) => {
-          setEditItemSenhaOpen(o);
-          if (!o) pendingEditItemRef.current = null;
-        }}
-        title="Alterar item da ordem"
-        description="Informe a observação (motivo) e confirme com sua senha. Isso ficará registrado nos logs."
-        confirmLabel="Salvar alteração"
-        requireObservacao
-        observacaoLabel="Motivo da alteração"
-        onVerified={async ({ password, observacao }) => {
-          const p = pendingEditItemRef.current;
-          if (!p) return;
-          try {
-            await api.updateCompra(p.itemId, {
-              quantidade: p.qtd,
-              preco_no_dia: p.preco,
-              tipo: p.tipo,
-              password,
-              observacao,
-            });
-            toast.success("Item atualizado");
-            await loadData();
-            setEditingItem(null);
-            if (p.detId && p.detId === String(p.ordemIdRef)) {
-              const d = await api.getCompraDetalhe(String(p.ordemIdRef));
-              setDetailCompra(d as OrdemCompra);
-            }
-          } catch (e: unknown) {
-            toast.error(e instanceof Error ? e.message : "Erro ao atualizar item");
-          } finally {
-            pendingEditItemRef.current = null;
-          }
         }}
       />
 

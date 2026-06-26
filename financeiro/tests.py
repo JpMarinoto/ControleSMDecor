@@ -167,13 +167,7 @@ class CompraDataApiTest(TestCase):
         lanc_iso = ordem.data_lancamento.date().isoformat() if ordem.data_lancamento else ""
         req_patch = factory.patch(
             f"/api/compras/{oid}/",
-            data=json.dumps(
-                {
-                    "data": "2025-04-15",
-                    "password": "senha_segura_123",
-                    "observacao": "Ajuste de data para teste automatizado",
-                }
-            ),
+            data=json.dumps({"data": "2025-04-15"}),
             content_type="application/json",
         )
         force_authenticate(req_patch, user=self.user)
@@ -265,8 +259,6 @@ class CompraDataApiTest(TestCase):
                 {
                     "preco_no_dia": "15.00",
                     "tipo": "material",
-                    "password": "senha_segura_123",
-                    "observacao": "Ajuste de preço em teste automatizado",
                 }
             ),
             content_type="application/json",

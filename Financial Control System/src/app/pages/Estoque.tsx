@@ -32,6 +32,10 @@ interface ItemEstoque {
   alterado_hoje?: boolean;
 }
 
+function totalEstoqueItem(item: Pick<ItemEstoque, "estoque_atual" | "preco_unitario_base">): number {
+  return (Number(item.estoque_atual) || 0) * (Number(item.preco_unitario_base) || 0);
+}
+
 export function Estoque() {
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
@@ -190,6 +194,18 @@ export function Estoque() {
         return;
       }
       toast.success("Contagem aplicada ao sistema");
+      setMateriais((prev) =>
+        prev.map((m) =>
+          m.id === id
+            ? {
+                ...m,
+                estoque_atual: nova,
+                total: totalEstoqueItem({ estoque_atual: nova, preco_unitario_base: m.preco_unitario_base }),
+                alterado_hoje: true,
+              }
+            : m
+        )
+      );
       setContagem((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -224,7 +240,14 @@ export function Estoque() {
       toast.success("Contagem aplicada ao sistema");
       setProdutos((prev) =>
         prev.map((p) =>
-          p.id === id ? { ...p, estoque_atual: nova ?? p.estoque_atual, alterado_hoje: true } : p
+          p.id === id
+            ? {
+                ...p,
+                estoque_atual: nova,
+                total: totalEstoqueItem({ estoque_atual: nova, preco_unitario_base: p.preco_unitario_base }),
+                alterado_hoje: true,
+              }
+            : p
         )
       );
       setContagemProdutos((prev) => {
@@ -232,6 +255,7 @@ export function Estoque() {
         delete next[id];
         return next;
       });
+      load();
     } catch {
       toast.error("Erro ao aplicar contagem");
     } finally {
@@ -239,8 +263,8 @@ export function Estoque() {
     }
   };
 
-  const somaTotalMateriais = materiais.reduce((s, i) => s + (i.total || 0), 0);
-  const somaTotalProdutos = produtos.reduce((s, i) => s + (i.total || 0), 0);
+  const somaTotalMateriais = materiais.reduce((s, i) => s + totalEstoqueItem(i), 0);
+  const somaTotalProdutos = produtos.reduce((s, i) => s + totalEstoqueItem(i), 0);
 
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
@@ -529,7 +553,7 @@ export function Estoque() {
                               </TableCell>
                             )}
                             {isChefe && (
-                              <TableCell className="text-right">{formatCurrency(item.total)}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(totalEstoqueItem(item))}</TableCell>
                             )}
                           </TableRow>
                         ))
@@ -594,7 +618,7 @@ export function Estoque() {
                               </TableCell>
                             )}
                             {isChefe && (
-                              <TableCell className="text-right">{formatCurrency(item.total)}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(totalEstoqueItem(item))}</TableCell>
                             )}
                           </TableRow>
                         ))
@@ -687,7 +711,7 @@ export function Estoque() {
                                 <TableCell className="text-right text-muted-foreground">
                                   {formatCurrency(item.preco_unitario_base)}
                                 </TableCell>
-                                <TableCell className="text-right">{formatCurrency(item.total)}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(totalEstoqueItem(item))}</TableCell>
                               </>
                             )}
                           </TableRow>
@@ -780,7 +804,7 @@ export function Estoque() {
                                   <TableCell className="text-right text-muted-foreground">
                                     {formatCurrency(item.preco_unitario_base)}
                                   </TableCell>
-                                  <TableCell className="text-right">{formatCurrency(item.total)}</TableCell>
+                                  <TableCell className="text-right">{formatCurrency(totalEstoqueItem(item))}</TableCell>
                                 </>
                               )}
                             </TableRow>

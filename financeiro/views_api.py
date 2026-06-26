@@ -1604,9 +1604,6 @@ class CompraDetail(APIView):
             )
         if ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
-        _, observacao, err = _exigir_senha_e_observacao_compra(request)
-        if err:
-            return err
         data = request.data or {}
         data_raw = data.get('data') or data.get('data_compra')
         alterar_data = bool(data_raw)
@@ -1648,14 +1645,15 @@ class CompraDetail(APIView):
             ordem.numero_venda_fornecedor = numero_venda
             update_fields.append('numero_venda_fornecedor')
             log_partes.append(f'nº venda fornecedor "{antigo}" → "{numero_venda}"')
-        ordem.ultima_alteracao_observacao = observacao[:2000]
+        resumo_alteracao = '; '.join(log_partes) if log_partes else 'alteração na ordem'
+        ordem.ultima_alteracao_observacao = resumo_alteracao[:2000]
         ordem.ultima_alteracao_em = timezone.now()
         ordem.save(update_fields=list(dict.fromkeys(update_fields)))
         _api_log(
             request,
             "Editar",
             "Compra",
-            f"Ordem #{pk_int} - {'; '.join(log_partes)}. Obs.: {observacao}",
+            f"Ordem #{pk_int} - {resumo_alteracao}",
         )
         ordem = OrdemCompra.objects.prefetch_related(
             'itens__material', 'itens_produtos__produto'
@@ -1673,9 +1671,6 @@ class CompraDetail(APIView):
             return Response({'detail': 'Só é possível adicionar itens a uma ordem (id numérico).'}, status=status.HTTP_404_NOT_FOUND)
         if ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
-        _, observacao, err = _exigir_senha_e_observacao_compra(request)
-        if err:
-            return err
         data = request.data if isinstance(request.data, dict) else {}
         item_tipo = (data.get('tipo') or '').strip().lower()
         qtd = data.get('quantidade')
@@ -1713,13 +1708,14 @@ class CompraDetail(APIView):
                 preco_no_dia=p,
                 data_compra=ordem.data_compra,
             )
+            resumo = f"item produto adicionado (linha #{item.id}, produto {prod.id}, qtd {q}, preço {float(p)})"
             _api_log(
                 request,
                 "Editar",
                 "Compra",
-                f"Ordem #{pk_int} - item produto adicionado (linha #{item.id}, produto {prod.id}, qtd {q}, preço {float(p)}). Obs.: {observacao}",
+                f"Ordem #{pk_int} - {resumo}",
             )
-            _set_ultima_alteracao_ordem(pk_int, observacao)
+            _set_ultima_alteracao_ordem(pk_int, resumo)
         else:
             if not material_id:
                 return Response({'material': ['Informe o material.']}, status=status.HTTP_400_BAD_REQUEST)
@@ -1735,13 +1731,14 @@ class CompraDetail(APIView):
                 preco_no_dia=p,
                 data_compra=ordem.data_compra,
             )
+            resumo = f"item material adicionado (linha #{item.id}, material {material.id}, qtd {q}, preço {float(p)})"
             _api_log(
                 request,
                 "Editar",
                 "Compra",
-                f"Ordem #{pk_int} - item material adicionado (linha #{item.id}, material {material.id}, qtd {q}, preço {float(p)}). Obs.: {observacao}",
+                f"Ordem #{pk_int} - {resumo}",
             )
-            _set_ultima_alteracao_ordem(pk_int, observacao)
+            _set_ultima_alteracao_ordem(pk_int, resumo)
 
         ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').get(pk=pk_int)
         return Response(OrdemCompraSerializer(ordem).data, status=status.HTTP_200_OK)
@@ -1764,9 +1761,6 @@ class CompraDetail(APIView):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
-        _, observacao, err = _exigir_senha_e_observacao_compra(request)
-        if err:
-            return err
         old_q = obj.quantidade
         old_p = float(obj.preco_no_dia or 0)
         old_mat = getattr(obj, 'material_id', None)
@@ -1823,9 +1817,9 @@ class CompraDetail(APIView):
             request,
             "Editar",
             "Compra",
-            f"{'Ordem #' + str(obj.ordem_id) if obj.ordem_id else 'Compra avulsa'} linha #{pk} ({kind}): {det}. Obs.: {observacao}",
+            f"{'Ordem #' + str(obj.ordem_id) if obj.ordem_id else 'Compra avulsa'} linha #{pk} ({kind}): {det}",
         )
-        _set_ultima_alteracao_ordem(obj.ordem_id, observacao)
+        _set_ultima_alteracao_ordem(obj.ordem_id, det)
         if kind == 'material':
             return Response(CompraSerializer(obj).data)
         return Response(ItemCompraProdutoSerializer(obj).data)

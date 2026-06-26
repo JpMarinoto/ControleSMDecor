@@ -579,8 +579,6 @@ export const api = {
       data?: string;
       data_compra?: string;
       numero_venda_fornecedor?: string;
-      password: string;
-      observacao: string;
     }
   ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
@@ -599,8 +597,6 @@ export const api = {
       produto?: number;
       quantidade: number;
       preco_no_dia: number;
-      password: string;
-      observacao: string;
     }
   ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${ordemId}/`, {
@@ -621,8 +617,6 @@ export const api = {
       produto?: number;
       /** Desambigua quando existem material e produto com o mesmo ID de linha. */
       tipo?: 'material' | 'produto';
-      password: string;
-      observacao: string;
     }
   ) => {
     const response = await fetch(`${API_BASE_URL}/compras/${id}/`, {
