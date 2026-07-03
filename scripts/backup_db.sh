@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Backup diário do SQLite (Django). Uso na VPS com cron/systemd timer.
+# Backup diário do SQLite (Django). Uso na VPS com systemd timer ou cron manual.
+# Automático na VPS: ./scripts/install_backup_timer.sh (ver deploy/systemd/README_BACKUP.txt)
 # Recomendado: instalar sqlite para cópia consistente: dnf install -y sqlite
 set -euo pipefail
 

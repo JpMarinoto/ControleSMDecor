@@ -110,6 +110,7 @@ class Produto(models.Model):
         return f"[{self.id}] {self.nome}"
 
 class Material(models.Model):
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
     nome = models.CharField(max_length=200)
     categoria = models.ForeignKey(
         'CategoriaProduto',
@@ -142,8 +143,8 @@ class Material(models.Model):
 
 class ProdutoInsumo(models.Model):
     """Materiais necessários para fabricar um produto e sua quantidade por unidade."""
-    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='insumos')
-    material = models.ForeignKey(Material, on_delete=models.CASCADE)
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='insumos')
+    material = models.ForeignKey(Material, on_delete=models.PROTECT)
     quantidade = models.DecimalField(max_digits=12, decimal_places=4, default=1)
 
     class Meta:
@@ -157,7 +158,7 @@ class ProdutoInsumo(models.Model):
 # ==========================================
 
 class Venda(models.Model):
-    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='vendas')
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='vendas')
     data_lancamento = models.DateTimeField(
         default=timezone.now,
         verbose_name='Data de lançamento',
@@ -209,7 +210,7 @@ class ItemVenda(models.Model):
         return self.quantidade * self.preco_unitario
 
 class Pagamento(models.Model):
-    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='pagamentos')
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='pagamentos')
     valor = models.DecimalField(max_digits=10, decimal_places=2)
     data_pagamento = models.DateField(default=timezone.now)
     metodo = models.CharField(max_length=50, default='Pix')
@@ -219,8 +220,8 @@ class Pagamento(models.Model):
 
 class PrecoClienteProduto(models.Model):
     """Preço específico que um cliente paga por um produto (cadastrado pelo chefe)."""
-    cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='precos_produtos')
-    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='precos_por_cliente')
+    cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name='precos_produtos')
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='precos_por_cliente')
     preco = models.DecimalField(max_digits=18, decimal_places=5)
 
     class Meta:
@@ -250,6 +251,27 @@ class PrecificacaoShopee(models.Model):
 
     def __str__(self):
         return self.nome
+
+
+class ShopeeLoja(models.Model):
+    """Loja Shopee na Open Platform — credenciais guardadas no servidor (apenas chefe)."""
+
+    nome = models.CharField(max_length=200)
+    partner_id = models.CharField(max_length=64, blank=True, default="")
+    partner_key = models.CharField(max_length=256, blank=True, default="")
+    shop_id = models.CharField(max_length=64, blank=True, default="")
+    redirect_url = models.CharField(max_length=500, blank=True, default="")
+    conectado = models.BooleanField(default=False)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["nome", "id"]
+        verbose_name = "Loja Shopee"
+        verbose_name_plural = "Lojas Shopee"
+
+    def __str__(self):
+        return self.nome or f"Loja Shopee #{self.pk}"
 
 
 class PrecificacaoTiktok(models.Model):
@@ -293,7 +315,7 @@ class PrecificacaoTiktok(models.Model):
 
 class OrdemCompra(models.Model):
     """Ordem de compra (uma compra com N itens), como Venda com ItemVenda."""
-    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='ordens_compra')
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='ordens_compra')
     data_lancamento = models.DateTimeField(
         default=timezone.now,
         verbose_name='Data de lançamento',
@@ -342,8 +364,8 @@ class OrdemCompra(models.Model):
 
 class CompraMaterial(models.Model):
     """Compra: preco_no_dia é o valor negociado na nota; mudança no cadastro do material não altera compras antigas."""
-    material = models.ForeignKey(Material, on_delete=models.CASCADE)
-    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras')
+    material = models.ForeignKey(Material, on_delete=models.PROTECT)
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='compras')
     quantidade = models.PositiveIntegerField()
     preco_no_dia = models.DecimalField(max_digits=18, decimal_places=5)
     data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
@@ -368,8 +390,8 @@ class CompraMaterial(models.Model):
 
 class CompraProduto(models.Model):
     """Compra de produto de revenda (produto pronto) vinculada a fornecedor."""
-    produto = models.ForeignKey(Produto, on_delete=models.CASCADE)
-    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='compras_produtos')
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT)
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='compras_produtos')
     quantidade = models.PositiveIntegerField()
     preco_no_dia = models.DecimalField(max_digits=18, decimal_places=5)
     data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
@@ -392,7 +414,7 @@ class CompraProduto(models.Model):
         return self.quantidade * self.preco_no_dia
 
 class PagamentoFornecedor(models.Model):
-    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.CASCADE, related_name='pagamentos_feitos')
+    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='pagamentos_feitos')
     valor = models.DecimalField(max_digits=10, decimal_places=2)
     data_pagamento = models.DateTimeField(auto_now_add=True)
     metodo = models.CharField(max_length=50, default='Pix')
@@ -419,7 +441,7 @@ class AjusteEstoque(models.Model):
     ENTRADA = 'entrada'
     SAIDA = 'saida'
     TIPO_CHOICES = [(ENTRADA, 'Entrada'), (SAIDA, 'Saída')]
-    material = models.ForeignKey(Material, on_delete=models.CASCADE, related_name='ajustes')
+    material = models.ForeignKey(Material, on_delete=models.PROTECT, related_name='ajustes')
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
     quantidade = models.PositiveIntegerField()
     observacao = models.CharField(max_length=255, blank=True)
@@ -431,7 +453,7 @@ class AjusteEstoque(models.Model):
 
 class AjusteEstoqueProduto(models.Model):
     """Histórico de ajustes de estoque de produtos (contagem / definição de quantidade atual)."""
-    produto = models.ForeignKey(Produto, on_delete=models.CASCADE, related_name='ajustes_estoque')
+    produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='ajustes_estoque')
     quantidade = models.PositiveIntegerField()
     observacao = models.CharField(max_length=255, blank=True)
     data = models.DateTimeField(auto_now_add=True)
@@ -533,6 +555,7 @@ class OutrosAReceber(models.Model):
 
 class ContaBanco(models.Model):
     """Conta bancária com saldo atual (atualizado pelas movimentações)."""
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
     nome = models.CharField(max_length=100)
     saldo_atual = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
@@ -548,7 +571,7 @@ class MovimentoBanco(models.Model):
     ENTRADA = 'entrada'
     SAIDA = 'saida'
     TIPO_CHOICES = [(ENTRADA, 'Entrada'), (SAIDA, 'Saída')]
-    conta = models.ForeignKey(ContaBanco, on_delete=models.CASCADE, related_name='movimentacoes')
+    conta = models.ForeignKey(ContaBanco, on_delete=models.PROTECT, related_name='movimentacoes')
     tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
     descricao = models.CharField(max_length=255)
     valor = models.DecimalField(max_digits=12, decimal_places=2)
@@ -632,6 +655,7 @@ class PerfilUsuario(models.Model):
 
 
 class CategoriaProduto(models.Model):
+    ativo = models.BooleanField(default=True, verbose_name="Ativo")
     TIPO_PRODUTO = 'produto'
     TIPO_MATERIAL = 'material'
     TIPO_CHOICES = [

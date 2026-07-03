@@ -1370,4 +1370,121 @@ export const api = {
       throw new Error(msg || `HTTP ${response.status}`);
     }
   },
+
+  getShopeeIntegracaoStatus: async () => {
+    const response = await fetch(`${API_BASE_URL}/shopee/status/`, { headers: authHeaders() });
+    return readJsonOrThrow(response) as Promise<{
+      conectado: boolean;
+      modo: "desenvolvimento" | "producao";
+      mensagem: string;
+      shop_id?: string | null;
+      lojas?: {
+        id: number;
+        nome: string;
+        partner_id: string;
+        partner_key_definida: boolean;
+        shop_id: string;
+        redirect_url: string;
+        conectado: boolean;
+        criado_em?: string | null;
+        atualizado_em?: string | null;
+      }[];
+      total_lojas?: number;
+      lojas_conectadas?: number;
+      proximos_passos: string[];
+    }>;
+  },
+
+  getShopeeLojas: async () => {
+    const response = await fetch(`${API_BASE_URL}/shopee/lojas/`, { headers: authHeaders() });
+    return readJsonOrThrow(response) as Promise<
+      {
+        id: number;
+        nome: string;
+        partner_id: string;
+        partner_key_definida: boolean;
+        shop_id: string;
+        redirect_url: string;
+        conectado: boolean;
+        criado_em?: string | null;
+        atualizado_em?: string | null;
+      }[]
+    >;
+  },
+
+  createShopeeLoja: async (body: {
+    nome: string;
+    partner_id?: string;
+    partner_key?: string;
+    shop_id?: string;
+    redirect_url?: string;
+  }) => {
+    const response = await fetch(`${API_BASE_URL}/shopee/lojas/`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response);
+  },
+
+  updateShopeeLoja: async (
+    id: number,
+    body: {
+      nome: string;
+      partner_id?: string;
+      partner_key?: string;
+      shop_id?: string;
+      redirect_url?: string;
+    }
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/shopee/lojas/${id}/`, {
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return readJsonOrThrow(response);
+  },
+
+  deleteShopeeLoja: async (id: number) => {
+    const response = await fetch(`${API_BASE_URL}/shopee/lojas/${id}/`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!response.ok && response.status !== 204) {
+      const text = await response.text();
+      let msg = text;
+      try {
+        const j = JSON.parse(text) as unknown;
+        msg = messageFromApiError(j) || text;
+      } catch {
+        /* usar texto cru */
+      }
+      throw new Error(msg || `HTTP ${response.status}`);
+    }
+  },
+
+  getShopeeResumoLucro: async (
+    periodo: "dia" | "mes" | "intervalo" = "dia",
+    params?: { data_inicio?: string; data_fim?: string }
+  ) => {
+    const qs = new URLSearchParams({ periodo });
+    if (params?.data_inicio) qs.set("data_inicio", params.data_inicio);
+    if (params?.data_fim) qs.set("data_fim", params.data_fim);
+    const response = await fetch(`${API_BASE_URL}/shopee/resumo-lucro/?${qs}`, {
+      headers: authHeaders(),
+    });
+    return readJsonOrThrow(response) as Promise<{
+      periodo: string;
+      data_inicio: string;
+      data_fim: string;
+      receita_bruta: number;
+      comissao_shopee: number;
+      taxas_logistica: number;
+      custo_produtos: number;
+      lucro_liquido: number;
+      pedidos: number;
+      itens_vendidos: number;
+      fonte: "api" | "placeholder";
+    }>;
+  },
 };

@@ -648,6 +648,10 @@ export function FornecedorDetalhe() {
     .filter((c) => !selectedCompraIds.has(c.id))
     .reduce((s, c) => s + safeNumFn(c.total), 0);
 
+  const comprasNaoPagasExibidas = exibirCompras.filter((c) => c.marcada_paga !== true);
+  const selecionarNaoPagasCompras = () =>
+    setSelectedCompraIds(new Set(comprasNaoPagasExibidas.map((c) => c.id)));
+
   const aplicarMarcacaoCompra = async (opts: { ordemId?: number; linhaId?: string; valor: boolean }) => {
     if (!id) return;
     const key = opts.ordemId != null ? `ordem-${opts.ordemId}` : opts.linhaId ?? "";
@@ -931,6 +935,16 @@ export function FornecedorDetalhe() {
                   onClick={() => setSelectedCompraIds(new Set(exibirCompras.map((c) => c.id)))}
                 >
                   Selecionar todas ({exibirCompras.length})
+                </Button>
+              ) : null}
+              {isChefe && comprasNaoPagasExibidas.length > 0 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={selecionarNaoPagasCompras}
+                >
+                  Selecionar não pagas ({comprasNaoPagasExibidas.length})
                 </Button>
               ) : null}
               <Button type="button" variant="outline" size="sm" onClick={() => setSelectedCompraIds(new Set())} disabled={selectedCompraIds.size === 0}>

@@ -1,7 +1,8 @@
 import React from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
   TrendingUp,
   ShoppingCart,
@@ -16,8 +17,11 @@ import {
   UserCog,
   UserPlus,
   Banknote,
+  LayoutGrid,
+  Store,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { ShopeeLojaPanel } from "./ShopeeLojaPanel";
 
 /** Dashboard do funcionário: atalhos para Venda, Compra, Estoque e Cadastro. */
 function DashboardFuncionario() {
@@ -166,6 +170,7 @@ const CHEFE_LINKS_FINANCAS: ChefeLink[] = [
 ];
 
 const CHEFE_LINKS_ADMIN: ChefeLink[] = [
+  { to: "/?tab=shopee", title: "Shopee", description: "Lucro diário e mensal da loja (integração API)", icon: Store, delay: 0.38 },
   { to: "/precificacao", title: "Precificação", description: "Shopee, TikTok e tabelas de preço", icon: Tag, delay: 0.4 },
   { to: "/logs", title: "Logs", description: "Registo de atividade do sistema", icon: FileText, delay: 0.44 },
   { to: "/usuarios", title: "Usuários", description: "Perfis Chefe e Funcionário", icon: UserCog, delay: 0.48 },
@@ -199,18 +204,53 @@ function ChefeLinkCard({ to, title, description, icon: Icon, delay }: ChefeLink)
   );
 }
 
-/** Dashboard do chefe: só atalhos — valores e listas ficam nas páginas indicadas. */
+/** Dashboard do chefe: atalhos + aba Shopee (integração API). */
 function DashboardChefe() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "shopee" ? "shopee" : "atalhos";
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold">Dashboard</h1>
         <p className="text-muted-foreground max-w-2xl">
-          Aqui não são mostrados totais nem listas financeiras. Os dados estão nas secções abaixo — abra cada uma para
-          consultar valores, gráficos e histórico.
+          Atalhos para operação e finanças, e integração com a loja Shopee para lucro diário e mensal.
         </p>
       </div>
 
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          if (v === "shopee") setSearchParams({ tab: "shopee" });
+          else setSearchParams({});
+        }}
+        className="w-full"
+      >
+        <TabsList className="flex w-full flex-wrap gap-1 h-auto p-1 justify-start max-w-md">
+          <TabsTrigger value="atalhos" className="gap-1.5 text-xs sm:text-sm">
+            <LayoutGrid className="size-4 shrink-0" />
+            Atalhos
+          </TabsTrigger>
+          <TabsTrigger value="shopee" className="gap-1.5 text-xs sm:text-sm">
+            <Store className="size-4 shrink-0 text-orange-500" />
+            Shopee
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="atalhos" className="mt-6 space-y-8">
+          <DashboardChefeAtalhos />
+        </TabsContent>
+        <TabsContent value="shopee" className="mt-6">
+          <ShopeeLojaPanel />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function DashboardChefeAtalhos() {
+  return (
+    <>
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Operação</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -245,7 +285,7 @@ function DashboardChefe() {
         </Link>
         .
       </p>
-    </div>
+    </>
   );
 }
 

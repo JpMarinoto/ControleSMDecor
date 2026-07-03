@@ -1,0 +1,17 @@
+# Backup diário do db.sqlite3 (systemd oneshot).
+# Instalação: ver deploy/systemd/README_BACKUP.txt
+
+[Unit]
+Description=Backup SQLite ControleSMDecor
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+WorkingDirectory=/home/deploy/ControleSMDecor
+Environment=RETENTION_DAYS=30
+ExecStartPre=/bin/mkdir -p /home/deploy/ControleSMDecor/backups/db
+ExecStart=/home/deploy/ControleSMDecor/scripts/backup_db.sh
+StandardOutput=append:/home/deploy/ControleSMDecor/backups/db/backup.log
+StandardError=append:/home/deploy/ControleSMDecor/backups/db/backup.log

@@ -72,4 +72,8 @@ urlpatterns = [
     path('precificacoes/shopee/<int:pk>/', views_api.PrecificacaoShopeeDelete.as_view()),
     path('precificacoes/tiktok/', views_api.PrecificacaoTiktokListCreate.as_view()),
     path('precificacoes/tiktok/<int:pk>/', views_api.PrecificacaoTiktokDelete.as_view()),
+    path('shopee/status/', views_api.ShopeeIntegracaoStatus.as_view()),
+    path('shopee/resumo-lucro/', views_api.ShopeeResumoLucro.as_view()),
+    path('shopee/lojas/', views_api.ShopeeLojaListCreate.as_view()),
+    path('shopee/lojas/<int:pk>/', views_api.ShopeeLojaDetail.as_view()),
 ]

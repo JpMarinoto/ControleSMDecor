@@ -1,0 +1,11 @@
+[Unit]
+Description=Agenda backup diário do banco SQLite ControleSMDecor
+
+[Timer]
+# Horário no fuso local do servidor (ver: timedatectl). Padrão: 03:00.
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

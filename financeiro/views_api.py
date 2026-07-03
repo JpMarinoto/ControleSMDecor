@@ -46,6 +46,7 @@ from .models import (
     RegistroImpressao,
     PrecificacaoShopee,
     PrecificacaoTiktok,
+    ShopeeLoja,
 )
 from .serializers import (
     ClienteSerializer,
@@ -72,6 +73,62 @@ def _safe_float(x):
         return f if math.isfinite(f) else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+def _cliente_tem_historico(cliente):
+    return (
+        cliente.vendas.exists()
+        or cliente.pagamentos.exists()
+        or cliente.precos_produtos.exists()
+    )
+
+
+def _fornecedor_tem_historico(fornecedor):
+    return (
+        fornecedor.compras.exists()
+        or fornecedor.compras_produtos.exists()
+        or fornecedor.pagamentos_feitos.exists()
+        or fornecedor.ordens_compra.exists()
+    )
+
+
+def _material_tem_historico(material):
+    return (
+        CompraMaterial.objects.filter(material=material).exists()
+        or AjusteEstoque.objects.filter(material=material).exists()
+        or ProdutoInsumo.objects.filter(material=material).exists()
+    )
+
+
+def _categoria_tem_historico(categoria):
+    return categoria.produtos.exists() or categoria.materiais.exists()
+
+
+def _conta_tem_historico(conta):
+    return (
+        conta.movimentacoes.exists()
+        or conta.pagamentos_cliente.exists()
+        or conta.pagamentos_fornecedor.exists()
+    )
+
+
+def _excluir_cadastro_preservando_historico(request, obj, entidade_log, tem_historico_fn):
+    """Inativa se houver histórico; apaga só registros nunca usados."""
+    nome = getattr(obj, 'nome', str(obj))
+    pk = obj.pk
+    if tem_historico_fn(obj):
+        obj.ativo = False
+        obj.save(update_fields=['ativo'])
+        _api_log(
+            request,
+            "Inativar",
+            entidade_log,
+            f"{entidade_log} inativado (histórico preservado): {nome} (ID {pk})",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    obj.delete()
+    _api_log(request, "Excluir", entidade_log, f"{entidade_log} excluído: {nome} (ID {pk})")
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def _int_quantidade_item(qtd):
@@ -306,19 +363,9 @@ class ClienteDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        if obj.vendas.exists() or obj.pagamentos.exists():
-            return Response(
-                {
-                    "error": "Não é possível excluir: este cliente possui vendas ou pagamentos registrados.",
-                    "code": "tem_vendas",
-                    "hint": "Use 'Inativar' para ocultar o cliente da lista sem apagar os dados.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        nome = obj.nome
-        obj.delete()
-        _api_log(request, "Excluir", "Cliente", f"Cliente excluído: {nome} (ID {pk})")
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return _excluir_cadastro_preservando_historico(
+            request, obj, "Cliente", _cliente_tem_historico
+        )
 
     def patch(self, request, pk):
         obj = self.get_object(pk)
@@ -326,6 +373,10 @@ class ClienteDetail(APIView):
             obj.ativo = False
             obj.save()
             _api_log(request, "Inativar", "Cliente", f"Cliente inativado: {obj.nome} (ID {pk})")
+        elif request.data.get('ativo') is True:
+            obj.ativo = True
+            obj.save()
+            _api_log(request, "Reativar", "Cliente", f"Cliente reativado: {obj.nome} (ID {pk})")
         serializer = ClienteSerializer(obj)
         return Response(serializer.data)
 
@@ -377,19 +428,9 @@ class FornecedorDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        if obj.compras.exists() or obj.pagamentos_feitos.exists():
-            return Response(
-                {
-                    "error": "Não é possível excluir: este fornecedor possui compras ou pagamentos registrados.",
-                    "code": "tem_compras",
-                    "hint": "Use 'Inativar' para ocultar o fornecedor da lista sem apagar os dados.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        nome = obj.nome
-        obj.delete()
-        _api_log(request, "Excluir", "Fornecedor", f"Fornecedor excluído: {nome} (ID {pk})")
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return _excluir_cadastro_preservando_historico(
+            request, obj, "Fornecedor", _fornecedor_tem_historico
+        )
 
     def patch(self, request, pk):
         obj = self.get_object(pk)
@@ -397,6 +438,10 @@ class FornecedorDetail(APIView):
             obj.ativo = False
             obj.save()
             _api_log(request, "Inativar", "Fornecedor", f"Fornecedor inativado: {obj.nome} (ID {pk})")
+        elif request.data.get('ativo') is True:
+            obj.ativo = True
+            obj.save()
+            _api_log(request, "Reativar", "Fornecedor", f"Fornecedor reativado: {obj.nome} (ID {pk})")
         serializer = FornecedorSerializer(obj)
         return Response(serializer.data)
 
@@ -479,14 +524,14 @@ class ProdutoDetail(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        """Remove o produto só da lista de cadastro (inativa). Vendas e ordens mantêm o histórico."""
+        """Remove do cadastro (inativa). Vendas, compras e histórico permanecem ligados."""
         obj = self.get_object(pk)
         nome = obj.nome
         obj.ativo = False
         obj.save(update_fields=['ativo'])
         _api_log(
             request,
-            "Excluir",
+            "Inativar",
             "Produto",
             f"Produto removido do cadastro (inativado): {nome} (ID {pk})",
         )
@@ -736,7 +781,10 @@ class MaterialBulkPrecos(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class MaterialListCreate(APIView):
     def get(self, request):
+        incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
         qs = Material.objects.select_related('fornecedor_padrao').all().order_by('nome')
+        if not incluir_inativos:
+            qs = qs.filter(ativo=True)
         serializer = MaterialSerializer(qs, many=True)
         return Response(serializer.data)
 
@@ -775,17 +823,32 @@ class MaterialDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        nome = obj.nome
-        obj.delete()
-        _api_log(request, "Excluir", "Material", f"Material excluído: {nome} (ID {pk})")
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return _excluir_cadastro_preservando_historico(
+            request, obj, "Material", _material_tem_historico
+        )
+
+    def patch(self, request, pk):
+        obj = self.get_object(pk)
+        if request.data.get('ativo') is False:
+            obj.ativo = False
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Inativar", "Material", f"Material inativado: {obj.nome} (ID {pk})")
+        elif request.data.get('ativo') is True:
+            obj.ativo = True
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Reativar", "Material", f"Material reativado: {obj.nome} (ID {pk})")
+        serializer = MaterialSerializer(obj)
+        return Response(serializer.data)
 
 
 # --- Categorias ---
 @method_decorator(csrf_exempt, name='dispatch')
 class CategoriaListCreate(APIView):
     def get(self, request):
+        incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
         qs = CategoriaProduto.objects.all().order_by('tipo', 'nome')
+        if not incluir_inativos:
+            qs = qs.filter(ativo=True)
         serializer = CategoriaSerializer(qs, many=True)
         return Response(serializer.data)
 
@@ -818,17 +881,32 @@ class CategoriaDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        nome = obj.nome
-        obj.delete()
-        _api_log(request, "Excluir", "Categoria", f"Categoria excluída: {nome} (ID {pk})")
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return _excluir_cadastro_preservando_historico(
+            request, obj, "Categoria", _categoria_tem_historico
+        )
+
+    def patch(self, request, pk):
+        obj = self.get_object(pk)
+        if request.data.get('ativo') is False:
+            obj.ativo = False
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Inativar", "Categoria", f"Categoria inativada: {obj.nome} (ID {pk})")
+        elif request.data.get('ativo') is True:
+            obj.ativo = True
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Reativar", "Categoria", f"Categoria reativada: {obj.nome} (ID {pk})")
+        serializer = CategoriaSerializer(obj)
+        return Response(serializer.data)
 
 
 # --- Contas (ContaBanco) ---
 @method_decorator(csrf_exempt, name='dispatch')
 class ContaListCreate(APIView):
     def get(self, request):
+        incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
         qs = ContaBanco.objects.all().order_by('nome')
+        if not incluir_inativos:
+            qs = qs.filter(ativo=True)
         serializer = ContaBancoSerializer(qs, many=True)
         return Response(serializer.data)
 
@@ -867,10 +945,22 @@ class ContaDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        nome = obj.nome
-        obj.delete()
-        _api_log(request, "Excluir", "ContaBanco", f"Conta excluída: {nome} (ID {pk})")
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return _excluir_cadastro_preservando_historico(
+            request, obj, "ContaBanco", _conta_tem_historico
+        )
+
+    def patch(self, request, pk):
+        obj = self.get_object(pk)
+        if request.data.get('ativo') is False:
+            obj.ativo = False
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Inativar", "ContaBanco", f"Conta inativada: {obj.nome} (ID {pk})")
+        elif request.data.get('ativo') is True:
+            obj.ativo = True
+            obj.save(update_fields=['ativo'])
+            _api_log(request, "Reativar", "ContaBanco", f"Conta reativada: {obj.nome} (ID {pk})")
+        serializer = ContaBancoSerializer(obj)
+        return Response(serializer.data)
 
 
 # --- Vendas ---
@@ -898,6 +988,11 @@ class VendaListCreate(APIView):
             cliente = Cliente.objects.get(pk=cliente_id)
         except Cliente.DoesNotExist:
             return Response({'cliente': ['Não encontrado']}, status=status.HTTP_400_BAD_REQUEST)
+        if not cliente.ativo:
+            return Response(
+                {'cliente': ['Cliente inativo no cadastro; reative ou escolha outro cliente.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         data_raw = data.get('data') or data.get('data_venda')
         data_enviada = _parse_data_request(data_raw)
         if data_enviada:
@@ -1460,6 +1555,11 @@ class CompraListCreate(APIView):
             fornecedor = Fornecedor.objects.get(pk=fornecedor_id)
         except Fornecedor.DoesNotExist:
             return Response({'fornecedor_id': ['Fornecedor inválido.']}, status=status.HTTP_400_BAD_REQUEST)
+        if not fornecedor.ativo:
+            return Response(
+                {'fornecedor_id': ['Fornecedor inativo no cadastro; reative ou escolha outro.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         data_raw = request.data.get('data') or request.data.get('data_compra')
         data_enviada = _parse_data_request(data_raw)
         if data_enviada:
@@ -1522,6 +1622,8 @@ class CompraListCreate(APIView):
                 try:
                     material = Material.objects.get(pk=material_id)
                 except Material.DoesNotExist:
+                    continue
+                if not material.ativo:
                     continue
                 c = CompraMaterial.objects.create(
                     ordem=ordem,
@@ -3883,3 +3985,219 @@ class PrecificacaoTiktokDelete(APIView):
             f"{nome} (ID {obj_id})",
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _requer_chefe_shopee(request):
+    try:
+        from .views_auth import _is_chefe
+
+        if not _is_chefe(request):
+            return Response(
+                {"error": "Apenas o chefe pode aceder à integração Shopee."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+    except Exception:
+        return Response(
+            {"error": "Apenas o chefe pode aceder à integração Shopee."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def _shopee_periodo_datas(periodo, data_inicio=None, data_fim=None):
+    from django.utils import timezone
+
+    hoje = timezone.localdate()
+    if periodo == "mes":
+        inicio = hoje.replace(day=1)
+        return inicio.isoformat(), hoje.isoformat()
+    if periodo == "intervalo" and data_inicio and data_fim:
+        return str(data_inicio)[:10], str(data_fim)[:10]
+    return hoje.isoformat(), hoje.isoformat()
+
+
+def _shopee_loja_payload(obj):
+    return {
+        "id": obj.id,
+        "nome": obj.nome,
+        "partner_id": obj.partner_id or "",
+        "partner_key_definida": bool((obj.partner_key or "").strip()),
+        "shop_id": obj.shop_id or "",
+        "redirect_url": obj.redirect_url or "",
+        "conectado": bool(obj.conectado),
+        "criado_em": obj.criado_em.isoformat() if obj.criado_em else None,
+        "atualizado_em": obj.atualizado_em.isoformat() if obj.atualizado_em else None,
+    }
+
+
+def _shopee_loja_credenciais_completas(obj):
+    return bool(
+        (obj.nome or "").strip()
+        and (obj.partner_id or "").strip()
+        and (obj.partner_key or "").strip()
+        and (obj.shop_id or "").strip()
+    )
+
+
+def _parse_shopee_loja_body(body):
+    if not isinstance(body, dict):
+        return None, Response({"error": "Corpo inválido."}, status=status.HTTP_400_BAD_REQUEST)
+    nome = str(body.get("nome") or "").strip()
+    if not nome:
+        return None, Response({"error": "Informe o nome da loja."}, status=status.HTTP_400_BAD_REQUEST)
+    data = {
+        "nome": nome,
+        "partner_id": str(body.get("partner_id") or "").strip(),
+        "shop_id": str(body.get("shop_id") or "").strip(),
+        "redirect_url": str(body.get("redirect_url") or "").strip(),
+    }
+    partner_key = body.get("partner_key")
+    if partner_key is not None:
+        data["partner_key"] = str(partner_key).strip()
+    return data, None
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ShopeeLojaListCreate(APIView):
+    """Lista e cadastra lojas Shopee (múltiplas lojas por conta)."""
+
+    def get(self, request):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        qs = ShopeeLoja.objects.all().order_by("nome", "id")
+        return Response([_shopee_loja_payload(loja) for loja in qs])
+
+    def post(self, request):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        data, err_resp = _parse_shopee_loja_body(request.data)
+        if err_resp:
+            return err_resp
+        partner_key = data.pop("partner_key", "")
+        obj = ShopeeLoja.objects.create(**data, partner_key=partner_key)
+        obj.conectado = _shopee_loja_credenciais_completas(obj)
+        obj.save(update_fields=["conectado"])
+        _api_log(request, "Criar", "ShopeeLoja", f"Loja Shopee: {obj.nome}")
+        return Response(_shopee_loja_payload(obj), status=status.HTTP_201_CREATED)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ShopeeLojaDetail(APIView):
+    """Edita ou remove uma loja Shopee."""
+
+    def get_object(self, pk):
+        return ShopeeLoja.objects.get(pk=pk)
+
+    def patch(self, request, pk):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        try:
+            obj = self.get_object(pk)
+        except ShopeeLoja.DoesNotExist:
+            return Response({"error": "Loja não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        data, err_resp = _parse_shopee_loja_body(request.data)
+        if err_resp:
+            return err_resp
+        partner_key = data.pop("partner_key", None)
+        for field, value in data.items():
+            setattr(obj, field, value)
+        if partner_key is not None and partner_key != "":
+            obj.partner_key = partner_key
+        obj.conectado = _shopee_loja_credenciais_completas(obj)
+        obj.save()
+        _api_log(request, "Editar", "ShopeeLoja", f"Loja Shopee ID {pk}: {obj.nome}")
+        return Response(_shopee_loja_payload(obj))
+
+    def delete(self, request, pk):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        try:
+            obj = self.get_object(pk)
+        except ShopeeLoja.DoesNotExist:
+            return Response({"error": "Loja não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        nome = obj.nome
+        obj.delete()
+        _api_log(request, "Excluir", "ShopeeLoja", f"Loja Shopee excluída: {nome} (ID {pk})")
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ShopeeIntegracaoStatus(APIView):
+    """Estado da conexão com a Shopee Open Platform (base para OAuth)."""
+
+    def get(self, request):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        lojas = list(ShopeeLoja.objects.all().order_by("nome", "id"))
+        lojas_payload = [_shopee_loja_payload(loja) for loja in lojas]
+        conectadas = sum(1 for loja in lojas if loja.conectado)
+        alguma_conectada = conectadas > 0
+        if not lojas:
+            mensagem = "Nenhuma loja cadastrada. Adicione uma loja na aba Conexão API."
+            proximos_passos = [
+                "Clicar em Adicionar loja e preencher Partner ID, Partner Key e Shop ID",
+                "Autorizar a loja via OAuth na Shopee Open Platform",
+                "Sincronizar pedidos e cruzar custos com produtos cadastrados",
+            ]
+        elif alguma_conectada:
+            mensagem = f"{conectadas} de {len(lojas)} loja(s) com credenciais completas."
+            proximos_passos = [
+                "Autorizar lojas via OAuth quando disponível",
+                "Sincronizar pedidos e calcular lucro por venda",
+            ]
+        else:
+            mensagem = f"{len(lojas)} loja(s) cadastrada(s). Complete as credenciais para conectar."
+            proximos_passos = [
+                "Preencher Partner ID, Partner Key e Shop ID em cada loja",
+                "Implementar fluxo OAuth e guardar access_token no servidor",
+            ]
+        return Response(
+            {
+                "conectado": alguma_conectada,
+                "modo": "desenvolvimento",
+                "mensagem": mensagem,
+                "shop_id": lojas[0].shop_id if len(lojas) == 1 else None,
+                "lojas": lojas_payload,
+                "total_lojas": len(lojas),
+                "lojas_conectadas": conectadas,
+                "proximos_passos": proximos_passos,
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ShopeeResumoLucro(APIView):
+    """Resumo de lucro da loja Shopee (placeholder até sincronizar pedidos reais)."""
+
+    def get(self, request):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        periodo = (request.query_params.get("periodo") or "dia").strip().lower()
+        if periodo not in ("dia", "mes", "intervalo"):
+            periodo = "dia"
+        data_inicio, data_fim = _shopee_periodo_datas(
+            periodo,
+            request.query_params.get("data_inicio"),
+            request.query_params.get("data_fim"),
+        )
+        return Response(
+            {
+                "periodo": periodo,
+                "data_inicio": data_inicio,
+                "data_fim": data_fim,
+                "receita_bruta": 0.0,
+                "comissao_shopee": 0.0,
+                "taxas_logistica": 0.0,
+                "custo_produtos": 0.0,
+                "lucro_liquido": 0.0,
+                "pedidos": 0,
+                "itens_vendidos": 0,
+                "fonte": "placeholder",
+            }
+        )

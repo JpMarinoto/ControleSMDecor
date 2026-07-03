@@ -1037,32 +1037,20 @@ export function Cadastro() {
     }
     try {
       await api.deleteCliente(id);
-      toast.success('Cliente excluído');
+      toast.success('Cliente removido do cadastro. Vendas e pagamentos foram preservados.');
       await loadData();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      const podeInativar = /vendas|pagamentos|inativar/i.test(msg);
-      if (podeInativar) {
-        try {
-          await api.inativarCliente(id);
-          toast.success('Cliente inativado (removido da lista, dados preservados).');
-          await loadData();
-        } catch {
-          toast.error(msg || 'Erro ao excluir cliente');
-        }
-      } else {
-        toast.error(msg || 'Erro ao excluir cliente');
-      }
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir cliente');
     }
   };
 
   const handleDeleteCategoria = async (id: string) => {
     try {
       await api.deleteCategoria(id);
-      toast.success('Categoria excluída');
+      toast.success('Categoria removida do cadastro. Produtos e materiais vinculados mantêm o histórico.');
       await loadData();
-    } catch {
-      toast.error('Erro ao excluir categoria');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir categoria');
     }
   };
 
@@ -1083,42 +1071,30 @@ export function Cadastro() {
     }
     try {
       await api.deleteFornecedor(id);
-      toast.success('Fornecedor excluído');
+      toast.success('Fornecedor removido do cadastro. Compras e pagamentos foram preservados.');
       await loadData();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      const podeInativar = /compras|pagamentos|inativar/i.test(msg);
-      if (podeInativar) {
-        try {
-          await api.inativarFornecedor(id);
-          toast.success('Fornecedor inativado (removido da lista, dados preservados).');
-          await loadData();
-        } catch {
-          toast.error(msg || 'Erro ao excluir fornecedor');
-        }
-      } else {
-        toast.error(msg || 'Erro ao excluir fornecedor');
-      }
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir fornecedor');
     }
   };
 
   const handleDeleteMaterial = async (id: string) => {
     try {
       await api.deleteMaterial(id);
-      toast.success('Material excluído');
+      toast.success('Material removido do cadastro. Compras e ajustes de estoque foram preservados.');
       await loadData();
-    } catch {
-      toast.error('Erro ao excluir material');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir material');
     }
   };
 
   const handleDeleteConta = async (id: string) => {
     try {
       await api.deleteConta(id);
-      toast.success('Conta excluída');
+      toast.success('Conta removida do cadastro. Movimentações e pagamentos foram preservados.');
       await loadData();
-    } catch {
-      toast.error('Erro ao excluir conta');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir conta');
     }
   };
 

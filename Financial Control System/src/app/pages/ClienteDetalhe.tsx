@@ -18,7 +18,7 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ArrowLeft, User, Receipt, CreditCard, Printer, Calendar, FileCheck, Wallet, Tag, Trash2, Pencil, CheckCircle2 } from "lucide-react";
 import { motion } from "motion/react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -112,6 +112,142 @@ function slugForFileName(s: string): string {
   }
 }
 
+const FECHAMENTO_DESTAQUE_CSS = `
+  .fechamento-destaque {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 12px 0 18px;
+  }
+  .fechamento-cards { display: flex; gap: 12px; flex-wrap: wrap; }
+  .fechamento-card {
+    flex: 1;
+    min-width: 140px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .fechamento-card-principal { border-color: #1e3a5f; }
+  .fechamento-card-vencimento { border-color: #facc15; background: #fefce8; }
+  .card-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin-bottom: 4px; }
+  .card-valor { font-size: 20px; font-weight: 800; color: #1e3a5f; line-height: 1.15; }
+  .card-valor-data { font-size: 17px; font-weight: 700; color: #0f172a; line-height: 1.2; }
+  .fechamento-saldo {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: #475569;
+  }
+  .fechamento-saldo strong { color: #0f172a; white-space: nowrap; }
+  .fechamento-pagamentos {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 20px 0 18px;
+    page-break-inside: avoid;
+  }
+  .pagamentos-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .pagamentos-titulo { font-size: 13px; font-weight: 700; color: #166534; }
+  .pagamentos-resumo { font-size: 11px; font-weight: 600; color: #15803d; }
+  .pagamentos-table { width: 100%; border-collapse: collapse; margin: 0; font-size: 11px; }
+  .pagamentos-table th,
+  .pagamentos-table td { border: 1px solid #d1fae5; padding: 8px 10px; text-align: left; }
+  .pagamentos-table th { background: #dcfce7; color: #166534; font-weight: 600; }
+  .pagamentos-table .num { text-align: right; white-space: nowrap; }
+  .pagamentos-table tfoot td {
+    background: #ecfdf5;
+    border-top: 2px solid #86efac;
+    font-weight: 600;
+    color: #14532d;
+  }
+  .pagamentos-vazio { text-align: center; color: #64748b !important; padding: 14px 10px !important; }
+`;
+
+type PagamentoFechamentoPrint = {
+  data: string;
+  valor: number;
+  metodo?: string;
+};
+
+function htmlFechamentoPagamentos(pagamentos: PagamentoFechamentoPrint[], mostrar: boolean): string {
+  if (!mostrar) return "";
+  const lista = [...pagamentos].sort(
+    (a, b) => parseDateOnlyToTime(a.data) - parseDateOnlyToTime(b.data)
+  );
+  const total = lista.reduce((s, p) => s + (Number(p.valor) || 0), 0);
+  const rows = lista
+    .map(
+      (p) => `<tr>
+        <td>${formatDateOnly(p.data)}</td>
+        <td>${(p.metodo || "—").trim()}</td>
+        <td class="num">${formatCurrencyBrl(p.valor)}</td>
+      </tr>`
+    )
+    .join("");
+  const tbody =
+    rows || `<tr><td colspan="3" class="pagamentos-vazio">Nenhum pagamento registrado.</td></tr>`;
+  const tfoot =
+    lista.length > 0
+      ? `<tfoot><tr><td colspan="2">Total pago</td><td class="num">${formatCurrencyBrl(total)}</td></tr></tfoot>`
+      : "";
+  return `
+    <section class="fechamento-pagamentos">
+      <div class="pagamentos-header">
+        <span class="pagamentos-titulo">Pagamentos</span>
+        <span class="pagamentos-resumo">${lista.length} registro(s) · ${formatCurrencyBrl(total)}</span>
+      </div>
+      <table class="pagamentos-table">
+        <thead><tr><th>Data</th><th>Forma</th><th class="num">Valor</th></tr></thead>
+        <tbody>${tbody}</tbody>
+        ${tfoot}
+      </table>
+    </section>`;
+}
+
+function htmlFechamentoValorVencimento(opts: {
+  valor: number;
+  vencimentoLabel: string;
+  saldoDevedor?: number;
+  mostrarSaldoDevedor: boolean;
+  isChefe: boolean;
+}): string {
+  const vencimentoCard = opts.vencimentoLabel
+    ? `<div class="fechamento-card fechamento-card-vencimento">
+         <div class="card-label">Vencimento</div>
+         <div class="card-valor-data">${opts.vencimentoLabel}</div>
+       </div>`
+    : "";
+  const saldoHtml =
+    opts.isChefe && opts.mostrarSaldoDevedor
+      ? `<div class="fechamento-saldo"><span>Saldo devedor atual (referência no sistema)</span><strong>${formatCurrencyBrl(opts.saldoDevedor ?? 0)}</strong></div>`
+      : "";
+  return `
+    <div class="fechamento-destaque">
+      <div class="fechamento-cards">
+        <div class="fechamento-card fechamento-card-principal">
+          <div class="card-label">Valor do fechamento</div>
+          <div class="card-valor">${formatCurrencyBrl(opts.valor)}</div>
+        </div>
+        ${vencimentoCard}
+      </div>
+      ${saldoHtml}
+    </div>`;
+}
+
 export function ClienteDetalhe() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -144,6 +280,11 @@ export function ClienteDetalhe() {
     titulo: string;
     downloadBaseName: string;
   } | null>(null);
+  const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const [printDialogUsarSelecao, setPrintDialogUsarSelecao] = useState(false);
+  const [printVencimento, setPrintVencimento] = useState("");
+  const [printMostrarPagamentos, setPrintMostrarPagamentos] = useState(false);
+  const [printMostrarSaldoDevedor, setPrintMostrarSaldoDevedor] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
 
   const [precosProdutos, setPrecosProdutos] = useState<{ id: number; produto_id: number; produto_nome: string; preco: number }[]>([]);
@@ -400,8 +541,16 @@ export function ClienteDetalhe() {
       </div>`;
   };
 
-  const imprimirFechamento = () => {
-    if (!printRef.current || !data) return;
+  const imprimirFechamento = (opts?: {
+    vencimento?: string;
+    mostrarPagamentos?: boolean;
+    mostrarSaldoDevedor?: boolean;
+  }) => {
+    if (!data) return;
+    const mostrarPagamentos = opts?.mostrarPagamentos === true;
+    const mostrarSaldoDevedor = opts?.mostrarSaldoDevedor === true;
+    const vencimentoRaw = (opts?.vencimento ?? "").trim().slice(0, 10);
+    const vencimentoLabel = vencimentoRaw.length >= 10 ? formatDateOnly(vencimentoRaw) : "";
     const comValores = true;
     const periodoLabel =
       periodo === "semana"
@@ -411,18 +560,14 @@ export function ClienteDetalhe() {
           : periodo === "personalizado" && dataInicio && dataFim
             ? `${formatDateOnly(dataInicio)} a ${formatDateOnly(dataFim)}`
             : "Todo o período";
-    const resumoBlock = comValores
-      ? `<div class="resumo">
-            <div class="linha"><span>Valor das vendas neste período (soma das notas)</span><strong>${formatCurrencyBrl(totalVendasPeriodo)}</strong></div>
-            ${
-              isChefe
-                ? `<div class="linha total-a-pagar"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrencyBrl(saldoDevedorGeral)}</strong></div>`
-                : ""
-            }
-            <div style="margin-top:10px;color:#64748b;font-size:11px;">
-              Este documento não discrimina pagamentos: um pagamento pode referir-se a fechamentos anteriores. Use o saldo no sistema para conferência financeira.
-            </div>
-          </div>`
+    const destaqueHtml = comValores
+      ? htmlFechamentoValorVencimento({
+          valor: totalVendasPeriodo,
+          vencimentoLabel,
+          saldoDevedor: saldoDevedorGeral,
+          mostrarSaldoDevedor,
+          isChefe,
+        })
       : `<div class="resumo">
             <div class="linha"><span>Notas no período</span><strong>${vendasFiltradas.length}</strong></div>
             <div style="margin-top:10px;color:#64748b;font-size:11px;">
@@ -449,6 +594,10 @@ export function ClienteDetalhe() {
           : `<tr><td>Venda #${v.id}</td><td>${formatDateOnly(v.data)}</td><td>${itensHtml}</td></tr>`;
       })
       .join("");
+    const pagamentosHtml = htmlFechamentoPagamentos(
+      limites ? pagamentosFiltrados : data.pagamentos,
+      mostrarPagamentos
+    );
     const htmlFech = `
       <!DOCTYPE html>
       <html>
@@ -481,14 +630,14 @@ export function ClienteDetalhe() {
             }
             .resumo .linha { display:flex; justify-content:space-between; gap:12px; margin: 6px 0; }
             .resumo .linha strong { white-space: nowrap; }
-            .resumo .total-a-pagar { font-weight: 800; font-size: 14px; color: #0f172a; margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
+            ${FECHAMENTO_DESTAQUE_CSS}
           </style>
         </head>
         <body>
           ${getEmpresaHeaderHtml()}
           <h1>Fechamento – ${data.cliente.nome}</h1>
           <p class="meta">Período: ${periodoLabel}</p>
-          ${resumoBlock}
+          ${destaqueHtml}
           <p class="meta"><strong>Vendas no período:</strong> ${vendasFiltradas.length}</p>
           <h3 style="font-size:14px;margin:20px 0 8px;">Vendas</h3>
           <table>
@@ -497,6 +646,7 @@ export function ClienteDetalhe() {
               ${vendasTbody}
             </tbody>
           </table>
+          ${pagamentosHtml}
           <p class="muted">${empresa.nome || "Empresa"} — Impresso em ${new Date().toLocaleString("pt-BR")}</p>
         </body>
       </html>
@@ -507,7 +657,14 @@ export function ClienteDetalhe() {
         tipo: "fechamento_cliente",
         titulo: tituloPrev,
         html: htmlFech,
-        meta: { cliente_id: Number(id), periodo: periodoLabel, com_valores: comValores },
+        meta: {
+          cliente_id: Number(id),
+          periodo: periodoLabel,
+          com_valores: comValores,
+          vencimento: vencimentoRaw || null,
+          mostrar_pagamentos: mostrarPagamentos,
+          mostrar_saldo_devedor: mostrarSaldoDevedor,
+        },
       })
       .catch(() => {});
     setPrintPreview({
@@ -528,7 +685,12 @@ export function ClienteDetalhe() {
 
   const imprimirFechamentoSelecionadas = (
     vendasSelecionadas: VendaCliente[],
-    totalSelecionado: number
+    totalSelecionado: number,
+    opts?: {
+      vencimento?: string;
+      mostrarPagamentos?: boolean;
+      mostrarSaldoDevedor?: boolean;
+    }
   ) => {
     if (vendasSelecionadas.length === 0) {
       toast.error("Selecione pelo menos uma venda para gerar o fechamento.");
@@ -536,6 +698,10 @@ export function ClienteDetalhe() {
     }
     if (!data) return;
 
+    const mostrarPagamentos = opts?.mostrarPagamentos === true;
+    const mostrarSaldoDevedor = opts?.mostrarSaldoDevedor === true;
+    const vencimentoRaw = (opts?.vencimento ?? "").trim().slice(0, 10);
+    const vencimentoLabel = vencimentoRaw.length >= 10 ? formatDateOnly(vencimentoRaw) : "";
     const comValores = true;
     const porData = [...vendasSelecionadas].sort((a, b) => parseData(a.data) - parseData(b.data));
     const notasHtml = porData
@@ -638,24 +804,25 @@ export function ClienteDetalhe() {
     const saldoTotal = safeNum(data.saldo_devedor);
     const totalSelNum = safeNum(totalSelecionado);
 
-    const resumoSelecaoHtml = comValores
-      ? `<div class="resumo-box">
-            <div class="linha"><span>Valor deste fechamento (soma das notas selecionadas)</span><strong>${formatCurrencyBrl(totalSelNum)}</strong></div>
-            ${
-              isChefe
-                ? `<div class="linha"><span>Saldo devedor atual do cliente (referência no sistema)</span><strong>${formatCurrencyBrl(saldoTotal)}</strong></div>`
-                : ""
-            }
-            <div style="margin-top:10px;color:#64748b;font-size:11px;">
-              Pagamentos não aparecem neste documento: podem referir-se a outros fechamentos. Use o saldo no sistema para conferência.
-            </div>
-          </div>`
+    const destaqueSelHtml = comValores
+      ? htmlFechamentoValorVencimento({
+          valor: totalSelNum,
+          vencimentoLabel,
+          saldoDevedor: saldoTotal,
+          mostrarSaldoDevedor,
+          isChefe,
+        })
       : `<div class="resumo-box">
             <div class="linha"><span>Notas neste fechamento</span><strong>${vendasSelecionadas.length}</strong></div>
             <div style="margin-top:10px;color:#64748b;font-size:11px;">
               Documento apenas com quantidades e produtos, sem valores em R$.
             </div>
           </div>`;
+
+    const pagamentosSelHtml = htmlFechamentoPagamentos(
+      limites ? pagamentosFiltrados : data.pagamentos,
+      mostrarPagamentos
+    );
 
     const htmlSel = `
       <!DOCTYPE html>
@@ -694,7 +861,6 @@ export function ClienteDetalhe() {
             }
             .resumo-box .linha { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center; }
             .resumo-box .linha:last-child { margin-bottom: 0; }
-            .resumo-box .total-fech { font-weight: 700; font-size: 15px; color: #0c4a6e; margin-top: 12px; padding-top: 12px; border-top: 2px solid #7dd3fc; }
             .nota {
               border: 1px solid #e2e8f0;
               border-radius: 10px;
@@ -708,11 +874,11 @@ export function ClienteDetalhe() {
             .nota-items th, .nota-items td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; }
             .nota-items th { background: #f1f5f9; font-weight: 600; color: #475569; }
             .nota-items .num { text-align: right; }
-            .muted { color: #64748b; font-size: 11px; margin-top: 28px; text-align: center; }
             .assinatura { margin-top: 40px; text-align: center; }
             .assinatura-linha { width: 60%; max-width: 240px; margin: 0 auto 8px; border-bottom: 2px solid #334155; height: 32px; }
             .assinatura-texto { font-size: 11px; color: #64748b; }
             .doc-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #64748b; }
+            ${FECHAMENTO_DESTAQUE_CSS}
           </style>
         </head>
         <body>
@@ -726,9 +892,11 @@ export function ClienteDetalhe() {
             <div><strong>Notas neste fechamento:</strong> ${vendasSelecionadas.length}</div>
           </div>
 
-          ${resumoSelecaoHtml}
+          ${destaqueSelHtml}
 
           ${notasHtml}
+
+          ${pagamentosSelHtml}
 
           <div class="assinatura">
             <div class="assinatura-linha"></div>
@@ -755,6 +923,9 @@ export function ClienteDetalhe() {
           total_selecionado: totalSelecionado,
           com_valores: comValores,
           saldo_devedor_atual: saldoTotal,
+          vencimento: vencimentoRaw || null,
+          mostrar_pagamentos: mostrarPagamentos,
+          mostrar_saldo_devedor: mostrarSaldoDevedor,
         },
       })
       .catch(() => {});
@@ -763,6 +934,14 @@ export function ClienteDetalhe() {
       titulo: tituloSel,
       downloadBaseName: `fechamento-${slugForFileName(data.cliente.nome)}-${id}-selecao`,
     });
+  };
+
+  const abrirDialogImpressao = (usarSelecao: boolean) => {
+    setPrintDialogUsarSelecao(usarSelecao);
+    setPrintVencimento("");
+    setPrintMostrarPagamentos(false);
+    setPrintMostrarSaldoDevedor(false);
+    setPrintDialogOpen(true);
   };
 
   const normalizarContas = (res: any): { id: number; nome: string }[] => {
@@ -904,6 +1083,9 @@ export function ClienteDetalhe() {
   const vendasTableColSpan = isChefe ? 7 : 4;
 
   const selecionarTodasExibidas = () => setSelectedVendaIds(new Set(exibirVendas.map((v) => v.id)));
+  const vendasNaoPagasExibidas = exibirVendas.filter((v) => v.marcada_paga !== true);
+  const selecionarNaoPagasExibidas = () =>
+    setSelectedVendaIds(new Set(vendasNaoPagasExibidas.map((v) => v.id)));
   const limparSelecao = () => setSelectedVendaIds(new Set());
 
   const aplicarMarcacaoVenda = async (vendaId: number, valor: boolean) => {
@@ -957,9 +1139,7 @@ export function ClienteDetalhe() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              imprimirFechamento();
-            }}
+            onClick={() => abrirDialogImpressao(false)}
           >
             <FileCheck className="size-4 mr-2" />
             Imprimir fechamento do período
@@ -968,9 +1148,7 @@ export function ClienteDetalhe() {
             variant="default"
             size="sm"
             disabled={vendasSelecionadas.length === 0}
-            onClick={() =>
-              imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado)
-            }
+            onClick={() => abrirDialogImpressao(true)}
             title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas as vendas selecionadas"}
           >
             <Printer className="size-4 mr-2" />
@@ -1137,6 +1315,14 @@ export function ClienteDetalhe() {
               <Button variant="outline" size="sm" onClick={selecionarTodasExibidas} disabled={exibirVendas.length === 0}>
                 Selecionar todas ({exibirVendas.length})
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={selecionarNaoPagasExibidas}
+                disabled={vendasNaoPagasExibidas.length === 0}
+              >
+                Selecionar não pagas ({vendasNaoPagasExibidas.length})
+              </Button>
               <Button variant="outline" size="sm" onClick={limparSelecao} disabled={selectedVendaIds.size === 0}>
                 Limpar seleção
               </Button>
@@ -1179,9 +1365,7 @@ export function ClienteDetalhe() {
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              onClick={() =>
-                imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado)
-              }
+              onClick={() => abrirDialogImpressao(true)}
               disabled={vendasSelecionadas.length === 0}
               title={vendasSelecionadas.length === 0 ? "Selecione pelo menos 1 venda" : "Imprimir apenas a seleção"}
             >
@@ -1721,6 +1905,83 @@ export function ClienteDetalhe() {
         titulo={printPreview?.titulo ?? ""}
         downloadBaseName={printPreview?.downloadBaseName}
       />
+
+      <Dialog open={printDialogOpen} onOpenChange={setPrintDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Opções de impressão</DialogTitle>
+            <DialogDescription>
+              {printDialogUsarSelecao
+                ? "Configure o fechamento das vendas selecionadas."
+                : "Configure o fechamento do período filtrado."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="print-vencimento-cliente">Vencimento</Label>
+              <Input
+                id="print-vencimento-cliente"
+                type="date"
+                value={printVencimento}
+                onChange={(e) => setPrintVencimento(e.target.value.slice(0, 10))}
+                className="max-w-[11rem]"
+              />
+              <p className="text-xs text-muted-foreground">Opcional. Aparece destacado no documento enviado ao cliente.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="print-mostrar-pagamentos-cliente"
+                checked={printMostrarPagamentos}
+                onCheckedChange={(v) => setPrintMostrarPagamentos(v === true)}
+              />
+              <Label htmlFor="print-mostrar-pagamentos-cliente" className="cursor-pointer font-normal">
+                Mostrar pagamentos
+              </Label>
+            </div>
+            {isChefe && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="print-mostrar-saldo-cliente"
+                  checked={printMostrarSaldoDevedor}
+                  onCheckedChange={(v) => setPrintMostrarSaldoDevedor(v === true)}
+                />
+                <Label htmlFor="print-mostrar-saldo-cliente" className="cursor-pointer font-normal">
+                  Mostrar saldo devedor atual
+                </Label>
+              </div>
+            )}
+            {isChefe && !printMostrarSaldoDevedor && (
+              <p className="text-xs text-muted-foreground">
+                Por padrão o documento traz só o valor deste fechamento, sem o saldo total em aberto do cliente.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPrintDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setPrintDialogOpen(false);
+                const opts = {
+                  vencimento: printVencimento,
+                  mostrarPagamentos: printMostrarPagamentos,
+                  mostrarSaldoDevedor: printMostrarSaldoDevedor,
+                };
+                if (printDialogUsarSelecao) {
+                  imprimirFechamentoSelecionadas(vendasSelecionadas, totalSelecionado, opts);
+                } else {
+                  imprimirFechamento(opts);
+                }
+              }}
+            >
+              <Printer className="size-4 mr-2" />
+              Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

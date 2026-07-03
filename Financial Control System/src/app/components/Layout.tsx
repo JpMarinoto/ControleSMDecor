@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router";
-import { LayoutDashboard, Menu, UserPlus, ShoppingCart, TrendingUp, ArrowLeftRight, Wallet, FileText, ArrowDownCircle, Package, CreditCard, Receipt, Building2, Users, Truck, UserCog, LogOut, UserCircle, Tag } from "lucide-react";
+import { LayoutDashboard, Menu, UserPlus, ShoppingCart, TrendingUp, ArrowLeftRight, Wallet, FileText, ArrowDownCircle, Package, CreditCard, Receipt, Building2, Users, Truck, UserCog, LogOut, UserCircle, Tag, Store } from "lucide-react";
 import { Button } from "./ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
 import {
@@ -73,6 +73,7 @@ export function Layout() {
     ],
     // Configurações e análises
     [
+      { name: 'Shopee', path: '/?tab=shopee', icon: Store },
       { name: 'Precificação', path: '/precificacao', icon: Tag },
       { name: 'Logs', path: '/logs', icon: FileText },
       { name: 'Usuários', path: '/usuarios', icon: UserCog },
@@ -100,7 +101,9 @@ export function Layout() {
             const Icon = item.icon;
             const isActive = item.path === '/financas'
               ? location.pathname === '/financas'
-              : (location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path + '/')));
+              : item.path === '/?tab=shopee'
+                ? location.pathname === '/' && new URLSearchParams(location.search).get('tab') === 'shopee'
+                : (location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path + '/')));
             return (
               <Link
                 key={item.path}

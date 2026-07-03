@@ -74,7 +74,7 @@ class FornecedorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Fornecedor
         fields = [
-            'id', 'nome', 'cpf', 'cnpj', 'telefone', 'chave_pix',
+            'id', 'ativo', 'nome', 'cpf', 'cnpj', 'telefone', 'chave_pix',
             'endereco', 'logradouro', 'bairro', 'numero', 'ponto_referencia', 'cep', 'cidade', 'estado',
         ]
 
@@ -82,7 +82,7 @@ class FornecedorSerializer(serializers.ModelSerializer):
 class CategoriaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CategoriaProduto
-        fields = ['id', 'nome', 'tipo', 'descricao']
+        fields = ['id', 'ativo', 'nome', 'tipo', 'descricao']
 
 
 class ProdutoSerializer(serializers.ModelSerializer):
@@ -165,6 +165,7 @@ class MaterialSerializer(serializers.ModelSerializer):
         model = Material
         fields = [
             'id',
+            'ativo',
             'nome',
             'precoUnitarioBase',
             'precoFabricacao',
@@ -186,7 +187,7 @@ class ContaBancoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ContaBanco
-        fields = ['id', 'nome', 'saldo', 'saldo_atual']
+        fields = ['id', 'ativo', 'nome', 'saldo', 'saldo_atual']
 
 
 # --- Vendas (formato esperado pelo front: clienteNome, data, total) ---
