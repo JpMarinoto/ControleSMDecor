@@ -254,13 +254,35 @@ class PrecificacaoShopee(models.Model):
 
 
 class ShopeeLoja(models.Model):
-    """Loja Shopee na Open Platform — credenciais guardadas no servidor (apenas chefe)."""
+    """Loja Shopee na Open Platform — credenciais e tokens OAuth (apenas chefe).
+
+    O usuário informa só: nome, partner_id, partner_key, redirect_url.
+    shop_id, merchant_id e tokens vêm do callback OAuth.
+    """
+
+    AMBIENTE_SANDBOX = "sandbox"
+    AMBIENTE_PRODUCAO = "producao"
+    AMBIENTE_CHOICES = [
+        (AMBIENTE_SANDBOX, "Sandbox (teste)"),
+        (AMBIENTE_PRODUCAO, "Produção"),
+    ]
 
     nome = models.CharField(max_length=200)
     partner_id = models.CharField(max_length=64, blank=True, default="")
     partner_key = models.CharField(max_length=256, blank=True, default="")
-    shop_id = models.CharField(max_length=64, blank=True, default="")
     redirect_url = models.CharField(max_length=500, blank=True, default="")
+    ambiente = models.CharField(
+        max_length=16,
+        choices=AMBIENTE_CHOICES,
+        default=AMBIENTE_PRODUCAO,
+        verbose_name="Ambiente Open Platform",
+    )
+    # Preenchidos automaticamente após OAuth
+    shop_id = models.CharField(max_length=64, blank=True, default="")
+    merchant_id = models.CharField(max_length=64, blank=True, default="")
+    access_token = models.TextField(blank=True, default="")
+    refresh_token = models.TextField(blank=True, default="")
+    token_expires_at = models.DateTimeField(null=True, blank=True)
     conectado = models.BooleanField(default=False)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
@@ -272,6 +294,24 @@ class ShopeeLoja(models.Model):
 
     def __str__(self):
         return self.nome or f"Loja Shopee #{self.pk}"
+
+    @property
+    def tem_credenciais_app(self):
+        return bool(
+            (self.nome or "").strip()
+            and (self.partner_id or "").strip()
+            and (self.partner_key or "").strip()
+            and (self.redirect_url or "").strip()
+        )
+
+    @property
+    def oauth_completo(self):
+        return bool(
+            self.tem_credenciais_app
+            and (self.shop_id or "").strip()
+            and (self.access_token or "").strip()
+            and (self.refresh_token or "").strip()
+        )
 
 
 class PrecificacaoTiktok(models.Model):

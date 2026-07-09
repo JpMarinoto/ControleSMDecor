@@ -3,6 +3,7 @@ API REST para o frontend React (Financial Control System).
 """
 import json
 import os
+import urllib.parse
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from django.utils import timezone
@@ -4022,39 +4023,100 @@ def _shopee_loja_payload(obj):
         "nome": obj.nome,
         "partner_id": obj.partner_id or "",
         "partner_key_definida": bool((obj.partner_key or "").strip()),
-        "shop_id": obj.shop_id or "",
         "redirect_url": obj.redirect_url or "",
+        "ambiente": getattr(obj, "ambiente", None) or "producao",
+        "shop_id": obj.shop_id or "",
+        "merchant_id": getattr(obj, "merchant_id", None) or "",
+        "token_expires_at": obj.token_expires_at.isoformat() if getattr(obj, "token_expires_at", None) else None,
         "conectado": bool(obj.conectado),
         "criado_em": obj.criado_em.isoformat() if obj.criado_em else None,
         "atualizado_em": obj.atualizado_em.isoformat() if obj.atualizado_em else None,
     }
 
 
-def _shopee_loja_credenciais_completas(obj):
+def _shopee_loja_pronta_para_oauth(obj):
+    """Credenciais do app — Shop ID / tokens vêm depois do OAuth."""
     return bool(
         (obj.nome or "").strip()
         and (obj.partner_id or "").strip()
         and (obj.partner_key or "").strip()
-        and (obj.shop_id or "").strip()
+        and (obj.redirect_url or "").strip()
     )
 
 
-def _parse_shopee_loja_body(body):
+def _shopee_loja_credenciais_completas(obj):
+    """Loja autorizada: app + tokens OAuth."""
+    return bool(
+        _shopee_loja_pronta_para_oauth(obj)
+        and (obj.shop_id or "").strip()
+        and (obj.access_token or "").strip()
+        and (obj.refresh_token or "").strip()
+    )
+
+
+def _parse_shopee_loja_body(body, *, partial=False):
     if not isinstance(body, dict):
         return None, Response({"error": "Corpo inválido."}, status=status.HTTP_400_BAD_REQUEST)
     nome = str(body.get("nome") or "").strip()
-    if not nome:
+    if not nome and not partial:
         return None, Response({"error": "Informe o nome da loja."}, status=status.HTTP_400_BAD_REQUEST)
-    data = {
-        "nome": nome,
-        "partner_id": str(body.get("partner_id") or "").strip(),
-        "shop_id": str(body.get("shop_id") or "").strip(),
-        "redirect_url": str(body.get("redirect_url") or "").strip(),
-    }
+    data = {}
+    if "nome" in body or not partial:
+        data["nome"] = nome
+    if "partner_id" in body or not partial:
+        data["partner_id"] = str(body.get("partner_id") or "").strip()
+    if "redirect_url" in body or not partial:
+        data["redirect_url"] = str(body.get("redirect_url") or "").strip()
+    if "ambiente" in body:
+        amb = str(body.get("ambiente") or "").strip().lower()
+        if amb in ("sandbox", "test", "teste"):
+            data["ambiente"] = "sandbox"
+        else:
+            data["ambiente"] = "producao"
     partner_key = body.get("partner_key")
     if partner_key is not None:
         data["partner_key"] = str(partner_key).strip()
+    # shop_id NÃO é aceito do formulário — vem só do OAuth
     return data, None
+
+
+def _aplicar_tokens_oauth(loja, token_payload: dict):
+    """Persiste shop_id, merchant_id e tokens a partir da resposta get_access_token."""
+    from datetime import timedelta
+    from django.utils import timezone as dj_tz
+
+    access = str(token_payload.get("access_token") or "").strip()
+    refresh = str(token_payload.get("refresh_token") or "").strip()
+    if not access or not refresh:
+        raise ValueError("Resposta OAuth sem access_token/refresh_token.")
+
+    shop_id = token_payload.get("shop_id")
+    if shop_id is None:
+        shop_list = token_payload.get("shop_id_list") or []
+        if isinstance(shop_list, list) and shop_list:
+            shop_id = shop_list[0]
+    merchant_id = token_payload.get("merchant_id")
+    if merchant_id is None:
+        m_list = token_payload.get("merchant_id_list") or []
+        if isinstance(m_list, list) and m_list:
+            merchant_id = m_list[0]
+
+    expire_in = token_payload.get("expire_in") or token_payload.get("expires_in") or 14400
+    try:
+        expire_in = int(expire_in)
+    except (TypeError, ValueError):
+        expire_in = 14400
+
+    loja.access_token = access
+    loja.refresh_token = refresh
+    loja.token_expires_at = dj_tz.now() + timedelta(seconds=max(60, expire_in - 60))
+    if shop_id is not None and str(shop_id).strip():
+        loja.shop_id = str(shop_id).strip()
+    if merchant_id is not None and str(merchant_id).strip():
+        loja.merchant_id = str(merchant_id).strip()
+    loja.conectado = _shopee_loja_credenciais_completas(loja)
+    loja.save()
+    return loja
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -4076,8 +4138,10 @@ class ShopeeLojaListCreate(APIView):
         if err_resp:
             return err_resp
         partner_key = data.pop("partner_key", "")
+        if "ambiente" not in data:
+            data["ambiente"] = "producao"
         obj = ShopeeLoja.objects.create(**data, partner_key=partner_key)
-        obj.conectado = _shopee_loja_credenciais_completas(obj)
+        obj.conectado = False
         obj.save(update_fields=["conectado"])
         _api_log(request, "Criar", "ShopeeLoja", f"Loja Shopee: {obj.nome}")
         return Response(_shopee_loja_payload(obj), status=status.HTTP_201_CREATED)
@@ -4098,7 +4162,7 @@ class ShopeeLojaDetail(APIView):
             obj = self.get_object(pk)
         except ShopeeLoja.DoesNotExist:
             return Response({"error": "Loja não encontrada."}, status=status.HTTP_404_NOT_FOUND)
-        data, err_resp = _parse_shopee_loja_body(request.data)
+        data, err_resp = _parse_shopee_loja_body(request.data, partial=True)
         if err_resp:
             return err_resp
         partner_key = data.pop("partner_key", None)
@@ -4106,6 +4170,7 @@ class ShopeeLojaDetail(APIView):
             setattr(obj, field, value)
         if partner_key is not None and partner_key != "":
             obj.partner_key = partner_key
+        # Reavaliar conexão (tokens podem continuar válidos)
         obj.conectado = _shopee_loja_credenciais_completas(obj)
         obj.save()
         _api_log(request, "Editar", "ShopeeLoja", f"Loja Shopee ID {pk}: {obj.nome}")
@@ -4126,8 +4191,183 @@ class ShopeeLojaDetail(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class ShopeeOAuthStart(APIView):
+    """Gera URL OAuth assinada para autorizar a loja na Shopee.
+
+    Sempre devolve JSON com auth_url. O front (com Token) deve ler e
+    redirecionar o browser para auth_url — NÃO abrir este endpoint no browser.
+    """
+
+    def get(self, request, pk):
+        return self._start(request, pk)
+
+    def post(self, request, pk):
+        return self._start(request, pk)
+
+    def _start(self, request, pk):
+        err = _requer_chefe_shopee(request)
+        if err:
+            return err
+        try:
+            loja = ShopeeLoja.objects.get(pk=pk)
+        except ShopeeLoja.DoesNotExist:
+            return Response({"error": "Loja não encontrada."}, status=status.HTTP_404_NOT_FOUND)
+        if not _shopee_loja_pronta_para_oauth(loja):
+            return Response(
+                {
+                    "error": "Preencha Nome, Partner ID, Partner Key e Redirect URL antes de conectar.",
+                    "code": "credenciais_incompletas",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from .shopee_client import build_auth_partner_url
+
+        redirect = (loja.redirect_url or "").strip()
+        # Em local (Vite), o callback deve ser o da API Django, não a página React
+        if "loja_id=" not in redirect:
+            sep = "&" if "?" in redirect else "?"
+            redirect_with_state = f"{redirect}{sep}loja_id={loja.id}"
+        else:
+            redirect_with_state = redirect
+        try:
+            url = build_auth_partner_url(
+                partner_id=loja.partner_id,
+                partner_key=loja.partner_key,
+                redirect_url=redirect_with_state,
+                ambiente=loja.ambiente or "producao",
+            )
+        except (ValueError, TypeError) as e:
+            return Response({"error": f"Partner ID inválido: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+        if not url.startswith("https://"):
+            return Response(
+                {"error": "Falha ao montar URL OAuth da Shopee."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        ambiente_efetivo = loja.ambiente or "producao"
+        _api_log(request, "OAuth", "ShopeeLoja", f"Início OAuth loja {loja.nome} (ID {loja.id}) ambiente={ambiente_efetivo}")
+        return Response(
+            {
+                "auth_url": url,
+                "loja_id": loja.id,
+                "ambiente": ambiente_efetivo,
+                "aviso_sandbox": ambiente_efetivo == "sandbox",
+            }
+        )
+
+
+def _shopee_frontend_base(request) -> str:
+    """Base do front após OAuth (Vite em dev, mesmo host em produção)."""
+    env_front = (os.environ.get("FRONTEND_URL") or os.environ.get("SHOPEE_FRONTEND_URL") or "").strip()
+    if env_front:
+        return env_front.rstrip("/")
+    # Se o callback veio pelo proxy Vite, o Referer costuma ser localhost:5173
+    referer = (request.META.get("HTTP_REFERER") or "").strip()
+    if referer:
+        try:
+            from urllib.parse import urlparse
+
+            p = urlparse(referer)
+            if p.scheme and p.netloc:
+                return f"{p.scheme}://{p.netloc}"
+        except Exception:
+            pass
+    # Fallback: origem da redirect_url da loja (sem path)
+    return ""
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ShopeeOAuthCallback(APIView):
+    """Recebe code + shop_id da Shopee e troca por access_token."""
+
+    def get(self, request):
+        return self._handle(request)
+
+    def post(self, request):
+        return self._handle(request)
+
+    def _front_redirect(self, request, path_qs: str, loja=None):
+        from django.shortcuts import redirect as django_redirect
+
+        base = _shopee_frontend_base(request)
+        if not base and loja and (loja.redirect_url or "").strip():
+            try:
+                from urllib.parse import urlparse
+
+                p = urlparse(loja.redirect_url.strip())
+                # Se callback é :8000/api/..., em dev o front é :5173
+                if p.port == 8000 or (p.hostname in ("127.0.0.1", "localhost") and "/api/" in (p.path or "")):
+                    base = f"{p.scheme}://{p.hostname}:5173"
+                elif p.scheme and p.netloc:
+                    base = f"{p.scheme}://{p.netloc}"
+            except Exception:
+                base = ""
+        if not base:
+            base = ""
+        return django_redirect(f"{base}{path_qs}" if base else path_qs)
+
+    def _handle(self, request):
+        from .shopee_client import ShopeeApiError, exchange_code_for_token
+
+        params = request.query_params if hasattr(request, "query_params") else request.GET
+        code = (params.get("code") or "").strip()
+        shop_id = (params.get("shop_id") or "").strip()
+        main_account_id = (params.get("main_account_id") or "").strip()
+        loja_id = (params.get("loja_id") or "").strip()
+
+        front_ok = "/?tab=shopee&oauth=ok"
+        front_err = "/?tab=shopee&oauth=erro"
+
+        if not code:
+            return self._front_redirect(request, f"{front_err}&msg=code_ausente")
+
+        loja = None
+        if loja_id:
+            loja = ShopeeLoja.objects.filter(pk=loja_id).first()
+        if loja is None and shop_id:
+            loja = ShopeeLoja.objects.filter(shop_id=shop_id).first()
+        if loja is None:
+            candidatas = [
+                l
+                for l in ShopeeLoja.objects.all()
+                if _shopee_loja_pronta_para_oauth(l) and not (l.access_token or "").strip()
+            ]
+            if len(candidatas) == 1:
+                loja = candidatas[0]
+        if loja is None:
+            return self._front_redirect(request, f"{front_err}&msg=loja_nao_encontrada")
+
+        try:
+            payload = exchange_code_for_token(
+                partner_id=loja.partner_id,
+                partner_key=loja.partner_key,
+                code=code,
+                shop_id=shop_id or None,
+                main_account_id=main_account_id or None,
+                ambiente=loja.ambiente or "producao",
+            )
+            if shop_id and not payload.get("shop_id") and not payload.get("shop_id_list"):
+                payload["shop_id"] = shop_id
+            _aplicar_tokens_oauth(loja, payload)
+        except (ShopeeApiError, ValueError) as e:
+            _api_log(request, "OAuth", "ShopeeLoja", f"Falha OAuth loja {loja.id}: {e}")
+            return self._front_redirect(
+                request,
+                f"{front_err}&msg={urllib.parse.quote(str(e)[:120])}",
+                loja=loja,
+            )
+
+        _api_log(
+            request,
+            "OAuth",
+            "ShopeeLoja",
+            f"Loja {loja.nome} autorizada — shop_id={loja.shop_id}",
+        )
+        return self._front_redirect(request, f"{front_ok}&loja_id={loja.id}", loja=loja)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class ShopeeIntegracaoStatus(APIView):
-    """Estado da conexão com a Shopee Open Platform (base para OAuth)."""
+    """Estado da conexão com a Shopee Open Platform."""
 
     def get(self, request):
         err = _requer_chefe_shopee(request)
@@ -4137,29 +4377,30 @@ class ShopeeIntegracaoStatus(APIView):
         lojas_payload = [_shopee_loja_payload(loja) for loja in lojas]
         conectadas = sum(1 for loja in lojas if loja.conectado)
         alguma_conectada = conectadas > 0
+        so_sandbox = bool(lojas) and all((loja.ambiente or "producao") == "sandbox" for loja in lojas)
         if not lojas:
-            mensagem = "Nenhuma loja cadastrada. Adicione uma loja na aba Conexão API."
+            mensagem = "Nenhuma loja cadastrada. Adicione uma loja e clique em Conectar Loja."
             proximos_passos = [
-                "Clicar em Adicionar loja e preencher Partner ID, Partner Key e Shop ID",
-                "Autorizar a loja via OAuth na Shopee Open Platform",
-                "Sincronizar pedidos e cruzar custos com produtos cadastrados",
+                "Informar Nome, Partner ID, Partner Key e Redirect URL (ambiente Produção)",
+                "Usar Partner ID / Key de Produção do app (não os de teste)",
+                "Clicar em Conectar Loja para autorizar a loja real na Shopee",
             ]
         elif alguma_conectada:
-            mensagem = f"{conectadas} de {len(lojas)} loja(s) com credenciais completas."
+            mensagem = f"{conectadas} de {len(lojas)} loja(s) autorizada(s) via OAuth."
             proximos_passos = [
-                "Autorizar lojas via OAuth quando disponível",
-                "Sincronizar pedidos e calcular lucro por venda",
+                "Sincronizar pedidos da loja autorizada",
+                "Cruzar itens com custo dos produtos cadastrados",
             ]
         else:
-            mensagem = f"{len(lojas)} loja(s) cadastrada(s). Complete as credenciais para conectar."
+            mensagem = f"{len(lojas)} loja(s) cadastrada(s). Clique em Conectar Loja para autorizar."
             proximos_passos = [
-                "Preencher Partner ID, Partner Key e Shop ID em cada loja",
-                "Implementar fluxo OAuth e guardar access_token no servidor",
+                "Conectar Loja → autorizar na Shopee → tokens salvos automaticamente",
+                "Confirme que o ambiente está em Produção e as chaves são as de produção",
             ]
         return Response(
             {
                 "conectado": alguma_conectada,
-                "modo": "desenvolvimento",
+                "modo": "sandbox" if so_sandbox else "producao",
                 "mensagem": mensagem,
                 "shop_id": lojas[0].shop_id if len(lojas) == 1 else None,
                 "lojas": lojas_payload,

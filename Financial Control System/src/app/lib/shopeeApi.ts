@@ -4,10 +4,11 @@
  */
 
 export type ShopeePeriodoLucro = "dia" | "mes" | "intervalo";
+export type ShopeeAmbiente = "sandbox" | "producao";
 
 export interface ShopeeIntegracaoStatus {
   conectado: boolean;
-  modo: "desenvolvimento" | "producao";
+  modo: "desenvolvimento" | "producao" | "sandbox";
   mensagem: string;
   shop_id?: string | null;
   lojas?: ShopeeLoja[];
@@ -21,27 +22,31 @@ export interface ShopeeLoja {
   nome: string;
   partner_id: string;
   partner_key_definida: boolean;
-  shop_id: string;
   redirect_url: string;
+  ambiente: ShopeeAmbiente;
+  shop_id: string;
+  merchant_id: string;
+  token_expires_at?: string | null;
   conectado: boolean;
   criado_em?: string | null;
   atualizado_em?: string | null;
 }
 
+/** Campos que o usuário preenche — Shop ID / tokens vêm do OAuth. */
 export interface ShopeeLojaForm {
   nome: string;
   partner_id: string;
   partner_key: string;
-  shop_id: string;
   redirect_url: string;
+  ambiente: ShopeeAmbiente;
 }
 
 export const SHOPEE_LOJA_VAZIA: ShopeeLojaForm = {
   nome: "",
   partner_id: "",
   partner_key: "",
-  shop_id: "",
   redirect_url: "",
+  ambiente: "producao",
 };
 
 export interface ShopeeResumoLucro {
@@ -57,20 +62,6 @@ export interface ShopeeResumoLucro {
   itens_vendidos: number;
   fonte: "api" | "placeholder";
 }
-
-export interface ShopeeCredenciaisForm {
-  partner_id: string;
-  partner_key: string;
-  shop_id: string;
-  redirect_url: string;
-}
-
-export const SHOPEE_CREDENCIAIS_VAZIAS: ShopeeCredenciaisForm = {
-  partner_id: "",
-  partner_key: "",
-  shop_id: "",
-  redirect_url: "",
-};
 
 /** Placeholder até a API Shopee estar conectada. */
 export function resumoLucroPlaceholder(periodo: ShopeePeriodoLucro): ShopeeResumoLucro {

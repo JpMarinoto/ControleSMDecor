@@ -71,9 +71,18 @@ function lojaParaForm(loja: ShopeeLoja) {
     nome: loja.nome,
     partner_id: loja.partner_id,
     partner_key: "",
-    shop_id: loja.shop_id,
     redirect_url: loja.redirect_url,
+    ambiente: loja.ambiente === "sandbox" ? ("sandbox" as const) : ("producao" as const),
   };
+}
+
+function defaultRedirectUrl() {
+  if (typeof window === "undefined") return "";
+  // Produção: https://dominio/api/...
+  // Homolog:  https://dominio/homolog/api/...
+  const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+  const prefix = base && base !== "/" ? base : "";
+  return `${window.location.origin}${prefix}/api/shopee/oauth/callback/`;
 }
 
 export function ShopeeLojaPanel() {
@@ -91,6 +100,7 @@ export function ShopeeLojaPanel() {
   const [salvandoLoja, setSalvandoLoja] = useState(false);
   const [excluirLoja, setExcluirLoja] = useState<ShopeeLoja | null>(null);
   const [excluindoLoja, setExcluindoLoja] = useState(false);
+  const [conectandoLojaId, setConectandoLojaId] = useState<number | null>(null);
 
   const carregar = useCallback(async () => {
     setLoadingStatus(true);
@@ -128,9 +138,27 @@ export function ShopeeLojaPanel() {
     carregar();
   }, [carregar]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauth = params.get("oauth");
+    if (!oauth) return;
+    if (oauth === "ok") {
+      toast.success("Loja autorizada na Shopee. Shop ID e tokens salvos automaticamente.");
+      carregar();
+    } else if (oauth === "erro") {
+      const msg = params.get("msg") || "Falha na autorização";
+      toast.error(`OAuth Shopee: ${decodeURIComponent(msg)}`);
+    }
+    params.delete("oauth");
+    params.delete("msg");
+    params.delete("loja_id");
+    const qs = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+  }, [carregar]);
+
   const abrirNovaLoja = () => {
     setEditandoLoja(null);
-    setLojaForm(SHOPEE_LOJA_VAZIA);
+    setLojaForm({ ...SHOPEE_LOJA_VAZIA, redirect_url: defaultRedirectUrl() });
     setLojaDialogOpen(true);
   };
 
@@ -147,11 +175,19 @@ export function ShopeeLojaPanel() {
       toast.error("Informe o nome da loja");
       return;
     }
+    if (!lojaForm.partner_id.trim() || !lojaForm.redirect_url.trim()) {
+      toast.error("Informe Partner ID e Redirect URL");
+      return;
+    }
+    if (!editandoLoja && !lojaForm.partner_key.trim()) {
+      toast.error("Informe a Partner Key");
+      return;
+    }
     const body = {
       nome,
       partner_id: lojaForm.partner_id.trim(),
-      shop_id: lojaForm.shop_id.trim(),
       redirect_url: lojaForm.redirect_url.trim(),
+      ambiente: lojaForm.ambiente,
       ...(lojaForm.partner_key.trim() ? { partner_key: lojaForm.partner_key.trim() } : {}),
     };
     try {
@@ -161,7 +197,7 @@ export function ShopeeLojaPanel() {
         toast.success("Loja atualizada");
       } else {
         await api.createShopeeLoja(body);
-        toast.success("Loja adicionada");
+        toast.success("Loja adicionada. Clique em Conectar Loja para autorizar na Shopee.");
       }
       setLojaDialogOpen(false);
       setEditandoLoja(null);
@@ -189,12 +225,37 @@ export function ShopeeLojaPanel() {
     }
   };
 
-  const handleConectarShopee = (loja: ShopeeLoja) => {
-    if (!loja.partner_id || !loja.partner_key_definida || !loja.shop_id) {
-      toast.error("Complete Partner ID, Partner Key e Shop ID antes de autorizar.");
+  const handleConectarShopee = async (loja: ShopeeLoja) => {
+    if (!loja.partner_id || !loja.partner_key_definida || !loja.redirect_url) {
+      toast.error("Preencha Nome, Partner ID, Partner Key e Redirect URL antes de conectar.");
       return;
     }
-    toast.info(`Fluxo OAuth da loja "${loja.nome}" será implementado em breve.`);
+    try {
+      setConectandoLojaId(loja.id);
+      const data = await api.startShopeeOAuth(loja.id);
+      const authUrl = typeof data?.auth_url === "string" ? data.auth_url.trim() : "";
+      if (!authUrl || !/^https:\/\//i.test(authUrl)) {
+        toast.error(
+          "Não foi possível gerar a URL da Shopee. Verifique Partner ID, Partner Key e o ambiente (Sandbox/Produção)."
+        );
+        setConectandoLojaId(null);
+        return;
+      }
+      // Nunca navegar para /api/... — só para o host da Shopee
+      if (authUrl.includes("/api/shopee/")) {
+        toast.error("URL OAuth inválida (apontou para a API local). Tente novamente.");
+        setConectandoLojaId(null);
+        return;
+      }
+      if (data.aviso_sandbox) {
+        toast.info("Ambiente Sandbox: pedidos reais exigem app em Produção na Open Platform.");
+      }
+      // assign evita histórico estranho; abre a página de autorização da Shopee
+      window.location.assign(authUrl);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao iniciar OAuth");
+      setConectandoLojaId(null);
+    }
   };
 
   const lojaSelecionada = lojas.find((l) => l.id === lojaSelecionadaId) ?? null;
@@ -438,7 +499,7 @@ export function ShopeeLojaPanel() {
               <div>
                 <CardTitle className="text-base">Lojas Shopee</CardTitle>
                 <CardDescription>
-                  Cadastre cada loja com Partner ID, Partner Key e Shop ID. As chaves ficam guardadas no servidor.
+                  Informe só Nome, Partner ID, Partner Key e Redirect URL. Shop ID e tokens vêm do OAuth ao clicar em Conectar Loja.
                 </CardDescription>
               </div>
               <Button size="sm" onClick={abrirNovaLoja}>
@@ -451,7 +512,7 @@ export function ShopeeLojaPanel() {
                 <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
                   <Store className="size-10 mx-auto mb-3 opacity-40" />
                   <p className="font-medium text-foreground">Nenhuma loja cadastrada</p>
-                  <p className="text-sm mt-1 mb-4">Clique em Adicionar loja para preencher os dados da Open Platform.</p>
+                  <p className="text-sm mt-1 mb-4">Adicione a loja e depois autorize na Shopee com Conectar Loja.</p>
                   <Button variant="secondary" onClick={abrirNovaLoja}>
                     <Plus className="size-4 mr-1.5" />
                     Adicionar loja
@@ -462,9 +523,8 @@ export function ShopeeLojaPanel() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Loja</TableHead>
-                      <TableHead>Partner ID</TableHead>
+                      <TableHead>Ambiente</TableHead>
                       <TableHead>Shop ID</TableHead>
-                      <TableHead>Chave</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
@@ -472,25 +532,36 @@ export function ShopeeLojaPanel() {
                   <TableBody>
                     {lojas.map((loja) => (
                       <TableRow key={loja.id}>
-                        <TableCell className="font-medium">{loja.nome}</TableCell>
-                        <TableCell className="font-mono text-xs">{loja.partner_id || "—"}</TableCell>
-                        <TableCell className="font-mono text-xs">{loja.shop_id || "—"}</TableCell>
-                        <TableCell>
-                          {loja.partner_key_definida ? (
-                            <Badge variant="secondary">Definida</Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-amber-700">Pendente</Badge>
-                          )}
+                        <TableCell className="font-medium">
+                          <div>{loja.nome}</div>
+                          <div className="text-xs text-muted-foreground font-mono">Partner {loja.partner_id || "—"}</div>
                         </TableCell>
                         <TableCell>
-                          {loja.conectado ? (
-                            <Badge className="bg-emerald-600 hover:bg-emerald-600">Pronta</Badge>
+                          {loja.ambiente === "producao" ? (
+                            <Badge className="bg-emerald-600 hover:bg-emerald-600">Produção</Badge>
                           ) : (
-                            <Badge variant="outline">Incompleta</Badge>
+                            <Badge variant="outline" className="text-amber-700 border-amber-300">Sandbox</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{loja.shop_id || "— (via OAuth)"}</TableCell>
+                        <TableCell>
+                          {loja.conectado ? (
+                            <Badge className="bg-emerald-600 hover:bg-emerald-600">Autorizada</Badge>
+                          ) : (
+                            <Badge variant="outline">Aguardando OAuth</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
+                          <div className="flex justify-end flex-wrap gap-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={conectandoLojaId === loja.id}
+                              onClick={() => handleConectarShopee(loja)}
+                            >
+                              <Link2 className="size-4 mr-1.5" />
+                              {conectandoLojaId === loja.id ? "A redirecionar…" : loja.conectado ? "Reconectar" : "Conectar Loja"}
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"
@@ -499,15 +570,6 @@ export function ShopeeLojaPanel() {
                               onClick={() => abrirEditarLoja(loja)}
                             >
                               <Pencil className="size-4" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              title="Autorizar OAuth"
-                              onClick={() => handleConectarShopee(loja)}
-                            >
-                              <Link2 className="size-4" />
                             </Button>
                             <Button
                               type="button"
@@ -531,12 +593,14 @@ export function ShopeeLojaPanel() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Shopee Open Platform</CardTitle>
+              <CardTitle className="text-base">Loja real (Produção)</CardTitle>
               <CardDescription>
-                Crie um app parceiro em open.shopee.com e use os mesmos dados em cada loja que autorizar.
+                Use o <strong>Partner ID</strong> e a <strong>Partner Key de Produção</strong> do app na Open Platform
+                (não os campos “de teste”). O ambiente padrão é Produção — host{" "}
+                <code className="text-xs">partner.shopeemobile.com</code>.
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" asChild>
                 <a href="https://open.shopee.com/" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="size-4 mr-2" />
@@ -554,7 +618,7 @@ export function ShopeeLojaPanel() {
           <DialogHeader>
             <DialogTitle>{editandoLoja ? "Editar loja" : "Adicionar loja"}</DialogTitle>
             <DialogDescription>
-              Preencha os dados da loja na Shopee Open Platform. A Partner Key não é exibida depois de salva.
+              Só estes campos. Shop ID, Merchant ID e tokens são preenchidos automaticamente após Conectar Loja.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSalvarLoja} className="space-y-4">
@@ -569,7 +633,7 @@ export function ShopeeLojaPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="loja-partner-id">Partner ID</Label>
+              <Label htmlFor="loja-partner-id">Partner ID *</Label>
               <Input
                 id="loja-partner-id"
                 value={lojaForm.partner_id}
@@ -579,7 +643,7 @@ export function ShopeeLojaPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="loja-partner-key">Partner Key</Label>
+              <Label htmlFor="loja-partner-key">Partner Key *</Label>
               <Input
                 id="loja-partner-key"
                 type="password"
@@ -594,24 +658,34 @@ export function ShopeeLojaPanel() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="loja-shop-id">Shop ID</Label>
-              <Input
-                id="loja-shop-id"
-                value={lojaForm.shop_id}
-                onChange={(e) => setLojaForm((f) => ({ ...f, shop_id: e.target.value }))}
-                placeholder="ID da loja após autorização OAuth"
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loja-redirect">Redirect URL (OAuth)</Label>
+              <Label htmlFor="loja-redirect">Redirect URL (OAuth) *</Label>
               <Input
                 id="loja-redirect"
                 value={lojaForm.redirect_url}
                 onChange={(e) => setLojaForm((f) => ({ ...f, redirect_url: e.target.value }))}
-                placeholder="https://seu-dominio.com/api/shopee/callback/"
+                placeholder="https://seu-dominio.com/api/shopee/oauth/callback/"
                 autoComplete="off"
               />
+              <p className="text-xs text-muted-foreground">
+                Cadastre este mesmo domínio/URL no app da Open Platform (callback).
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="loja-ambiente">Ambiente</Label>
+              <Select
+                value={lojaForm.ambiente}
+                onValueChange={(v) =>
+                  setLojaForm((f) => ({ ...f, ambiente: v === "sandbox" ? "sandbox" : "producao" }))
+                }
+              >
+                <SelectTrigger id="loja-ambiente">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="producao">Produção (loja real)</SelectItem>
+                  <SelectItem value="sandbox">Sandbox (somente teste)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter className="gap-2 sm:gap-0">
               <Button type="button" variant="outline" onClick={() => setLojaDialogOpen(false)}>

@@ -3,12 +3,16 @@ import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
+// Homologação na VPS: VITE_BASE=/homolog/ npm run build
+// Produção: base padrão /
+const base = process.env.VITE_BASE || '/'
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
   ],
-  base: '/',
+  base,
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

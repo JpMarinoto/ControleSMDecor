@@ -1,5 +1,13 @@
 // Autenticação por Token: o login devolve um token; guardamos em sessionStorage e enviamos em Authorization em todos os pedidos.
-const API_BASE_URL = typeof window !== 'undefined' ? '/api' : (import.meta.env.VITE_API_URL || '/api');
+// Em homologação (Vite base /homolog/) a API fica em /homolog/api/.
+function resolveApiBase(): string {
+  const explicit = import.meta.env?.VITE_API_URL;
+  if (explicit) return String(explicit).replace(/\/$/, "");
+  const base = String(import.meta.env?.BASE_URL || "/");
+  const root = base.endsWith("/") ? base.slice(0, -1) : base;
+  return root ? `${root}/api` : "/api";
+}
+const API_BASE_URL = resolveApiBase();
 
 const AUTH_TOKEN_KEY = 'authToken';
 
@@ -1375,7 +1383,7 @@ export const api = {
     const response = await fetch(`${API_BASE_URL}/shopee/status/`, { headers: authHeaders() });
     return readJsonOrThrow(response) as Promise<{
       conectado: boolean;
-      modo: "desenvolvimento" | "producao";
+      modo: "desenvolvimento" | "producao" | "sandbox";
       mensagem: string;
       shop_id?: string | null;
       lojas?: {
@@ -1383,8 +1391,11 @@ export const api = {
         nome: string;
         partner_id: string;
         partner_key_definida: boolean;
-        shop_id: string;
         redirect_url: string;
+        ambiente: "sandbox" | "producao";
+        shop_id: string;
+        merchant_id: string;
+        token_expires_at?: string | null;
         conectado: boolean;
         criado_em?: string | null;
         atualizado_em?: string | null;
@@ -1403,8 +1414,11 @@ export const api = {
         nome: string;
         partner_id: string;
         partner_key_definida: boolean;
-        shop_id: string;
         redirect_url: string;
+        ambiente: "sandbox" | "producao";
+        shop_id: string;
+        merchant_id: string;
+        token_expires_at?: string | null;
         conectado: boolean;
         criado_em?: string | null;
         atualizado_em?: string | null;
@@ -1416,8 +1430,8 @@ export const api = {
     nome: string;
     partner_id?: string;
     partner_key?: string;
-    shop_id?: string;
     redirect_url?: string;
+    ambiente?: "sandbox" | "producao";
   }) => {
     const response = await fetch(`${API_BASE_URL}/shopee/lojas/`, {
       method: "POST",
@@ -1433,8 +1447,8 @@ export const api = {
       nome: string;
       partner_id?: string;
       partner_key?: string;
-      shop_id?: string;
       redirect_url?: string;
+      ambiente?: "sandbox" | "producao";
     }
   ) => {
     const response = await fetch(`${API_BASE_URL}/shopee/lojas/${id}/`, {
@@ -1461,6 +1475,20 @@ export const api = {
       }
       throw new Error(msg || `HTTP ${response.status}`);
     }
+  },
+
+  startShopeeOAuth: async (lojaId: number) => {
+    const response = await fetch(`${API_BASE_URL}/shopee/lojas/${lojaId}/oauth/start/`, {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json", Accept: "application/json" },
+      body: "{}",
+    });
+    return readJsonOrThrow(response) as Promise<{
+      auth_url: string;
+      loja_id: number;
+      ambiente: string;
+      aviso_sandbox: boolean;
+    }>;
   },
 
   getShopeeResumoLucro: async (

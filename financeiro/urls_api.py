@@ -76,4 +76,6 @@ urlpatterns = [
     path('shopee/resumo-lucro/', views_api.ShopeeResumoLucro.as_view()),
     path('shopee/lojas/', views_api.ShopeeLojaListCreate.as_view()),
     path('shopee/lojas/<int:pk>/', views_api.ShopeeLojaDetail.as_view()),
+    path('shopee/lojas/<int:pk>/oauth/start/', views_api.ShopeeOAuthStart.as_view()),
+    path('shopee/oauth/callback/', views_api.ShopeeOAuthCallback.as_view()),
 ]
