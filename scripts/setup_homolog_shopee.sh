@@ -20,6 +20,15 @@ if [[ ! -d "${PROD_DIR}" ]]; then
   exit 1
 fi
 
+# Python da produção (Django 6 precisa de 3.12+). NÃO usar /usr/bin/python3 antigo.
+PROD_PYTHON="${PROD_DIR}/.venv/bin/python"
+if [[ ! -x "${PROD_PYTHON}" ]]; then
+  echo "Python da produção não encontrado: ${PROD_PYTHON}"
+  echo "Crie/ative o .venv de produção antes de rodar este script."
+  exit 1
+fi
+echo "    Python:    $("${PROD_PYTHON}" -V 2>&1)"
+
 # 1) Cópia do código (sem banco de produção)
 mkdir -p "${HOMOLOG_DIR}"
 rsync -a --delete \
@@ -34,13 +43,29 @@ rsync -a --delete \
   --exclude '.env' \
   "${PROD_DIR}/" "${HOMOLOG_DIR}/"
 
-# 2) venv
-if [[ ! -d "${HOMOLOG_DIR}/.venv" ]]; then
-  python3 -m venv "${HOMOLOG_DIR}/.venv"
+# 2) venv com o MESMO interpretador da produção
+# Se o venv homolog foi criado com python3 antigo, apaga e recria.
+NEED_VENV=0
+if [[ ! -x "${HOMOLOG_DIR}/.venv/bin/python" ]]; then
+  NEED_VENV=1
+else
+  HOMOLOG_PY_VER="$("${HOMOLOG_DIR}/.venv/bin/python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  PROD_PY_VER="$("${PROD_PYTHON}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  if [[ "${HOMOLOG_PY_VER}" != "${PROD_PY_VER}" ]]; then
+    echo "    venv homolog Python ${HOMOLOG_PY_VER} != produção ${PROD_PY_VER} — recriando..."
+    NEED_VENV=1
+  fi
 fi
+
+if [[ "${NEED_VENV}" -eq 1 ]]; then
+  rm -rf "${HOMOLOG_DIR}/.venv"
+  "${PROD_PYTHON}" -m venv "${HOMOLOG_DIR}/.venv"
+fi
+
 # shellcheck disable=SC1091
 source "${HOMOLOG_DIR}/.venv/bin/activate"
-pip install -q -r "${HOMOLOG_DIR}/requirements.txt"
+python -m pip install -U pip setuptools wheel
+pip install -r "${HOMOLOG_DIR}/requirements.txt"
 
 # 3) .env próprio (banco vazio separado)
 if [[ ! -f "${HOMOLOG_DIR}/.env" ]]; then
