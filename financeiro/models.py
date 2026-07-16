@@ -234,9 +234,14 @@ class PrecoClienteProduto(models.Model):
 
 
 class PrecificacaoShopee(models.Model):
-    """Planilha de precificação Shopee (chefe); persiste no banco com o restante do sistema."""
+    """Planilha de precificação Shopee; cada usuário só vê as próprias (chefe pode optar por outro)."""
 
-    nome = models.CharField(max_length=200, unique=True)
+    usuario = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="precificacoes_shopee",
+    )
+    nome = models.CharField(max_length=200)
     mes_referencia = models.CharField(max_length=7, blank=True, default="")
     nf_percent = models.CharField(max_length=20, default="70")
     imposto_percent = models.CharField(max_length=20, default="10")
@@ -248,9 +253,10 @@ class PrecificacaoShopee(models.Model):
         ordering = ["-atualizado_em"]
         verbose_name = "Precificação Shopee"
         verbose_name_plural = "Precificações Shopee"
+        unique_together = [("usuario", "nome")]
 
     def __str__(self):
-        return self.nome
+        return f"{self.nome} ({self.usuario_id})"
 
 
 class ShopeeLoja(models.Model):
@@ -315,17 +321,22 @@ class ShopeeLoja(models.Model):
 
 
 class PrecificacaoTiktok(models.Model):
-    """Planilha de precificação TikTok Shop (chefe); persiste no banco junto da Shopee.
+    """Planilha de precificação TikTok Shop; cada usuário só vê as próprias (chefe pode optar por outro).
 
-    Taxas TikTok Shop Brasil (a partir de 06/02/2026):
-      - Comissão da plataforma: 6% (cap R$ 50/produto)
-      - Tarifa fixa por item: R$ 4
-      - Programa de Taxas de Envio (PTE): 6% (cap R$ 50/produto)
+    Taxas TikTok Shop Brasil (a partir de 15/07/2026):
+      - Abaixo de R$ 50: comissão 10% + tarifa fixa R$ 4/item
+      - R$ 50 ou mais: comissão 6% + tarifa fixa R$ 6/item
+      - PTE (frete grátis): 6% (cap R$ 50/produto)
       - Comissão de afiliado: definida pelo vendedor (geralmente 8–15%)
-    Os valores ficam configuráveis no front (caso o TikTok Shop atualize).
+    O front aplica faixas automáticas; campos aqui servem para override manual.
     """
 
-    nome = models.CharField(max_length=200, unique=True)
+    usuario = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="precificacoes_tiktok",
+    )
+    nome = models.CharField(max_length=200)
     mes_referencia = models.CharField(max_length=7, blank=True, default="")
     nf_percent = models.CharField(max_length=20, default="70")
     imposto_percent = models.CharField(max_length=20, default="10")
@@ -344,9 +355,10 @@ class PrecificacaoTiktok(models.Model):
         ordering = ["-atualizado_em"]
         verbose_name = "Precificação TikTok Shop"
         verbose_name_plural = "Precificações TikTok Shop"
+        unique_together = [("usuario", "nome")]
 
     def __str__(self):
-        return self.nome
+        return f"{self.nome} ({self.usuario_id})"
 
 
 # ==========================================
@@ -673,14 +685,21 @@ class LogSistema(models.Model):
 # ==========================================
 
 class PerfilUsuario(models.Model):
-    """Perfil do usuário: 1 = Chefe (acesso total), 2 = Funcionário (acesso limitado)."""
+    """Perfil: 1 = Chefe, 2 = Funcionário, 3 = Cliente (só precificação própria)."""
     ROLE_CHEFE = '1'
     ROLE_FUNCIONARIO = '2'
-    ROLE_CHOICES = [(ROLE_CHEFE, 'Chefe'), (ROLE_FUNCIONARIO, 'Funcionário')]
+    ROLE_CLIENTE = '3'
+    ROLE_CHOICES = [
+        (ROLE_CHEFE, 'Chefe'),
+        (ROLE_FUNCIONARIO, 'Funcionário'),
+        (ROLE_CLIENTE, 'Cliente'),
+    ]
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='perfil_financeiro')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default=ROLE_FUNCIONARIO)
     nome_exibicao = models.CharField(max_length=100, blank=True)
+    # Funcionário: precisa marcar para acessar precificação. Cliente: sempre True.
+    pode_precificar = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = 'Perfil usuário'
@@ -692,6 +711,16 @@ class PerfilUsuario(models.Model):
     @property
     def is_chefe(self):
         return self.role == self.ROLE_CHEFE
+
+    @property
+    def is_cliente(self):
+        return self.role == self.ROLE_CLIENTE
+
+    @property
+    def pode_acessar_precificacao(self):
+        if self.is_chefe or self.is_cliente:
+            return True
+        return bool(self.pode_precificar)
 
 
 class CategoriaProduto(models.Model):

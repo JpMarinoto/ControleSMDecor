@@ -1,5 +1,5 @@
 import React from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, Navigate, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -291,6 +291,7 @@ function DashboardChefeAtalhos() {
 
 export function Dashboard() {
   const { user } = useAuth();
+  if (user?.is_cliente) return <Navigate to="/precificacao" replace />;
   if (!user?.is_chefe) return <DashboardFuncionario />;
   return <DashboardChefe />;
 }

@@ -1,31 +1,54 @@
 /**
- * Taxas do TikTok Shop Brasil (vigentes a partir de 06/02/2026).
+ * Taxas do TikTok Shop Brasil.
+ *
+ * Vigente a partir de 15/07/2026:
+ *  - Item abaixo de R$ 50: comissão 10% + tarifa fixa R$ 4 por item
+ *  - Item de R$ 50 ou mais: comissão 6% + tarifa fixa R$ 6 por item
+ *  - PTE (Programa de Taxas de Envio): 6% (cap R$ 50/produto) — sem alteração
+ *  - Comissão de afiliado: definida pelo vendedor
  *
  * Fontes:
- *  - https://seller-br.tiktok.com/university/essay?knowledge_id=3268441302615809 (Termos de Serviço — efetivo 06/02/2026)
- *  - https://seller-br.tiktok.com/university/essay?knowledge_id=5665577566734097 (Programa de Taxas de Envio — PTE)
- *  - Central do Vendedor TikTok Shop > Finanças > Faturas
+ *  - Valor Econômico / TikTok Shop Academy (reajuste jul/2026)
+ *  - https://seller-br.tiktok.com/university/essay?knowledge_id=3268441302615809
+ *  - https://seller-br.tiktok.com/university/essay?knowledge_id=5665577566734097 (PTE)
  *
- * Estrutura de custos por pedido entregue:
- *  1) Tarifa de Comissão da Plataforma: 6% sobre o valor do pedido (incluindo impostos),
- *     limitada a R$ 50 por produto.
- *  2) Tarifa fixa por item vendido: R$ 4 por item (incluindo impostos).
- *  3) Taxa de serviço do Programa de Taxas de Envio (PTE): 6% do valor de venda do pedido,
- *     antes de subsídios, limitada a R$ 50 por produto. Aplicável apenas a participantes do PTE.
- *  4) Comissão de afiliado/criador: definida pelo vendedor (geralmente 8–15%) — só incide
- *     em pedidos vinda da campanha de afiliados.
- *
- * Diferente da Shopee, no TikTok Shop a comissão e o PTE têm teto absoluto em R$ 50, então
- * usamos uma função partida (linear até o teto, fixa depois).
+ * A base de comissão, tarifa por item e PTE é o preço do item após descontos do seller.
+ * Comissão e PTE têm teto absoluto de R$ 50 por produto.
  */
 
-export interface TiktokTaxasConfig {
-  /** % comissão da plataforma (0.06 = 6%). */
+export type FaixaTiktok = {
+  descricao: string;
+  min: number;
+  max: number;
   comissaoPercent: number;
+  tarifaItem: number;
+};
+
+/** Faixas oficiais vigentes a partir de 15/07/2026. */
+export const TIKTOK_FAIXAS_2026: FaixaTiktok[] = [
+  {
+    descricao: "Abaixo de R$ 50",
+    min: 0,
+    max: 49.99,
+    comissaoPercent: 0.1,
+    tarifaItem: 4,
+  },
+  {
+    descricao: "R$ 50 ou mais",
+    min: 50,
+    max: Infinity,
+    comissaoPercent: 0.06,
+    tarifaItem: 6,
+  },
+];
+
+export interface TiktokTaxasConfig {
+  /** Override manual — só usado com modoManual=true. */
+  comissaoPercent?: number;
   /** Teto da comissão da plataforma em R$ por produto (50). */
   comissaoCap: number;
-  /** Tarifa fixa por item vendido (R$). */
-  tarifaItem: number;
+  /** Override manual — só usado com modoManual=true. */
+  tarifaItem?: number;
   /** % de serviço do Programa de Taxas de Envio (0.06 = 6%). */
   ptePercent: number;
   /** Teto do PTE em R$ por produto (50). */
@@ -34,13 +57,13 @@ export interface TiktokTaxasConfig {
   participarPte: boolean;
   /** % paga ao afiliado/criador sobre o valor do pedido (0.10 = 10%). */
   afiliadoPercent: number;
+  /** Se true, ignora faixas oficiais e usa comissaoPercent/tarifaItem do cfg. */
+  modoManual?: boolean;
 }
 
-/** Configuração padrão com as taxas oficiais publicadas pelo TikTok Shop Brasil. */
+/** Configuração padrão (faixas automáticas + PTE). */
 export const TIKTOK_TAXAS_PADRAO: TiktokTaxasConfig = {
-  comissaoPercent: 0.06,
   comissaoCap: 50,
-  tarifaItem: 4,
   ptePercent: 0.06,
   pteCap: 50,
   participarPte: true,
@@ -53,6 +76,29 @@ export interface TiktokTaxasDetalhe {
   pte: number;
   afiliado: number;
   total: number;
+  faixa?: FaixaTiktok;
+}
+
+export function obterFaixaTiktok(precoVenda: number): FaixaTiktok | undefined {
+  return TIKTOK_FAIXAS_2026.find((f) => precoVenda >= f.min && precoVenda <= f.max);
+}
+
+function resolveComissaoETarifa(
+  precoVenda: number,
+  cfg: TiktokTaxasConfig,
+): { comissaoPercent: number; tarifaItem: number; faixa?: FaixaTiktok } {
+  if (cfg.modoManual && cfg.comissaoPercent != null && cfg.tarifaItem != null) {
+    return { comissaoPercent: cfg.comissaoPercent, tarifaItem: cfg.tarifaItem };
+  }
+  const faixa = obterFaixaTiktok(precoVenda);
+  if (!faixa) {
+    return { comissaoPercent: 0.06, tarifaItem: 4 };
+  }
+  return {
+    comissaoPercent: faixa.comissaoPercent,
+    tarifaItem: faixa.tarifaItem,
+    faixa,
+  };
 }
 
 /** Calcula todas as taxas (em R$) que o TikTok Shop cobra sobre um pedido. */
@@ -63,10 +109,10 @@ export function calcularTaxasTiktok(
   if (precoVenda <= 0) {
     return { comissao: 0, tarifaItem: 0, pte: 0, afiliado: 0, total: 0 };
   }
-  const comissao = Math.min(precoVenda * cfg.comissaoPercent, cfg.comissaoCap);
+  const { comissaoPercent, tarifaItem, faixa } = resolveComissaoETarifa(precoVenda, cfg);
+  const comissao = Math.min(precoVenda * comissaoPercent, cfg.comissaoCap);
   const pte = cfg.participarPte ? Math.min(precoVenda * cfg.ptePercent, cfg.pteCap) : 0;
   const afiliado = precoVenda * cfg.afiliadoPercent;
-  const tarifaItem = cfg.tarifaItem;
   const total = comissao + tarifaItem + pte + afiliado;
   return {
     comissao: round2(comissao),
@@ -74,6 +120,7 @@ export function calcularTaxasTiktok(
     pte: round2(pte),
     afiliado: round2(afiliado),
     total: round2(total),
+    faixa,
   };
 }
 
@@ -81,33 +128,29 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/**
- * Dado um lucro alvo em R$ e o gasto total, encontra o preço de venda bruto que produz esse
- * lucro respeitando os tetos de comissão e PTE.
- *
- * Equação abaixo do teto (vb < limiteCap):
- *   vb - vb*comPct - tarifa - (pte? vb*ptePct : 0) - vb*afilPct - gasto = lucro
- *   vb = (lucro + tarifa + gasto) / (1 - comPct - (pte? ptePct : 0) - afilPct)
- *
- * Equação acima do teto (vb >= limiteCap):
- *   vb - capCom - tarifa - (pte? capPte : 0) - vb*afilPct - gasto = lucro
- *   vb = (lucro + capCom + tarifa + (pte? capPte : 0) + gasto) / (1 - afilPct)
- *
- * O "limiteCap" considerado é o menor preço onde *qualquer* taxa percentual atinge o teto.
- */
-export function calcularVendaBrutaPorLucroTiktok(
+function cfgComFaixa(cfg: TiktokTaxasConfig, faixa: FaixaTiktok): TiktokTaxasConfig {
+  return {
+    ...cfg,
+    modoManual: true,
+    comissaoPercent: faixa.comissaoPercent,
+    tarifaItem: faixa.tarifaItem,
+  };
+}
+
+function calcularVendaBrutaPorLucroTiktokFlat(
   lucroTarget: number,
   gastoTotal: number,
   cfg: TiktokTaxasConfig,
 ): number | null {
   if (lucroTarget <= 0) return null;
-  const { comissaoPercent, comissaoCap, tarifaItem, ptePercent, pteCap, participarPte, afiliadoPercent } = cfg;
+  const comissaoPercent = cfg.comissaoPercent ?? 0;
+  const tarifaItem = cfg.tarifaItem ?? 0;
+  const { comissaoCap, ptePercent, pteCap, participarPte, afiliadoPercent } = cfg;
 
   const limCom = comissaoPercent > 0 ? comissaoCap / comissaoPercent : Infinity;
   const limPte = participarPte && ptePercent > 0 ? pteCap / ptePercent : Infinity;
   const limiteCap = Math.min(limCom, limPte);
 
-  // Tentativa 1: ambos abaixo do teto
   {
     const denom = 1 - comissaoPercent - (participarPte ? ptePercent : 0) - afiliadoPercent;
     if (denom > 0) {
@@ -115,7 +158,6 @@ export function calcularVendaBrutaPorLucroTiktok(
       if (vb < limiteCap || !isFinite(limiteCap)) return round2(vb);
     }
   }
-  // Tentativa 2: ambos no teto (caso comum quando os tetos ocorrem no mesmo ponto)
   {
     const denom = 1 - afiliadoPercent;
     if (denom > 0) {
@@ -127,24 +169,23 @@ export function calcularVendaBrutaPorLucroTiktok(
   return null;
 }
 
-/**
- * Dado um % de lucro alvo (lucro/vlrBruto) e o gasto total, encontra o preço de venda bruto
- * respeitando os tetos.
- */
-export function calcularVendaBrutaPorLucroPercentTiktok(
+function calcularVendaBrutaPorLucroPercentTiktokFlat(
   lucroPctTarget: number,
   gastoTotal: number,
   cfg: TiktokTaxasConfig,
 ): number | null {
   if (lucroPctTarget <= 0) return null;
-  const { comissaoPercent, comissaoCap, tarifaItem, ptePercent, pteCap, participarPte, afiliadoPercent } = cfg;
+  const comissaoPercent = cfg.comissaoPercent ?? 0;
+  const tarifaItem = cfg.tarifaItem ?? 0;
+  const { comissaoCap, ptePercent, pteCap, participarPte, afiliadoPercent } = cfg;
 
   const limCom = comissaoPercent > 0 ? comissaoCap / comissaoPercent : Infinity;
   const limPte = participarPte && ptePercent > 0 ? pteCap / ptePercent : Infinity;
   const limiteCap = Math.min(limCom, limPte);
 
   {
-    const denom = 1 - comissaoPercent - (participarPte ? ptePercent : 0) - afiliadoPercent - lucroPctTarget;
+    const denom =
+      1 - comissaoPercent - (participarPte ? ptePercent : 0) - afiliadoPercent - lucroPctTarget;
     if (denom > 0) {
       const vb = (tarifaItem + gastoTotal) / denom;
       if (vb < limiteCap || !isFinite(limiteCap)) return round2(vb);
@@ -157,6 +198,46 @@ export function calcularVendaBrutaPorLucroPercentTiktok(
       const vb = (fixo + gastoTotal) / denom;
       if (vb >= limiteCap) return round2(vb);
     }
+  }
+  return null;
+}
+
+/** Dado lucro alvo (R$), encontra venda bruta respeitando faixas e tetos. */
+export function calcularVendaBrutaPorLucroTiktok(
+  lucroTarget: number,
+  gastoTotal: number,
+  cfg: TiktokTaxasConfig,
+): number | null {
+  if (cfg.modoManual) {
+    return calcularVendaBrutaPorLucroTiktokFlat(lucroTarget, gastoTotal, cfg);
+  }
+  for (const faixa of TIKTOK_FAIXAS_2026) {
+    const vb = calcularVendaBrutaPorLucroTiktokFlat(
+      lucroTarget,
+      gastoTotal,
+      cfgComFaixa(cfg, faixa),
+    );
+    if (vb != null && vb >= faixa.min && vb <= faixa.max) return vb;
+  }
+  return null;
+}
+
+/** Dado lucro % alvo (sobre venda bruta), encontra venda bruta respeitando faixas e tetos. */
+export function calcularVendaBrutaPorLucroPercentTiktok(
+  lucroPctTarget: number,
+  gastoTotal: number,
+  cfg: TiktokTaxasConfig,
+): number | null {
+  if (cfg.modoManual) {
+    return calcularVendaBrutaPorLucroPercentTiktokFlat(lucroPctTarget, gastoTotal, cfg);
+  }
+  for (const faixa of TIKTOK_FAIXAS_2026) {
+    const vb = calcularVendaBrutaPorLucroPercentTiktokFlat(
+      lucroPctTarget,
+      gastoTotal,
+      cfgComFaixa(cfg, faixa),
+    );
+    if (vb != null && vb >= faixa.min && vb <= faixa.max) return vb;
   }
   return null;
 }

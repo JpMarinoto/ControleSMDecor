@@ -30,16 +30,24 @@ chmod +x scripts/setup_homolog_shopee.sh
 ./scripts/setup_homolog_shopee.sh
 ```
 
-### 2. Nginx — incluir trecho de `deploy/nginx/homolog-location.conf`
+### 2. Nginx — instalar bloco `/homolog/` (obrigatório)
 
-Edite o conf do site (ex.: `/etc/nginx/conf.d/...` ou `sites-available/...`)
-**dentro** do `server { ... }` de `santosmarinoto.com`, **antes** do `location /`:
+Sem este passo, `https://santosmarinoto.com/homolog/` cai no app de **produção**
+e o React redireciona para `/login` (parece “proteção de sessão”, mas não é).
 
 ```bash
-sudo nano /etc/nginx/conf.d/SEU_ARQUIVO.conf
-# cole o conteúdo de deploy/nginx/homolog-location.conf
-sudo nginx -t
-sudo systemctl reload nginx
+chmod +x scripts/install_homolog_nginx.sh
+./scripts/install_homolog_nginx.sh
+```
+
+O script acha o conf do domínio, insere o `include` do snippet
+`deploy/nginx/homolog-location.conf` **antes** de `location /`, testa e dá reload.
+
+Conferência:
+```bash
+curl -s https://santosmarinoto.com/homolog/ | head -n 15
+# deve ter: src="/homolog/assets/...
+# NÃO pode ter: src="/assets/...
 ```
 
 ### 3. Console Shopee — preencher

@@ -23,10 +23,15 @@ def _user_payload(user):
     """Retorna dict com dados do usuário e perfil para o frontend. Staff/superuser sem perfil ganham perfil Chefe."""
     if not user or not user.is_authenticated:
         return None
+    pode_precificar = False
     try:
         perfil = user.perfil_financeiro
         role = str(perfil.role) if perfil.role else PerfilUsuario.ROLE_FUNCIONARIO
         nome = (perfil.nome_exibicao or user.get_full_name() or user.username) or ""
+        pode_precificar = bool(perfil.pode_precificar)
+        if role == PerfilUsuario.ROLE_CLIENTE:
+            pode_precificar = True
+        pode_acessar = bool(perfil.pode_acessar_precificacao)
     except PerfilUsuario.DoesNotExist:
         if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
             nome_exib = (user.get_full_name() or user.username) or ""
@@ -34,19 +39,81 @@ def _user_payload(user):
                 user=user,
                 role=PerfilUsuario.ROLE_CHEFE,
                 nome_exibicao=nome_exib[:100],
+                pode_precificar=False,
             )
             role = str(perfil.role)
             nome = (perfil.nome_exibicao or user.username) or ""
+            pode_acessar = True
         else:
             role = PerfilUsuario.ROLE_FUNCIONARIO
             nome = (user.get_full_name() or user.username) or ""
+            pode_acessar = False
+    is_chefe = role == PerfilUsuario.ROLE_CHEFE
+    is_cliente = role == PerfilUsuario.ROLE_CLIENTE
+    if is_chefe:
+        pode_acessar = True
+        pode_precificar = False
     return {
         "id": int(user.id),
         "username": str(user.username),
         "nome": str(nome),
         "role": str(role),
-        "is_chefe": role == PerfilUsuario.ROLE_CHEFE,
+        "is_chefe": is_chefe,
+        "is_cliente": is_cliente,
+        "pode_precificar": bool(pode_precificar),
+        "pode_acessar_precificacao": bool(pode_acessar),
     }
+
+
+def _normalize_role_e_flag(role, pode_precificar):
+    """Normaliza role e flag de precificação para create/update."""
+    roles_ok = (
+        PerfilUsuario.ROLE_CHEFE,
+        PerfilUsuario.ROLE_FUNCIONARIO,
+        PerfilUsuario.ROLE_CLIENTE,
+    )
+    if role not in roles_ok:
+        role = PerfilUsuario.ROLE_FUNCIONARIO
+    flag = bool(pode_precificar)
+    if role == PerfilUsuario.ROLE_CLIENTE:
+        flag = True
+    elif role == PerfilUsuario.ROLE_CHEFE:
+        flag = False
+    return role, flag
+
+
+def _is_chefe(request):
+    if not request.user.is_authenticated:
+        return False
+    if getattr(request.user, "is_staff", False) or getattr(request.user, "is_superuser", False):
+        return True
+    try:
+        return request.user.perfil_financeiro.is_chefe
+    except PerfilUsuario.DoesNotExist:
+        return False
+
+
+def _pode_acessar_precificacao(request):
+    if not request.user.is_authenticated:
+        return False
+    if _is_chefe(request):
+        return True
+    try:
+        return request.user.perfil_financeiro.pode_acessar_precificacao
+    except PerfilUsuario.DoesNotExist:
+        return False
+
+
+def _usuario_pode_precificar_obj(user):
+    """True se o User alvo tem acesso a precificação (para select do chefe)."""
+    if not user or not user.is_active:
+        return False
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return True
+    try:
+        return user.perfil_financeiro.pode_acessar_precificacao
+    except PerfilUsuario.DoesNotExist:
+        return False
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -200,7 +267,6 @@ class AuthMe(APIView):
         # Trocar senha: exige senha_atual e nova senha
         nova_senha = data.get("nova_senha") or data.get("password")
         if nova_senha:
-            from django.contrib.auth import authenticate
             senha_atual = data.get("senha_atual") or data.get("current_password")
             if not senha_atual:
                 return Response(
@@ -240,18 +306,6 @@ class AuthMe(APIView):
             return Response(_user_payload(user))
 
 
-def _is_chefe(request):
-    if not request.user.is_authenticated:
-        return False
-    # Django staff/superuser sempre podem actuar como chefe (ex.: usuário criado antes do PerfilUsuario)
-    if getattr(request.user, "is_staff", False) or getattr(request.user, "is_superuser", False):
-        return True
-    try:
-        return request.user.perfil_financeiro.is_chefe
-    except PerfilUsuario.DoesNotExist:
-        return False
-
-
 @method_decorator(csrf_exempt, name="dispatch")
 class UsuarioListCreate(APIView):
     """Lista usuários com perfil (chefe) ou cria novo usuário (chefe)."""
@@ -273,22 +327,19 @@ class UsuarioListCreate(APIView):
         users = User.objects.filter(is_active=True).order_by("username")
         out = []
         for u in users:
-            try:
-                p = u.perfil_financeiro
-                out.append({
-                    "id": u.id,
-                    "username": u.username,
-                    "nome": p.nome_exibicao or u.get_full_name() or u.username,
-                    "role": p.role,
-                    "is_chefe": p.is_chefe,
-                })
-            except PerfilUsuario.DoesNotExist:
+            payload = _user_payload(u)
+            if payload:
+                out.append(payload)
+            else:
                 out.append({
                     "id": u.id,
                     "username": u.username,
                     "nome": u.get_full_name() or u.username,
                     "role": PerfilUsuario.ROLE_FUNCIONARIO,
                     "is_chefe": False,
+                    "is_cliente": False,
+                    "pode_precificar": False,
+                    "pode_acessar_precificacao": False,
                 })
         return Response(out)
 
@@ -328,9 +379,11 @@ class UsuarioListCreate(APIView):
         username = (request.data.get("username") or "").strip()
         password = request.data.get("password") or ""
         nome_exibicao = (request.data.get("nome_exibicao") or "").strip()
-        role = request.data.get("role") or PerfilUsuario.ROLE_FUNCIONARIO
-        if role not in (PerfilUsuario.ROLE_CHEFE, PerfilUsuario.ROLE_FUNCIONARIO):
-            role = PerfilUsuario.ROLE_FUNCIONARIO
+        role_raw = request.data.get("role") or PerfilUsuario.ROLE_FUNCIONARIO
+        pode_flag = request.data.get("pode_precificar")
+        if pode_flag is None:
+            pode_flag = request.data.get("podePrecificar", False)
+        role, pode_precificar = _normalize_role_e_flag(role_raw, pode_flag)
         if not username:
             _log("create_user_400", {"reason": "username_empty"})
             return Response(
@@ -355,6 +408,7 @@ class UsuarioListCreate(APIView):
                 user=user,
                 role=role,
                 nome_exibicao=nome_exibicao or username,
+                pode_precificar=pode_precificar,
             )
             LogSistema.objects.create(
                 usuario=request.user,
@@ -379,7 +433,7 @@ class UsuarioListCreate(APIView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class UsuarioDetail(APIView):
-    """GET/PUT/DELETE um usuário (apenas chefe). PUT: role, nome_exibicao, password (opcional)."""
+    """GET/PUT/DELETE um usuário (apenas chefe). PUT: role, nome_exibicao, password, pode_precificar."""
     def get_object(self, pk):
         return User.objects.get(pk=pk)
 
@@ -421,8 +475,25 @@ class UsuarioDetail(APIView):
         )
         if request.data.get("nome_exibicao") is not None:
             perfil.nome_exibicao = (request.data.get("nome_exibicao") or "").strip() or user.username
-        if request.data.get("role") in (PerfilUsuario.ROLE_CHEFE, PerfilUsuario.ROLE_FUNCIONARIO):
-            perfil.role = request.data["role"]
+        role_in = request.data.get("role")
+        roles_ok = (
+            PerfilUsuario.ROLE_CHEFE,
+            PerfilUsuario.ROLE_FUNCIONARIO,
+            PerfilUsuario.ROLE_CLIENTE,
+        )
+        if role_in in roles_ok:
+            pode_flag = request.data.get("pode_precificar")
+            if pode_flag is None:
+                pode_flag = request.data.get("podePrecificar", perfil.pode_precificar)
+            role, flag = _normalize_role_e_flag(role_in, pode_flag)
+            perfil.role = role
+            perfil.pode_precificar = flag
+        elif "pode_precificar" in request.data or "podePrecificar" in request.data:
+            pode_flag = request.data.get("pode_precificar")
+            if pode_flag is None:
+                pode_flag = request.data.get("podePrecificar", False)
+            _, flag = _normalize_role_e_flag(perfil.role, pode_flag)
+            perfil.pode_precificar = flag
         perfil.save()
         password = request.data.get("password")
         if password and len(password) >= 6:

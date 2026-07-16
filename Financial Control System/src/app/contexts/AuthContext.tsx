@@ -8,6 +8,9 @@ export interface User {
   nome: string;
   role: string;
   is_chefe: boolean;
+  is_cliente?: boolean;
+  pode_precificar?: boolean;
+  pode_acessar_precificacao?: boolean;
 }
 
 interface AuthContextType {
@@ -66,7 +69,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const data = await api.authLogin(username, password);
     const userPayload =
       data && typeof data === "object" && "id" in data
-        ? { id: data.id, username: data.username, nome: data.nome, role: data.role, is_chefe: data.is_chefe }
+        ? {
+            id: data.id as number,
+            username: String(data.username ?? ""),
+            nome: String(data.nome ?? ""),
+            role: String(data.role ?? "2"),
+            is_chefe: Boolean(data.is_chefe),
+            is_cliente: Boolean(data.is_cliente),
+            pode_precificar: Boolean(data.pode_precificar),
+            pode_acessar_precificacao: Boolean(
+              data.pode_acessar_precificacao ?? data.is_chefe ?? data.is_cliente,
+            ),
+          }
         : data;
     setUser(userPayload as User | null);
   }, []);

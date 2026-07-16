@@ -25,14 +25,22 @@ import {
 } from "../data/shopeeComissao";
 import {
   TIKTOK_TAXAS_PADRAO,
+  TIKTOK_FAIXAS_2026,
   type TiktokTaxasConfig,
   calcularTaxasTiktok,
   calcularVendaBrutaPorLucroTiktok,
   calcularVendaBrutaPorLucroPercentTiktok,
 } from "../data/tiktokTaxas";
-import { Tag, Plus, Trash2, ExternalLink, Copy, Pencil, ChevronDown, ChevronRight, Music2 } from "lucide-react";
+import { Tag, Plus, Trash2, ExternalLink, Copy, Pencil, ChevronDown, ChevronRight, ChevronUp, Music2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type PrecificacaoShopeeApiRow, type PrecificacaoTiktokApiRow } from "../lib/api";
+import { api, type PrecificacaoShopeeApiRow, type PrecificacaoTiktokApiRow, type PrecificacaoUsuarioOption } from "../lib/api";
+import { useAuth } from "../contexts/AuthContext";
+
+/** Dono efetivo das planilhas (null = usuário logado). Chefe pode optar por outro. */
+const PrecOwnerCtx = React.createContext<number | null>(null);
+function usePrecOwnerId(): number | null {
+  return React.useContext(PrecOwnerCtx);
+}
 
 /** Campos editáveis por linha (igual à planilha Shopee). */
 interface LinhaPrecificacao {
@@ -196,7 +204,7 @@ function CabecalhoTabelaPrecificacaoShopee({ repeticao = false }: { repeticao?: 
           "bg-neutral-200/90 shadow-[inset_0_1px_0_0_rgba(0,0,0,0.08)] dark:bg-muted/80 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
       )}
     >
-      <TableHead className={`w-[84px] min-w-[84px] max-w-[84px] bg-muted text-center ${thPreco}`}>Ações</TableHead>
+      <TableHead className={`w-[100px] min-w-[100px] max-w-[100px] bg-muted text-center ${thPreco}`}>Ações</TableHead>
       <TableHead className={`w-[176px] min-w-[148px] max-w-[176px] bg-muted text-left ${thPreco}`}>
         Descrição
       </TableHead>
@@ -260,12 +268,20 @@ function CelulaAcoesPrecificacao({
   tintClass,
   onCopiar,
   onRemover,
+  onMoverCima,
+  onMoverBaixo,
+  podeMoverCima,
+  podeMoverBaixo,
   onDefinirCor,
 }: {
   linha: LinhaPrecificacao;
   tintClass: string;
   onCopiar: () => void;
   onRemover: () => void;
+  onMoverCima: () => void;
+  onMoverBaixo: () => void;
+  podeMoverCima: boolean;
+  podeMoverBaixo: boolean;
   onDefinirCor: (cor: string) => void;
 }) {
   const [corAberto, setCorAberto] = useState(false);
@@ -276,12 +292,34 @@ function CelulaAcoesPrecificacao({
   return (
     <TableCell
       className={cn(
-        `w-[84px] min-w-[84px] max-w-[84px] ${XL.branco} ${XL.cellBorder} align-middle p-px`,
+        `w-[100px] min-w-[100px] max-w-[100px] ${XL.branco} ${XL.cellBorder} align-middle p-px`,
         tintClass,
       )}
     >
       <div className="mx-auto flex w-full flex-col items-stretch gap-px px-px py-0">
         <div className="flex shrink-0 flex-row items-center justify-center gap-px">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground disabled:opacity-30"
+            onClick={onMoverCima}
+            disabled={!podeMoverCima}
+            title="Mover para cima"
+          >
+            <ChevronUp className="size-2.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground disabled:opacity-30"
+            onClick={onMoverBaixo}
+            disabled={!podeMoverBaixo}
+            title="Mover para baixo"
+          >
+            <ChevronDown className="size-2.5" />
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -344,6 +382,9 @@ function CelulaAcoesPrecificacao({
 }
 
 export function Precificacao() {
+  const { user } = useAuth();
+  const [ownerUsuarioId, setOwnerUsuarioId] = useState<number | null>(null);
+  const [usuariosPrec, setUsuariosPrec] = useState<PrecificacaoUsuarioOption[]>([]);
   const [linhas, setLinhas] = useState<LinhaPrecificacao[]>([{ ...emptyLinha(), id: "1" }]);
   const [mesReferencia, setMesReferencia] = useState<string>(() => {
     const now = new Date();
@@ -395,6 +436,19 @@ export function Precificacao() {
     ]);
   };
 
+  const moverLinha = (id: string, direcao: -1 | 1) => {
+    setLinhas((prev) => {
+      const idx = prev.findIndex((l) => l.id === id);
+      if (idx < 0) return prev;
+      const novo = idx + direcao;
+      if (novo < 0 || novo >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.splice(novo, 0, item);
+      return next;
+    });
+  };
+
   const getComissao = (vlrBruto: number) => calcularComissaoShopee(vlrBruto);
 
   // Dado um lucro alvo em R$ e o gasto total, encontra o Vlr venda bruto
@@ -435,14 +489,34 @@ export function Precificacao() {
   };
 
   React.useEffect(() => {
+    if (!user?.is_chefe) {
+      setUsuariosPrec([]);
+      setOwnerUsuarioId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.getPrecificacaoUsuarios();
+        if (!cancelled) setUsuariosPrec(list);
+      } catch {
+        if (!cancelled) setUsuariosPrec([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.is_chefe]);
+
+  React.useEffect(() => {
     if (typeof window === "undefined") return;
     let cancelled = false;
     (async () => {
       setPrecificacoesCarregando(true);
       try {
-        let list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+        let list = (await api.getPrecificacoesShopee(ownerUsuarioId)).map(mapFromApi);
         if (cancelled) return;
-        if (list.length === 0) {
+        if (list.length === 0 && ownerUsuarioId == null) {
           const ls = window.localStorage.getItem("precificacoes_shopee");
           if (ls) {
             try {
@@ -458,13 +532,18 @@ export function Precificacao() {
                 });
               }
               window.localStorage.removeItem("precificacoes_shopee");
-              list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+              list = (await api.getPrecificacoesShopee(ownerUsuarioId)).map(mapFromApi);
             } catch {
               /* mantém lista vazia se import falhar */
             }
           }
         }
-        if (!cancelled) setPrecificacoesSalvas(list);
+        if (!cancelled) {
+          setPrecificacoesSalvas(list);
+          setIdSelecionado("");
+          setNomePrecificacao("");
+          setLinhas([{ ...emptyLinha(), id: "1" }]);
+        }
       } catch (e) {
         if (!cancelled) {
           toast.error(e instanceof Error ? e.message : "Erro ao carregar precificações.");
@@ -477,7 +556,7 @@ export function Precificacao() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ownerUsuarioId]);
 
   const salvarPrecificacao = async () => {
     if (!nomePrecificacao.trim()) {
@@ -492,8 +571,9 @@ export function Precificacao() {
         nfPercent: nfPercentGlobal,
         impostoPercent: impostoPercentGlobal,
         linhas,
+        ...(ownerUsuarioId != null ? { usuario_id: ownerUsuarioId } : {}),
       });
-      const list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+      const list = (await api.getPrecificacoesShopee(ownerUsuarioId)).map(mapFromApi);
       setPrecificacoesSalvas(list);
       toast.success("Precificação salva no banco de dados.");
     } catch (e) {
@@ -517,6 +597,7 @@ export function Precificacao() {
 
   const [excluindoPrecificacao, setExcluindoPrecificacao] = useState(false);
   const [confirmExcluirOpen, setConfirmExcluirOpen] = useState(false);
+  const [mostrarVerComo, setMostrarVerComo] = useState(false);
   const precificacaoSelecionadaAlvo = precificacoesSalvas.find((x) => x.id === idSelecionado) || null;
 
   const solicitarExcluirPrecificacao = () => {
@@ -533,8 +614,8 @@ export function Precificacao() {
     setConfirmExcluirOpen(false);
     setExcluindoPrecificacao(true);
     try {
-      await api.deletePrecificacaoShopee(idSelecionado);
-      const list = (await api.getPrecificacoesShopee()).map(mapFromApi);
+      await api.deletePrecificacaoShopee(idSelecionado, ownerUsuarioId);
+      const list = (await api.getPrecificacoesShopee(ownerUsuarioId)).map(mapFromApi);
       setPrecificacoesSalvas(list);
       setIdSelecionado("");
       setNomePrecificacao("");
@@ -549,6 +630,7 @@ export function Precificacao() {
   };
 
   return (
+    <PrecOwnerCtx.Provider value={ownerUsuarioId}>
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -561,7 +643,8 @@ export function Precificacao() {
             antes de anunciar — sem confundir margem com lucro líquido.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="flex items-center gap-2">
           <Label htmlFor="mes" className="text-xs text-muted-foreground">
             Mês de referência
           </Label>
@@ -587,6 +670,55 @@ export function Precificacao() {
               })}
             </SelectContent>
           </Select>
+          </div>
+          {user?.is_chefe && (
+            <div className="flex flex-col items-end gap-1">
+              {!mostrarVerComo && ownerUsuarioId == null ? (
+                <button
+                  type="button"
+                  className="text-[10px] text-muted-foreground/60 underline-offset-2 hover:text-muted-foreground hover:underline"
+                  onClick={() => setMostrarVerComo(true)}
+                >
+                  …
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <Select
+                    value={ownerUsuarioId == null ? "eu" : String(ownerUsuarioId)}
+                    onValueChange={(v) => {
+                      const id = v === "eu" ? null : Number(v);
+                      setOwnerUsuarioId(id);
+                      if (id == null) setMostrarVerComo(false);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-40 border-dashed text-[11px] text-muted-foreground">
+                      <SelectValue placeholder="Eu" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="eu">Eu</SelectItem>
+                      {usuariosPrec
+                        .filter((u) => u.id !== user?.id)
+                        .map((u) => (
+                          <SelectItem key={u.id} value={String(u.id)}>
+                            {u.nome || u.username}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {ownerUsuarioId == null && (
+                    <button
+                      type="button"
+                      className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground"
+                      onClick={() => setMostrarVerComo(false)}
+                      title="Ocultar"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -822,6 +954,10 @@ export function Precificacao() {
                             tintClass={tintClass}
                             onCopiar={() => copiarLinha(linha)}
                             onRemover={() => removeLinha(linha.id)}
+                            onMoverCima={() => moverLinha(linha.id, -1)}
+                            onMoverBaixo={() => moverLinha(linha.id, 1)}
+                            podeMoverCima={indexLinha > 0}
+                            podeMoverBaixo={indexLinha < linhas.length - 1}
                             onDefinirCor={(v) => {
                               updateLinha(linha.id, "corLinha", v);
                               setLinhaIdsSubcabecalhoAposCor((prev) => {
@@ -1151,14 +1287,15 @@ export function Precificacao() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </PrecOwnerCtx.Provider>
   );
 }
 
 /* ============================================================================
- * Aba TikTok Shop — taxas oficiais TikTok Shop Brasil (a partir de 06/02/2026):
- *   • Comissão da plataforma: 6% (cap R$ 50/produto)
- *   • Tarifa fixa por item: R$ 4
- *   • Programa de Taxas de Envio (PTE): 6% (cap R$ 50/produto)
+ * Aba TikTok Shop — taxas oficiais TikTok Shop Brasil (a partir de 15/07/2026):
+ *   • Abaixo de R$ 50: comissão 10% + tarifa fixa R$ 4/item
+ *   • R$ 50 ou mais: comissão 6% + tarifa fixa R$ 6/item
+ *   • PTE (envio): 6% (cap R$ 50/produto)
  *   • Comissão de afiliado: definida pelo vendedor (geralmente 8–15%)
  * ========================================================================== */
 
@@ -1226,7 +1363,7 @@ function CabecalhoTabelaPrecificacaoTiktok({ repeticao = false }: { repeticao?: 
           "bg-neutral-200/90 shadow-[inset_0_1px_0_0_rgba(0,0,0,0.08)] dark:bg-muted/80 dark:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.06)]",
       )}
     >
-      <TableHead className={`w-[84px] min-w-[84px] max-w-[84px] bg-muted text-center ${thPreco}`}>Ações</TableHead>
+      <TableHead className={`w-[100px] min-w-[100px] max-w-[100px] bg-muted text-center ${thPreco}`}>Ações</TableHead>
       <TableHead className={`w-[176px] min-w-[148px] max-w-[176px] bg-muted text-left ${thPreco}`}>
         Descrição
       </TableHead>
@@ -1294,6 +1431,7 @@ function CabecalhoTabelaPrecificacaoTiktok({ repeticao = false }: { repeticao?: 
 }
 
 function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
+  const ownerUsuarioId = usePrecOwnerId();
   const [linhas, setLinhas] = useState<LinhaTiktok[]>([{ ...emptyLinhaTiktok(), id: "1" }]);
   const [mesReferencia, setMesReferencia] = useState<string>(mesGlobal);
   // Sempre que o mês "global" da página mudar, sincroniza (a menos que o usuário já tenha carregado uma salva).
@@ -1304,12 +1442,13 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
   const [nfPercentGlobal, setNfPercentGlobal] = useState<string>("70");
   const [impostoPercentGlobal, setImpostoPercentGlobal] = useState<string>("10");
   // Configuração de taxas TikTok (default = oficiais do TikTok Shop Brasil 2026).
-  const [comissaoPercent, setComissaoPercent] = useState<string>(String(TIKTOK_TAXAS_PADRAO.comissaoPercent * 100));
+  const [comissaoPercent, setComissaoPercent] = useState<string>("6");
   const [comissaoCap, setComissaoCap] = useState<string>(String(TIKTOK_TAXAS_PADRAO.comissaoCap));
-  const [tarifaItem, setTarifaItem] = useState<string>(String(TIKTOK_TAXAS_PADRAO.tarifaItem));
+  const [tarifaItem, setTarifaItem] = useState<string>("4");
   const [ptePercent, setPtePercent] = useState<string>(String(TIKTOK_TAXAS_PADRAO.ptePercent * 100));
   const [pteCap, setPteCap] = useState<string>(String(TIKTOK_TAXAS_PADRAO.pteCap));
   const [participarPte, setParticiparPte] = useState<boolean>(TIKTOK_TAXAS_PADRAO.participarPte);
+  const [usarTaxasManuais, setUsarTaxasManuais] = useState<boolean>(false);
   // % afiliado padrão (cada linha pode sobrescrever).
   const [afiliadoPercentGlobal, setAfiliadoPercentGlobal] = useState<string>("0");
 
@@ -1348,14 +1487,32 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
     setLinhas((prev) => [...prev, { ...linha, id: String(Date.now()) }]);
   };
 
+  const moverLinha = (id: string, direcao: -1 | 1) => {
+    setLinhas((prev) => {
+      const idx = prev.findIndex((l) => l.id === id);
+      if (idx < 0) return prev;
+      const novo = idx + direcao;
+      if (novo < 0 || novo >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(idx, 1);
+      next.splice(novo, 0, item);
+      return next;
+    });
+  };
+
   React.useEffect(() => {
     if (typeof window === "undefined") return;
     let cancelled = false;
     (async () => {
       setPrecificacoesCarregando(true);
       try {
-        const list = (await api.getPrecificacoesTiktok()).map(mapTiktokFromApi);
-        if (!cancelled) setPrecificacoesSalvas(list);
+        const list = (await api.getPrecificacoesTiktok(ownerUsuarioId)).map(mapTiktokFromApi);
+        if (!cancelled) {
+          setPrecificacoesSalvas(list);
+          setIdSelecionado("");
+          setNomePrecificacao("");
+          setLinhas([{ ...emptyLinhaTiktok(), id: "1" }]);
+        }
       } catch (e) {
         if (!cancelled) {
           toast.error(e instanceof Error ? e.message : "Erro ao carregar precificações TikTok.");
@@ -1368,7 +1525,7 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ownerUsuarioId]);
 
   const salvarPrecificacao = async () => {
     if (!nomePrecificacao.trim()) {
@@ -1390,8 +1547,9 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
         pteCap,
         participarPte,
         linhas,
+        ...(ownerUsuarioId != null ? { usuario_id: ownerUsuarioId } : {}),
       });
-      const list = (await api.getPrecificacoesTiktok()).map(mapTiktokFromApi);
+      const list = (await api.getPrecificacoesTiktok(ownerUsuarioId)).map(mapTiktokFromApi);
       setPrecificacoesSalvas(list);
       toast.success("Precificação TikTok salva no banco de dados.");
     } catch (e) {
@@ -1438,8 +1596,8 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
     setConfirmExcluirOpen(false);
     setExcluindoPrecificacao(true);
     try {
-      await api.deletePrecificacaoTiktok(idSelecionado);
-      const list = (await api.getPrecificacoesTiktok()).map(mapTiktokFromApi);
+      await api.deletePrecificacaoTiktok(idSelecionado, ownerUsuarioId);
+      const list = (await api.getPrecificacoesTiktok(ownerUsuarioId)).map(mapTiktokFromApi);
       setPrecificacoesSalvas(list);
       setIdSelecionado("");
       setNomePrecificacao("");
@@ -1466,6 +1624,7 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
       pteCap: parseNum(pteCap),
       participarPte,
       afiliadoPercent: afilLinhaPct,
+      modoManual: usarTaxasManuais,
     };
   };
 
@@ -1509,16 +1668,17 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow>
-                  <TableCell className="text-xs">Comissão da plataforma</TableCell>
-                  <TableCell className="text-right text-xs">6% sobre o pedido</TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground">R$ 50 / produto</TableCell>
-                </TableRow>
-                <TableRow>
-                  <TableCell className="text-xs">Tarifa por item vendido</TableCell>
-                  <TableCell className="text-right text-xs">R$ 4 fixo</TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground">—</TableCell>
-                </TableRow>
+                {TIKTOK_FAIXAS_2026.map((f) => (
+                  <TableRow key={f.descricao}>
+                    <TableCell className="text-xs">{f.descricao}</TableCell>
+                    <TableCell className="text-right text-xs">
+                      {(f.comissaoPercent * 100).toFixed(0)}% + R$ {f.tarifaItem.toFixed(2)} / item
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">
+                      Cap comissão R$ 50
+                    </TableCell>
+                  </TableRow>
+                ))}
                 <TableRow>
                   <TableCell className="text-xs">Programa de Taxas de Envio (PTE)</TableCell>
                   <TableCell className="text-right text-xs">6% sobre o pedido</TableCell>
@@ -1532,8 +1692,8 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
               </TableBody>
             </Table>
             <p className="mt-2 text-[10px] text-muted-foreground">
-              Fonte: Central do Vendedor TikTok Shop &gt; Finanças &gt; Faturas. Taxas vigentes a partir de
-              06/02/2026; valores ficam editáveis abaixo caso a plataforma atualize.
+              Vigente a partir de 15/07/2026. Ex.: produto de R$ 40 paga 10% + R$ 4; produto de R$ 50+
+              paga 6% + R$ 6. PTE e afiliado são configuráveis abaixo.
             </p>
           </CardContent>
         )}
@@ -1680,6 +1840,18 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
           )}
           {mostrarConfigTaxas && (
             <div className="mb-2 grid gap-2 rounded-sm border bg-muted/40 px-2 py-2 text-[11px] sm:text-xs sm:grid-cols-[repeat(3,minmax(0,1fr))]">
+              <div className="col-span-full flex items-center gap-1.5">
+                <input
+                  id="tk-taxasManuais"
+                  type="checkbox"
+                  className="size-3.5 cursor-pointer accent-[var(--primary)]"
+                  checked={usarTaxasManuais}
+                  onChange={(e) => setUsarTaxasManuais(e.target.checked)}
+                />
+                <Label htmlFor="tk-taxasManuais" className="text-[11px] cursor-pointer select-none">
+                  Usar comissão/tarifa manual (ignora faixas oficiais de 15/07/2026)
+                </Label>
+              </div>
               <div className="flex items-center gap-1.5">
                 <Label htmlFor="tk-comPercent" className="text-[11px]">
                   % Comissão plataforma
@@ -1690,6 +1862,7 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                   inputMode="decimal"
                   value={comissaoPercent}
                   onChange={(e) => setComissaoPercent(e.target.value)}
+                  disabled={!usarTaxasManuais}
                 />
               </div>
               <div className="flex items-center gap-1.5">
@@ -1714,6 +1887,7 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                   inputMode="decimal"
                   value={tarifaItem}
                   onChange={(e) => setTarifaItem(e.target.value)}
+                  disabled={!usarTaxasManuais}
                 />
               </div>
               <div className="flex items-center gap-1.5">
@@ -1753,8 +1927,8 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                 </Label>
               </div>
               <p className="col-span-full text-[10px] text-muted-foreground">
-                Padrão TikTok Shop Brasil 2026: comissão 6% (cap R$ 50/produto), tarifa fixa R$ 4 por item,
-                PTE 6% (cap R$ 50/produto). Vendedores fora do PTE não pagam a taxa de envio.
+                Padrão automático (15/07/2026): abaixo de R$ 50 → 10% + R$ 4/item; R$ 50 ou mais → 6% +
+                R$ 6/item. PTE 6% (cap R$ 50). Marque &quot;manual&quot; só se quiser simular outra regra.
               </p>
             </div>
           )}
@@ -1812,6 +1986,10 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                           tintClass={tintClass}
                           onCopiar={() => copiarLinha(linha)}
                           onRemover={() => removeLinha(linha.id)}
+                          onMoverCima={() => moverLinha(linha.id, -1)}
+                          onMoverBaixo={() => moverLinha(linha.id, 1)}
+                          podeMoverCima={indexLinha > 0}
+                          podeMoverBaixo={indexLinha < linhas.length - 1}
                           onDefinirCor={(v) => {
                             updateLinha(linha.id, "corLinha", v);
                             setLinhaIdsSubcabecalhoAposCor((prev) => {
@@ -1995,13 +2173,16 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                           title={
                             taxas
                               ? [
+                                  taxas.faixa ? `Faixa: ${taxas.faixa.descricao}` : null,
                                   `Comissão plataforma: ${formatCurrency(taxas.comissao)}`,
                                   `Tarifa por item: ${formatCurrency(taxas.tarifaItem)}`,
                                   `PTE (envio): ${formatCurrency(taxas.pte)}`,
                                   `Afiliado (${afilEfetivoPct.toFixed(2).replace(".", ",")}%): ${formatCurrency(
                                     taxas.afiliado,
                                   )}`,
-                                ].join("\n")
+                                ]
+                                  .filter(Boolean)
+                                  .join("\n")
                               : "Informe o valor de venda bruto para calcular as taxas."
                           }
                         >
@@ -2029,8 +2210,21 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
                                     </DialogTitle>
                                   </DialogHeader>
                                   <div className="mt-2 space-y-1.5 text-sm">
+                                    {taxas.faixa && (
+                                      <p className="text-xs text-muted-foreground">
+                                        Faixa aplicada: {taxas.faixa.descricao}
+                                      </p>
+                                    )}
                                     <div className="flex justify-between">
-                                      <span>Comissão plataforma ({(cfg.comissaoPercent * 100).toFixed(2).replace(".", ",")}%)</span>
+                                      <span>
+                                        Comissão plataforma (
+                                        {(
+                                          (taxas.faixa?.comissaoPercent ?? cfg.comissaoPercent ?? 0) * 100
+                                        )
+                                          .toFixed(2)
+                                          .replace(".", ",")}
+                                        %)
+                                      </span>
                                       <span className="font-medium">{formatCurrency(taxas.comissao)}</span>
                                     </div>
                                     <div className="flex justify-between">

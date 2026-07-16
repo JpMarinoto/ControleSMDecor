@@ -3760,29 +3760,64 @@ class FuncionarioPagamentoCreate(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
-def _requer_chefe_precificacao_shopee(request):
+def _requer_acesso_precificacao(request):
     if not getattr(request.user, "is_authenticated", False):
         return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
     try:
-        from .views_auth import _is_chefe
+        from .views_auth import _pode_acessar_precificacao
 
-        if not _is_chefe(request):
+        if not _pode_acessar_precificacao(request):
             return Response(
-                {"error": "Apenas o chefe pode acessar a precificação Shopee."},
+                {"error": "Você não tem permissão para acessar a precificação."},
                 status=status.HTTP_403_FORBIDDEN,
             )
     except Exception:
         return Response(
-            {"error": "Apenas o chefe pode acessar a precificação Shopee."},
+            {"error": "Você não tem permissão para acessar a precificação."},
             status=status.HTTP_403_FORBIDDEN,
         )
     return None
+
+
+def _owner_precificacao(request, body=None):
+    """Resolve o dono das precificações. Não-chefe: sempre request.user. Chefe: ?usuario_id= ou body."""
+    from .views_auth import _is_chefe
+    from django.contrib.auth import get_user_model
+
+    UserModel = get_user_model()
+    owner = request.user
+    if not _is_chefe(request):
+        return owner, None
+
+    uid = None
+    if body and isinstance(body, dict):
+        uid = body.get("usuario_id") or body.get("usuarioId")
+    if uid is None:
+        uid = request.query_params.get("usuario_id") or request.query_params.get("usuarioId")
+    if uid is None or uid == "" or str(uid) == str(request.user.id):
+        return owner, None
+    try:
+        uid_int = int(uid)
+    except (TypeError, ValueError):
+        return None, Response(
+            {"error": "usuario_id inválido."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        other = UserModel.objects.get(pk=uid_int, is_active=True)
+    except UserModel.DoesNotExist:
+        return None, Response(
+            {"error": "Usuário não encontrado."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return other, None
 
 
 def _precificacao_shopee_payload(obj):
     return {
         "id": obj.id,
         "nome": obj.nome,
+        "usuarioId": obj.usuario_id,
         "dataIso": obj.atualizado_em.isoformat(),
         "mesReferencia": obj.mes_referencia or "",
         "nfPercent": obj.nf_percent or "70",
@@ -3793,20 +3828,26 @@ def _precificacao_shopee_payload(obj):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class PrecificacaoShopeeListCreate(APIView):
-    """Lista e grava precificações Shopee no SQLite (substitui localStorage)."""
+    """Lista e grava precificações Shopee (isoladas por usuário; chefe pode optar por outro)."""
 
     def get(self, request):
-        err = _requer_chefe_precificacao_shopee(request)
+        err = _requer_acesso_precificacao(request)
         if err:
             return err
-        qs = PrecificacaoShopee.objects.order_by("-atualizado_em")
+        owner, err_owner = _owner_precificacao(request)
+        if err_owner:
+            return err_owner
+        qs = PrecificacaoShopee.objects.filter(usuario=owner).order_by("-atualizado_em")
         return Response([_precificacao_shopee_payload(p) for p in qs])
 
     def post(self, request):
-        err = _requer_chefe_precificacao_shopee(request)
+        err = _requer_acesso_precificacao(request)
         if err:
             return err
         body = request.data or {}
+        owner, err_owner = _owner_precificacao(request, body)
+        if err_owner:
+            return err_owner
         nome = (body.get("nome") or "").strip()
         if not nome:
             return Response({"nome": ["Informe o nome da precificação."]}, status=status.HTTP_400_BAD_REQUEST)
@@ -3819,6 +3860,7 @@ class PrecificacaoShopeeListCreate(APIView):
         if not mes_ref:
             mes_ref = timezone.now().strftime("%Y-%m")
         obj, created = PrecificacaoShopee.objects.update_or_create(
+            usuario=owner,
             nome=nome,
             defaults={
                 "mes_referencia": mes_ref,
@@ -3831,7 +3873,7 @@ class PrecificacaoShopeeListCreate(APIView):
             request,
             "Salvar precificação Shopee",
             "PrecificacaoShopee",
-            f"{obj.nome} (ID {obj.id})",
+            f"{obj.nome} (ID {obj.id}, user {owner.id})",
         )
         return Response(
             _precificacao_shopee_payload(obj),
@@ -3841,14 +3883,17 @@ class PrecificacaoShopeeListCreate(APIView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class PrecificacaoShopeeDelete(APIView):
-    """Remove uma precificação Shopee salva (apenas chefe)."""
+    """Remove uma precificação Shopee do dono efetivo."""
 
     def delete(self, request, pk):
-        err = _requer_chefe_precificacao_shopee(request)
+        err = _requer_acesso_precificacao(request)
         if err:
             return err
+        owner, err_owner = _owner_precificacao(request)
+        if err_owner:
+            return err_owner
         try:
-            obj = PrecificacaoShopee.objects.get(pk=pk)
+            obj = PrecificacaoShopee.objects.get(pk=pk, usuario=owner)
         except PrecificacaoShopee.DoesNotExist:
             return Response({"error": "Precificação não encontrada."}, status=status.HTTP_404_NOT_FOUND)
         nome = obj.nome
@@ -3863,29 +3908,11 @@ class PrecificacaoShopeeDelete(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-def _requer_chefe_precificacao_tiktok(request):
-    if not getattr(request.user, "is_authenticated", False):
-        return Response({"error": "Não autenticado."}, status=status.HTTP_401_UNAUTHORIZED)
-    try:
-        from .views_auth import _is_chefe
-
-        if not _is_chefe(request):
-            return Response(
-                {"error": "Apenas o chefe pode acessar a precificação TikTok."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-    except Exception:
-        return Response(
-            {"error": "Apenas o chefe pode acessar a precificação TikTok."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    return None
-
-
 def _precificacao_tiktok_payload(obj):
     return {
         "id": obj.id,
         "nome": obj.nome,
+        "usuarioId": obj.usuario_id,
         "dataIso": obj.atualizado_em.isoformat(),
         "mesReferencia": obj.mes_referencia or "",
         "nfPercent": obj.nf_percent or "70",
@@ -3903,20 +3930,26 @@ def _precificacao_tiktok_payload(obj):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class PrecificacaoTiktokListCreate(APIView):
-    """Lista e grava precificações TikTok Shop no SQLite."""
+    """Lista e grava precificações TikTok Shop (isoladas por usuário)."""
 
     def get(self, request):
-        err = _requer_chefe_precificacao_tiktok(request)
+        err = _requer_acesso_precificacao(request)
         if err:
             return err
-        qs = PrecificacaoTiktok.objects.order_by("-atualizado_em")
+        owner, err_owner = _owner_precificacao(request)
+        if err_owner:
+            return err_owner
+        qs = PrecificacaoTiktok.objects.filter(usuario=owner).order_by("-atualizado_em")
         return Response([_precificacao_tiktok_payload(p) for p in qs])
 
     def post(self, request):
-        err = _requer_chefe_precificacao_tiktok(request)
+        err = _requer_acesso_precificacao(request)
         if err:
             return err
         body = request.data or {}
+        owner, err_owner = _owner_precificacao(request, body)
+        if err_owner:
+            return err_owner
         nome = (body.get("nome") or "").strip()
         if not nome:
             return Response({"nome": ["Informe o nome da precificação."]}, status=status.HTTP_400_BAD_REQUEST)
@@ -3937,6 +3970,7 @@ class PrecificacaoTiktokListCreate(APIView):
         if not mes_ref:
             mes_ref = timezone.now().strftime("%Y-%m")
         obj, created = PrecificacaoTiktok.objects.update_or_create(
+            usuario=owner,
             nome=nome,
             defaults={
                 "mes_referencia": mes_ref,
@@ -3956,7 +3990,7 @@ class PrecificacaoTiktokListCreate(APIView):
             request,
             "Salvar precificação TikTok Shop",
             "PrecificacaoTiktok",
-            f"{obj.nome} (ID {obj.id})",
+            f"{obj.nome} (ID {obj.id}, user {owner.id})",
         )
         return Response(
             _precificacao_tiktok_payload(obj),
@@ -3966,14 +4000,17 @@ class PrecificacaoTiktokListCreate(APIView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class PrecificacaoTiktokDelete(APIView):
-    """Remove uma precificação TikTok Shop salva (apenas chefe)."""
+    """Remove uma precificação TikTok Shop do dono efetivo."""
 
     def delete(self, request, pk):
-        err = _requer_chefe_precificacao_tiktok(request)
+        err = _requer_acesso_precificacao(request)
         if err:
             return err
+        owner, err_owner = _owner_precificacao(request)
+        if err_owner:
+            return err_owner
         try:
-            obj = PrecificacaoTiktok.objects.get(pk=pk)
+            obj = PrecificacaoTiktok.objects.get(pk=pk, usuario=owner)
         except PrecificacaoTiktok.DoesNotExist:
             return Response({"error": "Precificação não encontrada."}, status=status.HTTP_404_NOT_FOUND)
         nome = obj.nome
@@ -3986,6 +4023,40 @@ class PrecificacaoTiktokDelete(APIView):
             f"{nome} (ID {obj_id})",
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PrecificacaoUsuariosList(APIView):
+    """Lista usuários elegíveis para o select do chefe (quem pode precificar)."""
+
+    def get(self, request):
+        err = _requer_acesso_precificacao(request)
+        if err:
+            return err
+        from .views_auth import _is_chefe, _user_payload, _usuario_pode_precificar_obj
+        from django.contrib.auth import get_user_model
+
+        if not _is_chefe(request):
+            return Response(
+                {"error": "Apenas o chefe pode listar usuários de precificação."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        UserModel = get_user_model()
+        out = []
+        for u in UserModel.objects.filter(is_active=True).order_by("username"):
+            if not _usuario_pode_precificar_obj(u):
+                continue
+            payload = _user_payload(u)
+            if payload:
+                out.append({
+                    "id": payload["id"],
+                    "username": payload["username"],
+                    "nome": payload["nome"],
+                    "role": payload["role"],
+                    "is_chefe": payload["is_chefe"],
+                    "is_cliente": payload.get("is_cliente", False),
+                })
+        return Response(out)
 
 
 def _requer_chefe_shopee(request):

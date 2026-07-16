@@ -25,6 +25,16 @@ interface Usuario {
   nome: string;
   role: string;
   is_chefe: boolean;
+  is_cliente?: boolean;
+  pode_precificar?: boolean;
+  pode_acessar_precificacao?: boolean;
+}
+
+function labelPerfil(u: Usuario): string {
+  if (u.role === "1" || u.is_chefe) return "Chefe";
+  if (u.role === "3" || u.is_cliente) return "Cliente";
+  if (u.pode_precificar) return "Funcionário (precificação)";
+  return "Funcionário";
 }
 
 export function Usuarios() {
@@ -37,6 +47,7 @@ export function Usuarios() {
   const [password, setPassword] = useState("");
   const [nomeExibicao, setNomeExibicao] = useState("");
   const [role, setRole] = useState("2");
+  const [podePrecificar, setPodePrecificar] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [usuarioToDelete, setUsuarioToDelete] = useState<Usuario | null>(null);
@@ -67,6 +78,7 @@ export function Usuarios() {
     setPassword("");
     setNomeExibicao("");
     setRole("2");
+    setPodePrecificar(false);
     setOpen(true);
   };
 
@@ -75,7 +87,9 @@ export function Usuarios() {
     setUsername(u.username);
     setPassword("");
     setNomeExibicao(u.nome || "");
-    setRole(u.role === "1" ? "1" : "2");
+    const r = u.role === "1" || u.role === "3" ? u.role : "2";
+    setRole(r);
+    setPodePrecificar(Boolean(u.pode_precificar) || r === "3");
     setOpen(true);
   };
 
@@ -90,10 +104,12 @@ export function Usuarios() {
     }
     setSaving(true);
     try {
+      const pode = role === "3" ? true : role === "2" ? podePrecificar : false;
       if (editingId) {
         await api.updateUsuario(editingId, {
           nome_exibicao: nomeExibicao || undefined,
           role,
+          pode_precificar: pode,
           ...(password ? { password } : {}),
         });
         toast.success("Usuário atualizado");
@@ -103,6 +119,7 @@ export function Usuarios() {
           password,
           nome_exibicao: nomeExibicao || undefined,
           role,
+          pode_precificar: pode,
         });
         toast.success("Usuário criado");
       }
@@ -165,9 +182,11 @@ export function Usuarios() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="size-5" />
-            Funcionários e Chefe
+            Usuários do sistema
           </CardTitle>
-          <p className="text-sm text-muted-foreground">Só o Chefe pode criar, editar e desativar usuários.</p>
+          <p className="text-sm text-muted-foreground">
+            Chefe, Funcionário e Cliente.
+          </p>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -187,7 +206,7 @@ export function Usuarios() {
                   <TableRow key={u.id}>
                     <TableCell className="font-medium">{u.username}</TableCell>
                     <TableCell>{u.nome || "—"}</TableCell>
-                    <TableCell>{u.is_chefe ? "Chefe" : "Funcionário"}</TableCell>
+                    <TableCell>{labelPerfil(u)}</TableCell>
                     <TableCell>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openEdit(u)}>
@@ -217,7 +236,9 @@ export function Usuarios() {
           <DialogHeader>
             <DialogTitle>{editingId ? "Editar usuário" : "Novo usuário"}</DialogTitle>
             <DialogDescription>
-              {editingId ? "Altere nome de exibição, perfil ou senha." : "Crie um funcionário ou outro chefe."}
+              {editingId
+                ? "Altere nome, perfil, permissões ou senha."
+                : "Crie chefe, funcionário ou cliente."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -262,16 +283,38 @@ export function Usuarios() {
             </div>
             <div className="space-y-2">
               <Label>Perfil</Label>
-              <Select value={role} onValueChange={setRole}>
+              <Select
+                value={role}
+                onValueChange={(v) => {
+                  setRole(v);
+                  if (v === "3") setPodePrecificar(true);
+                  if (v === "1") setPodePrecificar(false);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="2">Funcionário</SelectItem>
+                  <SelectItem value="3">Cliente</SelectItem>
                   <SelectItem value="1">Chefe</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {role === "2" && (
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+                <input
+                  id="pode-precificar"
+                  type="checkbox"
+                  className="mt-1 size-4 cursor-pointer accent-[var(--primary)]"
+                  checked={podePrecificar}
+                  onChange={(e) => setPodePrecificar(e.target.checked)}
+                />
+                <Label htmlFor="pode-precificar" className="cursor-pointer text-sm font-normal leading-snug">
+                  Pode usar precificação
+                </Label>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>

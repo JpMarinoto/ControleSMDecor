@@ -103,6 +103,7 @@ export interface RelatorioComprasPeriodo {
 export interface PrecificacaoShopeeApiRow {
   id: number;
   nome: string;
+  usuarioId?: number;
   dataIso: string;
   mesReferencia: string;
   nfPercent: string;
@@ -114,6 +115,7 @@ export interface PrecificacaoShopeeApiRow {
 export interface PrecificacaoTiktokApiRow {
   id: number;
   nome: string;
+  usuarioId?: number;
   dataIso: string;
   mesReferencia: string;
   nfPercent: string;
@@ -126,6 +128,15 @@ export interface PrecificacaoTiktokApiRow {
   pteCap: string;
   participarPte: boolean;
   linhas: unknown[];
+}
+
+export interface PrecificacaoUsuarioOption {
+  id: number;
+  username: string;
+  nome: string;
+  role: string;
+  is_chefe: boolean;
+  is_cliente?: boolean;
 }
 
 export const api = {
@@ -236,7 +247,13 @@ export const api = {
     }
     return response.json();
   },
-  createUsuario: async (data: { username: string; password: string; nome_exibicao?: string; role?: string }) => {
+  createUsuario: async (data: {
+    username: string;
+    password: string;
+    nome_exibicao?: string;
+    role?: string;
+    pode_precificar?: boolean;
+  }) => {
     const response = await fetch(`${API_BASE_URL}/usuarios/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -269,7 +286,10 @@ export const api = {
     }
     return out;
   },
-  updateUsuario: async (id: number, data: { nome_exibicao?: string; role?: string; password?: string }) => {
+  updateUsuario: async (
+    id: number,
+    data: { nome_exibicao?: string; role?: string; password?: string; pode_precificar?: boolean },
+  ) => {
     const response = await fetch(`${API_BASE_URL}/usuarios/${id}/`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -1290,8 +1310,9 @@ export const api = {
     return readJsonOrThrow(response);
   },
 
-  getPrecificacoesShopee: async (): Promise<PrecificacaoShopeeApiRow[]> => {
-    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/`, {
+  getPrecificacoesShopee: async (usuarioId?: number | null): Promise<PrecificacaoShopeeApiRow[]> => {
+    const q = usuarioId != null ? `?usuario_id=${usuarioId}` : "";
+    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/${q}`, {
       headers: authHeaders(),
     });
     const data = await readJsonOrThrow(response);
@@ -1304,6 +1325,7 @@ export const api = {
     nfPercent: string;
     impostoPercent: string;
     linhas: unknown[];
+    usuario_id?: number;
   }) => {
     const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/`, {
       method: "POST",
@@ -1313,8 +1335,9 @@ export const api = {
     return readJsonOrThrow(response) as Promise<PrecificacaoShopeeApiRow>;
   },
 
-  deletePrecificacaoShopee: async (id: number | string) => {
-    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/${id}/`, {
+  deletePrecificacaoShopee: async (id: number | string, usuarioId?: number | null) => {
+    const q = usuarioId != null ? `?usuario_id=${usuarioId}` : "";
+    const response = await fetch(`${API_BASE_URL}/precificacoes/shopee/${id}/${q}`, {
       method: "DELETE",
       headers: authHeaders(),
     });
@@ -1331,8 +1354,9 @@ export const api = {
     }
   },
 
-  getPrecificacoesTiktok: async (): Promise<PrecificacaoTiktokApiRow[]> => {
-    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/`, {
+  getPrecificacoesTiktok: async (usuarioId?: number | null): Promise<PrecificacaoTiktokApiRow[]> => {
+    const q = usuarioId != null ? `?usuario_id=${usuarioId}` : "";
+    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/${q}`, {
       headers: authHeaders(),
     });
     const data = await readJsonOrThrow(response);
@@ -1352,6 +1376,7 @@ export const api = {
     pteCap: string;
     participarPte: boolean;
     linhas: unknown[];
+    usuario_id?: number;
   }) => {
     const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/`, {
       method: "POST",
@@ -1361,8 +1386,9 @@ export const api = {
     return readJsonOrThrow(response) as Promise<PrecificacaoTiktokApiRow>;
   },
 
-  deletePrecificacaoTiktok: async (id: number | string) => {
-    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/${id}/`, {
+  deletePrecificacaoTiktok: async (id: number | string, usuarioId?: number | null) => {
+    const q = usuarioId != null ? `?usuario_id=${usuarioId}` : "";
+    const response = await fetch(`${API_BASE_URL}/precificacoes/tiktok/${id}/${q}`, {
       method: "DELETE",
       headers: authHeaders(),
     });
@@ -1377,6 +1403,14 @@ export const api = {
       }
       throw new Error(msg || `HTTP ${response.status}`);
     }
+  },
+
+  getPrecificacaoUsuarios: async (): Promise<PrecificacaoUsuarioOption[]> => {
+    const response = await fetch(`${API_BASE_URL}/precificacoes/usuarios/`, {
+      headers: authHeaders(),
+    });
+    const data = await readJsonOrThrow(response);
+    return Array.isArray(data) ? (data as PrecificacaoUsuarioOption[]) : [];
   },
 
   getShopeeIntegracaoStatus: async () => {

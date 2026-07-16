@@ -50,6 +50,14 @@ export function Layout() {
       { name: 'Nova Venda', path: '/venda', icon: TrendingUp },
       { name: 'Estoque', path: '/estoque', icon: Package },
     ],
+    ...(user?.pode_acessar_precificacao
+      ? [[{ name: 'Precificação', path: '/precificacao', icon: Tag } as NavItem]]
+      : []),
+    [{ name: 'Editar perfil', path: '/meus-dados', icon: UserCircle }],
+  ];
+
+  const navClienteGroups: NavItem[][] = [
+    [{ name: 'Precificação', path: '/precificacao', icon: Tag }],
     [{ name: 'Editar perfil', path: '/meus-dados', icon: UserCircle }],
   ];
 
@@ -81,7 +89,11 @@ export function Layout() {
     ],
   ];
 
-  const navGroups = user?.is_chefe ? navChefeGroups : navFuncionarioGroups;
+  const navGroups = user?.is_chefe
+    ? navChefeGroups
+    : user?.is_cliente
+      ? navClienteGroups
+      : navFuncionarioGroups;
   const isFuncionario = !user?.is_chefe;
   const mainContentFullWidth =
     location.pathname === "/precificacao" || location.pathname.startsWith("/precificacao/");
@@ -263,7 +275,8 @@ export function Layout() {
                   sessionStorage.setItem("logout", "1");
                 } catch {}
                 await new Promise((r) => setTimeout(r, 150));
-                window.location.href = "/login";
+                const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+                window.location.href = `${base}/login`;
               }}
             >
               Sair

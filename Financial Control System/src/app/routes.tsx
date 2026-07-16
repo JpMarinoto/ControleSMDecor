@@ -21,6 +21,8 @@ import { MeusDados } from "./pages/MeusDados";
 import { Precificacao } from "./pages/Precificacao";
 import { RequireAuth } from "./components/RequireAuth";
 import { RequireChefe } from "./components/RequireChefe";
+import { RequirePrecificacao } from "./components/RequirePrecificacao";
+import { BlockCliente } from "./components/BlockCliente";
 
 export const router = createBrowserRouter(
   [
@@ -34,10 +36,10 @@ export const router = createBrowserRouter(
       ),
       children: [
         { index: true, Component: Dashboard },
-        { path: "cadastro", Component: Cadastro },
-        { path: "compra", Component: Compra },
-        { path: "venda", Component: Venda },
-        { path: "estoque", Component: Estoque },
+        { path: "cadastro", element: <BlockCliente><Cadastro /></BlockCliente> },
+        { path: "compra", element: <BlockCliente><Compra /></BlockCliente> },
+        { path: "venda", element: <BlockCliente><Venda /></BlockCliente> },
+        { path: "estoque", element: <BlockCliente><Estoque /></BlockCliente> },
         { path: "caixa", element: <Navigate to="/financas/caixa" replace /> },
         { path: "financas", element: <RequireChefe><Financas /></RequireChefe> },
         { path: "financas/caixa", element: <RequireChefe><Caixa /></RequireChefe> },
@@ -52,7 +54,7 @@ export const router = createBrowserRouter(
         { path: "dividas-gerais", element: <Navigate to="/financas" replace /> },
         { path: "logs", element: <RequireChefe><Logs /></RequireChefe> },
         { path: "outros-a-receber", element: <RequireChefe><OutrosAReceber /></RequireChefe> },
-        { path: "precificacao", element: <RequireChefe><Precificacao /></RequireChefe> },
+        { path: "precificacao", element: <RequirePrecificacao><Precificacao /></RequirePrecificacao> },
         { path: "conta-banco", element: <RequireChefe><ContaBancoList /></RequireChefe> },
         { path: "conta-banco/:id", element: <RequireChefe><ContaBancoDetalhe /></RequireChefe> },
         { path: "usuarios", element: <RequireChefe><Usuarios /></RequireChefe> },

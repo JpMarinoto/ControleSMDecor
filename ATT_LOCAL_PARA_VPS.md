@@ -28,10 +28,12 @@ Ver guia completo: `deploy/HOMOLOG_SHOPEE.md`
 ssh deploy@129.121.53.239
 cd /home/deploy/ControleSMDecor
 git pull
-chmod +x scripts/setup_homolog_shopee.sh
+chmod +x scripts/setup_homolog_shopee.sh scripts/install_homolog_nginx.sh
 ./scripts/setup_homolog_shopee.sh
-# Depois: incluir deploy/nginx/homolog-location.conf no nginx e reload
+./scripts/install_homolog_nginx.sh   # OBRIGATÓRIO — sem isso /homolog cai no /login da produção
 ```
+
+Se `/homolog` ainda abrir `/login` da produção: o nginx não tem o bloco. Rode só o `install_homolog_nginx.sh`.
 
 URLs:
 - App: https://santosmarinoto.com/homolog/
