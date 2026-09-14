@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { api } from "../lib/api";
+import { api, AUTH_EXPIRED_EVENT, clearAuthToken } from "../lib/api";
 
 export interface User {
   id: number;
@@ -64,6 +64,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onExpired = () => {
+      clearAuthToken();
+      setUser(null);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, []);
 
   const login = useCallback(async (username: string, password: string) => {
     const data = await api.authLogin(username, password);

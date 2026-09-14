@@ -158,7 +158,9 @@ class AuthLogin(APIView):
                 {"error": "Usuário inativo"},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        token, _ = Token.objects.get_or_create(user=user)
+        # Novo login invalida token anterior (outras abas passam a receber 401 e pedem login)
+        Token.objects.filter(user=user).delete()
+        token = Token.objects.create(user=user)
         payload = _user_payload(user)
         if payload:
             payload["token"] = token.key

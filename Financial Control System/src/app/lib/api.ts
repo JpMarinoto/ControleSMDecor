@@ -1,4 +1,4 @@
-// Autenticação por Token: o login devolve um token; guardamos em sessionStorage e enviamos em Authorization em todos os pedidos.
+// Autenticação por Token: o login devolve um token; guardamos em localStorage e enviamos em Authorization em todos os pedidos.
 // Em homologação (Vite base /homolog/) a API fica em /homolog/api/.
 function resolveApiBase(): string {
   const explicit = import.meta.env?.VITE_API_URL;
@@ -9,19 +9,62 @@ function resolveApiBase(): string {
 }
 const API_BASE_URL = resolveApiBase();
 
-const AUTH_TOKEN_KEY = 'authToken';
+/** Chave por API (produção vs /homolog) para não misturar tokens no mesmo domínio. */
+const AUTH_TOKEN_KEY = `authToken:${API_BASE_URL}`;
+const AUTH_TOKEN_KEY_LEGACY = "authToken";
+
+/** Disparado quando a API responde 401 de autenticação (token inválido/expirado). */
+export const AUTH_EXPIRED_EVENT = "smdecor:auth-expired";
+
+function notifyAuthExpired(): void {
+  if (typeof window === "undefined") return;
+  clearAuthToken();
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+}
+
+function isAuthFailureMessage(msg: string): boolean {
+  const m = msg.trim().toLowerCase();
+  return (
+    m.includes("invalid token") ||
+    m.includes("token inválido") ||
+    m.includes("authentication credentials were not provided") ||
+    m.includes("not_authenticated") ||
+    m === "não autenticado." ||
+    m.startsWith("não autenticado")
+  );
+}
 
 export function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return sessionStorage.getItem(AUTH_TOKEN_KEY);
+  if (typeof window === "undefined") return null;
+  const cur = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY);
+  if (cur) return cur;
+  // Migra token legado (mesma origem, chave única) só para a API padrão /
+  if (API_BASE_URL === "/api") {
+    const legacy =
+      localStorage.getItem(AUTH_TOKEN_KEY_LEGACY) || sessionStorage.getItem(AUTH_TOKEN_KEY_LEGACY);
+    if (legacy) {
+      setAuthToken(legacy);
+      localStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
+      sessionStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
+      return legacy;
+    }
+  }
+  return null;
 }
 
 export function setAuthToken(token: string): void {
-  if (typeof window !== 'undefined') sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+  if (typeof window === "undefined") return;
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  sessionStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
 }
 
 export function clearAuthToken(): void {
-  if (typeof window !== 'undefined') sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
+  sessionStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
 }
 
 function authHeaders(): Record<string, string> {
@@ -57,7 +100,12 @@ async function readJsonOrThrow(response: Response): Promise<unknown> {
     }
   }
   if (!response.ok) {
-    throw new Error(messageFromApiError(body) || `Erro HTTP ${response.status}`);
+    const msg = messageFromApiError(body) || `Erro HTTP ${response.status}`;
+    if (response.status === 401 && isAuthFailureMessage(msg)) {
+      notifyAuthExpired();
+      throw new Error("Sessão expirada ou inválida. Faça login novamente.");
+    }
+    throw new Error(msg);
   }
   return body;
 }
@@ -198,7 +246,13 @@ export const api = {
 
   authMe: async () => {
     const response = await fetch(`${API_BASE_URL}/auth/me/`, { headers: authHeaders() });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if (response.status === 401) {
+        // Token inválido/ausente: limpa para não ficar preso em "Invalid token" nas próximas ações
+        clearAuthToken();
+      }
+      return null;
+    }
     let data: unknown;
     try {
       data = await response.json();
