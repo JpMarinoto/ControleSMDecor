@@ -156,11 +156,10 @@ export function FornecedorDetalhe() {
   const [periodo, setPeriodo] = useState<Periodo>("todos");
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
-  const [materiais, setMateriais] = useState<{ id: number; nome: string; preco_unitario_base: number }[]>([]);
-  const [produtos, setProdutos] = useState<{ id: number; nome: string; preco_venda: number; estoque_atual: number; ativo: boolean }[]>([]);
-  const [editingMaterialId, setEditingMaterialId] = useState<number | null>(null);
-  const [editingMaterialPreco, setEditingMaterialPreco] = useState("");
-  const [savingMaterialId, setSavingMaterialId] = useState<number | null>(null);
+  const [produtos, setProdutos] = useState<{ id: number; nome: string; preco_venda: number; preco_custo?: number; estoque_atual: number; ativo: boolean }[]>([]);
+  const [editingProdutoId, setEditingProdutoId] = useState<number | null>(null);
+  const [editingProdutoPreco, setEditingProdutoPreco] = useState("");
+  const [savingProdutoId, setSavingProdutoId] = useState<number | null>(null);
   const [selectedCompraIds, setSelectedCompraIds] = useState<Set<string>>(new Set());
   const [comprasPage, setComprasPage] = useState(1);
   const [historicoPage, setHistoricoPage] = useState(1);
@@ -218,18 +217,11 @@ export function FornecedorDetalhe() {
     load();
   }, [id, location.key]);
 
-  const loadMateriais = () => {
-    if (!id) return;
-    api.getFornecedorMateriais(id).then(setMateriais).catch(() => setMateriais([]));
-  };
   const loadProdutos = () => {
     if (!id) return;
     api.getFornecedorProdutos(id).then(setProdutos).catch(() => setProdutos([]));
   };
 
-  useEffect(() => {
-    if (id) loadMateriais();
-  }, [id]);
   useEffect(() => {
     if (id) loadProdutos();
   }, [id]);
@@ -239,28 +231,33 @@ export function FornecedorDetalhe() {
     setHistoricoPage(1);
   }, [periodo, dataInicio, dataFim]);
 
-  const handleSaveMaterialPreco = async (materialId: number, novoValorStr: string) => {
+  const handleSaveProdutoPreco = async (produtoId: number, novoValorStr: string) => {
     const v = parseFloat(novoValorStr.replace(",", "."));
     if (isNaN(v) || v < 0) {
       toast.error("Preço inválido.");
-      setEditingMaterialId(null);
+      setEditingProdutoId(null);
       return;
     }
-    const mat = materiais.find((m) => m.id === materialId);
-    if (mat && Math.abs(mat.preco_unitario_base - v) < 0.005) {
-      setEditingMaterialId(null);
+    const prod = produtos.find((p) => p.id === produtoId);
+    if (!prod) {
+      setEditingProdutoId(null);
       return;
     }
-    setSavingMaterialId(materialId);
+    const atual = Number(prod.preco_custo ?? 0);
+    if (Math.abs(atual - v) < 0.005) {
+      setEditingProdutoId(null);
+      return;
+    }
+    setSavingProdutoId(produtoId);
     try {
-      await api.updateMaterial(String(materialId), { precoUnitarioBase: v });
-      toast.success("Preço do material atualizado");
-      loadMateriais();
+      await api.updateProduto(String(produtoId), { preco_custo: v });
+      toast.success("Preço atualizado");
+      loadProdutos();
     } catch {
       toast.error("Erro ao atualizar preço");
     } finally {
-      setSavingMaterialId(null);
-      setEditingMaterialId(null);
+      setSavingProdutoId(null);
+      setEditingProdutoId(null);
     }
   };
 
@@ -1065,18 +1062,16 @@ export function FornecedorDetalhe() {
             <CardTitle className="flex items-center gap-2">
               <ChevronRight className="size-5 transition-transform group-data-[state=open]:rotate-90" />
               <Package className="size-5" />
-              Produtos e materiais deste fornecedor
+              Produtos deste fornecedor
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Produtos/materiais cadastrados com este fornecedor. Clique para abrir.
+              Produtos cadastrados com este fornecedor.
             </p>
           </CollapsibleTrigger>
         </CardHeader>
         <CollapsibleContent>
         <CardContent className="pt-0">
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Produtos</div>
+          <div className="space-y-2">
               {produtos.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhum produto vinculado a este fornecedor. Vincule no Cadastro (Produtos).</p>
               ) : (
@@ -1084,69 +1079,51 @@ export function FornecedorDetalhe() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Produto</TableHead>
-                      <TableHead className="text-right w-44">Preço venda</TableHead>
+                      <TableHead className="text-right w-44">Preço de custo</TableHead>
                       <TableHead className="text-right w-28">Estoque</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {produtos.map((p) => (
+                    {produtos.map((p) => {
+                      const precoAtual = Number(p.preco_custo ?? 0);
+                      return (
                       <TableRow key={p.id} className={p.ativo === false ? "opacity-60" : ""}>
-                        <TableCell className="font-medium">{p.nome}</TableCell>
-                        <TableCell className="text-right tabular-nums">{formatCurrencyBrl(Number(p.preco_venda ?? 0))}</TableCell>
-                        <TableCell className="text-right tabular-nums">{Number(p.estoque_atual ?? 0)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Materiais</div>
-              {materiais.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum material vinculado a este fornecedor. Vincule no Cadastro (Materiais).</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Material</TableHead>
-                      <TableHead className="text-right w-40">Preço base (R$)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {materiais.map((m) => (
-                      <TableRow key={m.id}>
-                        <TableCell className="font-medium">{m.nome}</TableCell>
+                        <TableCell className="font-medium">
+                          <span className="inline-flex items-center gap-2">
+                            {p.nome}
+                          </span>
+                        </TableCell>
                         <TableCell className="text-right">
-                          {savingMaterialId === m.id ? (
+                          {savingProdutoId === p.id ? (
                             <span className="text-muted-foreground text-sm">Salvando...</span>
                           ) : (
                             <Input
                               type="text"
                               inputMode="decimal"
                               className="h-8 w-28 text-right ml-auto"
-                              value={editingMaterialId === m.id ? editingMaterialPreco : m.preco_unitario_base.toFixed(2).replace(".", ",")}
+                              value={editingProdutoId === p.id ? editingProdutoPreco : precoAtual.toFixed(2).replace(".", ",")}
                               onChange={(e) => {
-                                setEditingMaterialId(m.id);
-                                setEditingMaterialPreco(e.target.value);
+                                setEditingProdutoId(p.id);
+                                setEditingProdutoPreco(e.target.value);
                               }}
                               onFocus={() => {
-                                setEditingMaterialId(m.id);
-                                setEditingMaterialPreco(m.preco_unitario_base.toFixed(2).replace(".", ","));
+                                setEditingProdutoId(p.id);
+                                setEditingProdutoPreco(precoAtual.toFixed(2).replace(".", ","));
                               }}
-                              onBlur={() => handleSaveMaterialPreco(m.id, editingMaterialId === m.id ? editingMaterialPreco : m.preco_unitario_base.toFixed(2).replace(".", ","))}
+                              onBlur={() => handleSaveProdutoPreco(p.id, editingProdutoId === p.id ? editingProdutoPreco : precoAtual.toFixed(2).replace(".", ","))}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                               }}
                             />
                           )}
                         </TableCell>
+                        <TableCell className="text-right tabular-nums">{Number(p.estoque_atual ?? 0)}</TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
-            </div>
           </div>
         </CardContent>
         </CollapsibleContent>

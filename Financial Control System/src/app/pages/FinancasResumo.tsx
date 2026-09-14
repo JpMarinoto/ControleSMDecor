@@ -10,13 +10,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Badge } from "../components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input";
-import { TrendingUp, TrendingDown, Wallet, DollarSign, Users, Package as PackageIcon, ShoppingCart, Eye, EyeOff } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, DollarSign, Users, Package as PackageIcon, ShoppingCart, Eye, EyeOff, CalendarSearch } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { BarChart, Bar, LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid, Legend } from "recharts";
 import { motion } from "motion/react";
 
 type PeriodoEntradaSaida = "dia" | "semana" | "mes" | "personalizado";
-type PeriodoResumo = "tudo" | "dia" | "semana" | "mes" | "personalizado";
+type PeriodoResumo = "dia" | "semana" | "mes" | "personalizado";
 
 /** Retorna a data de hoje no formato YYYY-MM-DD (sem time-zone). */
 function hojeKey(): string {
@@ -53,7 +54,7 @@ function FinancasResumo() {
     const hoje = hojeKey();
     return { inicio: hoje, fim: hoje };
   });
-  const [periodoResumo, setPeriodoResumo] = useState<PeriodoResumo>("tudo");
+  const [periodoResumo, setPeriodoResumo] = useState<PeriodoResumo>("mes");
   const [rangeResumo, setRangeResumo] = useState<{ inicio: string; fim: string }>(() => {
     const hoje = hojeKey();
     return { inicio: hoje, fim: hoje };
@@ -70,17 +71,22 @@ function FinancasResumo() {
   const [dividasGerais, setDividasGerais] = useState<any[]>([]);
   /** Sempre oculto ao abrir «Visão geral» (cada vez que o separador monta). Não persistir — evita reaparecerem valores na próxima entrada. */
   const [valoresVisiveis, setValoresVisiveis] = useState(false);
+  /** Consulta histórica: YYYY-MM-DD ou null = dados ao vivo */
+  const [consultaData, setConsultaData] = useState<string | null>(null);
+  const [dialogConsultaOpen, setDialogConsultaOpen] = useState(false);
+  const [dataConsultaDraft, setDataConsultaDraft] = useState(() => hojeKey());
+  const [carregandoConsulta, setCarregandoConsulta] = useState(false);
 
   const loadFromApi = async () => {
     try {
       const [txRes, clientesRes, fornRes, vendasRes, comprasRes, contasRes, materiaisRes, dividasRes, estoqueRes] = await Promise.all([
         api.getTransactions().catch(() => []),
-        api.getClientes().catch(() => []),
-        api.getFornecedores().catch(() => []),
+        api.getClientes({ incluir_inativos: true }).catch(() => []),
+        api.getFornecedores({ incluir_inativos: true }).catch(() => []),
         api.getVendas().catch(() => []),
         api.getCompras().catch(() => []),
         api.getContas().catch(() => []),
-        api.getMateriais().catch(() => []),
+        api.getProdutos().catch(() => []),
         api.getDividasGerais().catch(() => []),
         api.getEstoque().catch(() => ({ materiais: [], produtos: [] })),
       ]);
@@ -94,6 +100,7 @@ function FinancasResumo() {
       setDividasGerais(Array.isArray(dividasRes) ? dividasRes : []);
       setEstoqueMateriais(Array.isArray((estoqueRes as any)?.materiais) ? (estoqueRes as any).materiais : []);
       setEstoqueProdutos(Array.isArray((estoqueRes as any)?.produtos) ? (estoqueRes as any).produtos : []);
+      setConsultaData(null);
     } catch {
       // Fallback para localStorage (ex.: backend offline)
       setTransactions(storage.getTransactions());
@@ -112,6 +119,27 @@ function FinancasResumo() {
       setDividasGerais([]);
       setEstoqueMateriais([]);
       setEstoqueProdutos([]);
+      setConsultaData(null);
+    }
+  };
+
+  const aplicarConsultaData = async (dataIso: string) => {
+    setCarregandoConsulta(true);
+    try {
+      const snap = await api.getFinancasSnapshot(dataIso) as any;
+      setClientes(Array.isArray(snap.clientes) ? snap.clientes : []);
+      setFornecedores(Array.isArray(snap.fornecedores) ? snap.fornecedores : []);
+      setContas(normalizarContas(snap.contas));
+      setDividasGerais(Array.isArray(snap.dividas_gerais) ? snap.dividas_gerais : []);
+      setEstoqueProdutos(Array.isArray(snap.estoque_produtos) ? snap.estoque_produtos : []);
+      setEstoqueMateriais(Array.isArray(snap.estoque_materiais) ? snap.estoque_materiais : []);
+      setConsultaData(String(snap.data || dataIso).slice(0, 10));
+      setDialogConsultaOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : "Não foi possível carregar o snapshot dessa data.");
+    } finally {
+      setCarregandoConsulta(false);
     }
   };
 
@@ -123,11 +151,49 @@ function FinancasResumo() {
     loadFromApi();
   }, []);
 
+  const refHoje = React.useMemo(() => {
+    if (consultaData) {
+      const d = new Date(`${consultaData}T12:00:00`);
+      return Number.isNaN(d.getTime()) ? new Date() : d;
+    }
+    return new Date();
+  }, [consultaData]);
+
+  const refHojeKey = React.useMemo(() => {
+    const d = new Date(refHoje);
+    d.setHours(0, 0, 0, 0);
+    // YYYY-MM-DD local
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }, [refHoje]);
+
+  const transactionsAteConsulta = React.useMemo(() => {
+    if (!consultaData) return transactions;
+    return transactions.filter((t) => String(t.date || "").slice(0, 10) <= consultaData);
+  }, [transactions, consultaData]);
+
+  const vendasAteConsulta = React.useMemo(() => {
+    if (!consultaData) return vendas;
+    return vendas.filter((v: any) => {
+      const k = String(v.data ?? v.data_venda ?? "").slice(0, 10);
+      return k && k <= consultaData;
+    });
+  }, [vendas, consultaData]);
+
+  const comprasAteConsulta = React.useMemo(() => {
+    if (!consultaData) return compras;
+    return compras.filter((c: any) => {
+      const k = String(c.data ?? c.data_compra ?? "").slice(0, 10);
+      return k && k <= consultaData;
+    });
+  }, [compras, consultaData]);
+
   const filtrarPorPeriodoResumo = (txs: Transaction[], periodo: PeriodoResumo): Transaction[] => {
-    if (periodo === "tudo") return txs;
-    const hoje = new Date();
+    const hoje = new Date(refHoje);
     hoje.setHours(0, 0, 0, 0);
-    const hojeStr = hoje.toISOString().split("T")[0];
+    const hojeStr = refHojeKey;
 
     if (periodo === "dia") {
       return txs.filter((t) => t.date === hojeStr);
@@ -160,7 +226,7 @@ function FinancasResumo() {
     });
   };
 
-  const transactionsResumo = filtrarPorPeriodoResumo(transactions, periodoResumo);
+  const transactionsResumo = filtrarPorPeriodoResumo(transactionsAteConsulta, periodoResumo);
 
   const totalIncome = transactionsResumo
     .filter(t => t.type === 'income')
@@ -183,12 +249,12 @@ function FinancasResumo() {
     (fornecedores || []).reduce((s: number, f: any) => s + safeNum(f.saldo_devedor), 0) + totalDividasGerais;
 
   // Weekly balance calculation
-  const now = new Date();
+  const now = refHoje;
   const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay());
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 6);
 
-  const weeklyTransactions = transactions.filter(t => {
+  const weeklyTransactions = transactionsAteConsulta.filter(t => {
     const tDate = new Date(t.date);
     return tDate >= weekStart && tDate <= weekEnd;
   });
@@ -201,10 +267,10 @@ function FinancasResumo() {
   const getReceivableData = (): { date: number; label: string; valor: number }[] => {
     const days: { date: number; label: string; valor: number }[] = [];
     for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateKey = date.toISOString().split('T')[0];
-      const dayVendas = vendas.filter((v: any) => (v.data ?? v.data_venda ?? '') === dateKey || (v.data_venda && String(v.data_venda).slice(0, 10) === dateKey));
+      const date = new Date(refHoje);
+      date.setDate(refHoje.getDate() - i);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dayVendas = vendasAteConsulta.filter((v: any) => (v.data ?? v.data_venda ?? '') === dateKey || (v.data_venda && String(v.data_venda).slice(0, 10) === dateKey));
       const total = dayVendas.reduce((sum, v) => sum + safeNum(v.total ?? v.total_venda), 0);
       days.push({
         date: date.getDate(),
@@ -219,10 +285,10 @@ function FinancasResumo() {
   const getPayableData = (): { date: number; label: string; valor: number }[] => {
     const days: { date: number; label: string; valor: number }[] = [];
     for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateKey = date.toISOString().split('T')[0];
-      const dayCompras = compras.filter((c: any) => (c.data ?? '') === dateKey || (c.data_compra && String(c.data_compra).slice(0, 10) === dateKey));
+      const date = new Date(refHoje);
+      date.setDate(refHoje.getDate() - i);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dayCompras = comprasAteConsulta.filter((c: any) => (c.data ?? '') === dateKey || (c.data_compra && String(c.data_compra).slice(0, 10) === dateKey));
       const total = dayCompras.reduce((sum, c) => sum + safeNum(c.total), 0);
       days.push({
         date: date.getDate(),
@@ -237,10 +303,10 @@ function FinancasResumo() {
   const getWeeklyBalanceData = (): { day: string; saldo: number }[] => {
     const days: { day: string; saldo: number }[] = [];
     for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateKey = date.toISOString().split('T')[0];
-      const dayTransactions = transactions.filter(t => t.date === dateKey);
+      const date = new Date(refHoje);
+      date.setDate(refHoje.getDate() - i);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dayTransactions = transactionsAteConsulta.filter(t => t.date === dateKey);
       const income = dayTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + safeNum(t.amount), 0);
       const expense = dayTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + safeNum(t.amount), 0);
       days.push({
@@ -253,21 +319,21 @@ function FinancasResumo() {
 
   // Entradas x Saídas (dia / semana / mês) - baseado em transações
   const getEntradasSaidasData = (): { label: string; entradas: number; saidas: number }[] => {
-    const hoje = new Date();
-    const hojeKey = hoje.toISOString().split('T')[0];
+    const hoje = refHoje;
+    const hojeKeyLocal = refHojeKey;
     if (periodoEntradaSaida === 'dia') {
-      const dayTx = transactions.filter(t => t.date === hojeKey);
+      const dayTx = transactionsAteConsulta.filter(t => t.date === hojeKeyLocal);
       const entradas = dayTx.filter(t => t.type === 'income').reduce((s, t) => s + safeNum(t.amount), 0);
       const saidas = dayTx.filter(t => t.type === 'expense').reduce((s, t) => s + safeNum(t.amount), 0);
-      return [{ label: 'Hoje', entradas, saidas }];
+      return [{ label: consultaData ? formatDateOnly(consultaData) : 'Hoje', entradas, saidas }];
     }
     if (periodoEntradaSaida === 'semana') {
       const days: { label: string; entradas: number; saidas: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const date = new Date(hoje);
         date.setDate(date.getDate() - i);
-        const dateKey = date.toISOString().split('T')[0];
-        const dayTx = transactions.filter(t => t.date === dateKey);
+        const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const dayTx = transactionsAteConsulta.filter(t => t.date === dateKey);
         const entradas = dayTx.filter(t => t.type === 'income').reduce((s, t) => s + safeNum(t.amount), 0);
         const saidas = dayTx.filter(t => t.type === 'expense').reduce((s, t) => s + safeNum(t.amount), 0);
         days.push({
@@ -279,8 +345,8 @@ function FinancasResumo() {
       return days;
     }
     if (periodoEntradaSaida === 'personalizado') {
-      const iniStr = rangeEntradaSaida.inicio || hojeKey;
-      const fimStr = rangeEntradaSaida.fim || hojeKey;
+      const iniStr = rangeEntradaSaida.inicio || hojeKeyLocal;
+      const fimStr = rangeEntradaSaida.fim || hojeKeyLocal;
       let ini = new Date(iniStr + 'T00:00:00');
       let fim = new Date(fimStr + 'T00:00:00');
       if (ini.getTime() > fim.getTime()) {
@@ -289,15 +355,14 @@ function FinancasResumo() {
         fim = tmp;
       }
       const totalDias = Math.floor((fim.getTime() - ini.getTime()) / 86400000) + 1;
-      // Limita o número de dias renderizados no gráfico para manter a leitura legível
       const limiteDias = Math.min(totalDias, 92);
       const offset = totalDias > limiteDias ? totalDias - limiteDias : 0;
       const days: { label: string; entradas: number; saidas: number }[] = [];
       for (let i = 0; i < limiteDias; i++) {
         const date = new Date(ini);
         date.setDate(ini.getDate() + offset + i);
-        const dateKey = date.toISOString().split('T')[0];
-        const dayTx = transactions.filter(t => t.date === dateKey);
+        const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const dayTx = transactionsAteConsulta.filter(t => t.date === dateKey);
         const entradas = dayTx.filter(t => t.type === 'income').reduce((s, t) => s + safeNum(t.amount), 0);
         const saidas = dayTx.filter(t => t.type === 'expense').reduce((s, t) => s + safeNum(t.amount), 0);
         days.push({
@@ -312,8 +377,8 @@ function FinancasResumo() {
     for (let i = 29; i >= 0; i--) {
       const date = new Date(hoje);
       date.setDate(date.getDate() - i);
-      const dateKey = date.toISOString().split('T')[0];
-      const dayTx = transactions.filter(t => t.date === dateKey);
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const dayTx = transactionsAteConsulta.filter(t => t.date === dateKey);
       const entradas = dayTx.filter(t => t.type === 'income').reduce((s, t) => s + safeNum(t.amount), 0);
       const saidas = dayTx.filter(t => t.type === 'expense').reduce((s, t) => s + safeNum(t.amount), 0);
       days.push({
@@ -328,22 +393,23 @@ function FinancasResumo() {
   const entradasSaidasData = getEntradasSaidasData();
 
   // Latest payments received
-  const ultimosPagamentosRecebidos = transactions
+  const ultimosPagamentosRecebidos = transactionsAteConsulta
     .filter(t => t.type === 'income')
     .sort((a, b) => parseDateOnlyToTime(b.date) - parseDateOnlyToTime(a.date))
     .slice(0, 5);
 
   // Latest expenses
-  const historicoSaida = transactions
+  const historicoSaida = transactionsAteConsulta
     .filter(t => t.type === 'expense')
     .sort((a, b) => parseDateOnlyToTime(b.date) - parseDateOnlyToTime(a.date))
     .slice(0, 5);
 
-  // Total do estoque (investimento): materiais + produtos (custo) via /api/estoque/
+  // Total do estoque (investimento): produtos (incl. insumos) via /api/estoque/
   const estoqueTotal = React.useMemo(() => {
     const soma = (arr: any[]) => arr.reduce((s, i) => s + safeNum(i.total), 0);
-    return soma(estoqueMateriais) + soma(estoqueProdutos);
-  }, [estoqueMateriais, estoqueProdutos]);
+    // produtos já inclui insumos; não somar materiais à parte (duplicaria)
+    return soma(estoqueProdutos);
+  }, [estoqueProdutos]);
 
   const totalSaldoContas = contas.reduce(
     (sum, c) => sum + safeNum(c.saldo_atual ?? c.saldo),
@@ -370,9 +436,31 @@ function FinancasResumo() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-semibold">Visão geral</h1>
-          <p className="text-muted-foreground">Gráficos e resumo financeiro</p>
+          <p className="text-muted-foreground">
+            {consultaData
+              ? `Consulta em ${formatDateOnly(consultaData)} às 23:59`
+              : "Gráficos e resumo financeiro"}
+          </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => {
+              setDataConsultaDraft(consultaData || hojeKey());
+              setDialogConsultaOpen(true);
+            }}
+          >
+            <CalendarSearch className="size-4" />
+            Consultar tela data
+          </Button>
+          {consultaData && (
+            <Button type="button" variant="secondary" size="sm" onClick={() => void loadFromApi()}>
+              Voltar ao atual
+            </Button>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -393,9 +481,48 @@ function FinancasResumo() {
               <p>{valoresVisiveis ? "Ocultar valores (como no app do banco)" : "Mostrar valores"}</p>
             </TooltipContent>
           </Tooltip>
-          <TransactionDialog onTransactionAdded={loadTransactions} />
+          {!consultaData && <TransactionDialog onTransactionAdded={loadTransactions} />}
         </div>
       </div>
+
+      {consultaData && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          Exibindo a situação financeira de <strong>{formatDateOnly(consultaData)}</strong> às <strong>23:59</strong>.
+          Os totais de a receber, a pagar, contas e estoque foram reconstruídos até esse horário.
+        </div>
+      )}
+
+      <Dialog open={dialogConsultaOpen} onOpenChange={setDialogConsultaOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Consultar tela data</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Input
+              id="financas-consulta-data"
+              type="date"
+              value={dataConsultaDraft}
+              max={hojeKey()}
+              onChange={(e) => setDataConsultaDraft(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              A tela mostra os saldos como estavam nesse dia às 23:59 (horário de Brasília).
+            </p>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDialogConsultaOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={!dataConsultaDraft || carregandoConsulta}
+              onClick={() => void aplicarConsultaData(dataConsultaDraft)}
+            >
+              {carregandoConsulta ? "Carregando…" : "Consultar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Top 4 Charts - mesmo tamanho, centralizados */}
       <div className="flex justify-center">
@@ -436,7 +563,7 @@ function FinancasResumo() {
                   {clientesComSaldo.length > 0 ? (
                     clientesComSaldo.map((c: any) => (
                       <div key={c.id} className="flex items-center justify-between p-2 rounded-md dash-inset-row">
-                        <p className="text-sm font-medium truncate flex-1 min-w-0">{c.nome}</p>
+                        <p className={`text-sm font-medium truncate flex-1 min-w-0 ${c.ativo === false ? "text-destructive" : ""}`}>{c.nome}</p>
                         <p className="text-sm font-semibold dash-text-positive ml-2">{formatCurrency(safeNum(c.saldo_devedor))}</p>
                       </div>
                     ))
@@ -652,7 +779,6 @@ function FinancasResumo() {
               <SelectValue placeholder="Período" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="tudo">Todo período</SelectItem>
               <SelectItem value="dia">Hoje</SelectItem>
               <SelectItem value="semana">Última semana</SelectItem>
               <SelectItem value="mes">Últimos 30 dias</SelectItem>
@@ -974,7 +1100,7 @@ function FinancasResumo() {
             <CardContent className="flex-1">
               <div className="space-y-2">
                 <div className="flex items-center justify-between p-3 rounded-lg bg-primary/5 border border-primary/20">
-                  <span className="font-medium">Total (materiais + produtos)</span>
+                  <span className="font-medium">Total estoque (produtos)</span>
                   <span className="text-xl font-bold text-primary">{formatCurrency(estoqueTotal)}</span>
                 </div>
                 <Table>

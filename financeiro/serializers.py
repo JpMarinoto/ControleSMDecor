@@ -12,11 +12,9 @@ from .models import (
     Fornecedor,
     Produto,
     ProdutoInsumo,
-    Material,
     CategoriaProduto,
     Venda,
     ItemVenda,
-    CompraMaterial,
     CompraProduto,
     OrdemCompra,
     Pagamento,
@@ -100,15 +98,18 @@ class ProdutoSerializer(serializers.ModelSerializer):
             'nome',
             'categoria',
             'categoria_nome',
+            'eh_insumo',
             'revenda',
             'fabricado',
             'fornecedor',
             'fornecedor_nome',
             'preco_custo',
+            'preco_fabricacao',
             'mao_obra_unitaria',
             'margem_lucro_percent',
             'preco_venda',
             'descricao',
+            'estoque_atual',
             'insumos',
             'custo_materiais',
             'custo_total_fabricacao',
@@ -126,14 +127,17 @@ class ProdutoSerializer(serializers.ModelSerializer):
 
     def get_insumos(self, obj):
         itens = []
-        for i in obj.insumos.select_related('material').all():
-            preco_ins = Decimal(str(i.material.preco_para_insumo() or 0))
+        for i in obj.insumos.select_related('insumo').all():
+            preco_ins = Decimal(str(i.insumo.preco_para_insumo() or 0))
             qtd = Decimal(str(i.quantidade or 0))
             itens.append(
                 {
                     'id': i.id,
-                    'material': i.material_id,
-                    'material_nome': i.material.nome,
+                    # material = alias legado; insumo = novo
+                    'material': i.insumo_id,
+                    'insumo': i.insumo_id,
+                    'material_nome': i.insumo.nome,
+                    'insumo_nome': i.insumo.nome,
                     'quantidade': float(qtd),
                     'preco_unitario_base': float(preco_ins),
                     'total_insumo': float(qtd * preco_ins),
@@ -143,8 +147,8 @@ class ProdutoSerializer(serializers.ModelSerializer):
 
     def get_custo_materiais(self, obj):
         total = Decimal('0')
-        for i in obj.insumos.select_related('material').all():
-            total += Decimal(str(i.quantidade or 0)) * Decimal(str(i.material.preco_para_insumo() or 0))
+        for i in obj.insumos.select_related('insumo').all():
+            total += Decimal(str(i.quantidade or 0)) * Decimal(str(i.insumo.preco_para_insumo() or 0))
         return float(total)
 
     def get_custo_total_fabricacao(self, obj):
@@ -152,33 +156,13 @@ class ProdutoSerializer(serializers.ModelSerializer):
         mao_obra = Decimal(str(obj.mao_obra_unitaria or 0))
         return float(custo_mat + mao_obra)
 
+    def create(self, validated_data):
+        validated_data['eh_insumo'] = False
+        return super().create(validated_data)
 
-class MaterialSerializer(serializers.ModelSerializer):
-    nome = serializers.CharField()
-    precoUnitarioBase = serializers.DecimalField(source='preco_unitario_base', max_digits=12, decimal_places=4)
-    precoFabricacao = serializers.DecimalField(
-        source='preco_fabricacao', max_digits=12, decimal_places=4, required=False, allow_null=True
-    )
-    fornecedor_padrao_nome = serializers.SerializerMethodField(read_only=True)
-
-    class Meta:
-        model = Material
-        fields = [
-            'id',
-            'ativo',
-            'nome',
-            'precoUnitarioBase',
-            'precoFabricacao',
-            'estoque_atual',
-            'categoria',
-            'fornecedor_padrao',
-            'fornecedor_padrao_nome',
-        ]
-
-    def get_fornecedor_padrao_nome(self, obj):
-        if obj.fornecedor_padrao_id and obj.fornecedor_padrao:
-            return obj.fornecedor_padrao.nome or ''
-        return ''
+    def update(self, instance, validated_data):
+        validated_data['eh_insumo'] = False
+        return super().update(instance, validated_data)
 
 
 class ContaBancoSerializer(serializers.ModelSerializer):
@@ -262,30 +246,21 @@ class VendaCreateSerializer(serializers.Serializer):
 
 
 # --- Compras (ordem com itens, como Venda) ---
-class ItemCompraMaterialSerializer(serializers.ModelSerializer):
-    tipo = serializers.SerializerMethodField()
-    material_nome = serializers.CharField(source='material.nome', read_only=True)
-    total = serializers.SerializerMethodField()
-
-    class Meta:
-        model = CompraMaterial
-        fields = ['id', 'tipo', 'material', 'material_nome', 'quantidade', 'preco_no_dia', 'total']
-
-    def get_tipo(self, obj):
-        return 'material'
-
-    def get_total(self, obj):
-        return float(obj.total_compra)
-
-
 class ItemCompraProdutoSerializer(serializers.ModelSerializer):
     tipo = serializers.SerializerMethodField()
     produto_nome = serializers.CharField(source='produto.nome', read_only=True)
+    # Alias legado para front que ainda lê "material"
+    material = serializers.IntegerField(source='produto_id', read_only=True)
+    material_nome = serializers.CharField(source='produto.nome', read_only=True)
     total = serializers.SerializerMethodField()
 
     class Meta:
         model = CompraProduto
-        fields = ['id', 'tipo', 'produto', 'produto_nome', 'quantidade', 'preco_no_dia', 'total']
+        fields = [
+            'id', 'tipo', 'produto', 'produto_nome',
+            'material', 'material_nome',
+            'quantidade', 'preco_no_dia', 'total',
+        ]
 
     def get_tipo(self, obj):
         return 'produto'
@@ -323,36 +298,33 @@ class OrdemCompraSerializer(serializers.ModelSerializer):
         return _lancamento_iso_datetime_br(getattr(obj, 'data_lancamento', None))
 
     def get_itens(self, obj):
-        # Junta itens de material + itens de produto (revenda)
-        itens_mat = list(getattr(obj, 'itens', []).all()) if hasattr(obj, 'itens') else []
         itens_prod = list(getattr(obj, 'itens_produtos', []).all()) if hasattr(obj, 'itens_produtos') else []
-        out = [ItemCompraMaterialSerializer(i).data for i in itens_mat] + [ItemCompraProdutoSerializer(i).data for i in itens_prod]
-        return out
+        return [ItemCompraProdutoSerializer(i).data for i in itens_prod]
 
     def get_total(self, obj):
         try:
-            total = float(obj.total_ordem)
+            return float(obj.total_ordem)
         except Exception:
-            total = 0.0
-        # Inclui produtos de revenda quando existirem
-        try:
-            total += sum(float(i.total_compra) for i in obj.itens_produtos.all())
-        except Exception:
-            pass
-        return float(total)
+            return 0.0
 
 
 # Serializer para um item avulso (edição/exclusão/copiar)
 class CompraSerializer(serializers.ModelSerializer):
     fornecedor = serializers.CharField(source='fornecedor.nome', read_only=True)
-    material_nome = serializers.CharField(source='material.nome', read_only=True)
+    produto_nome = serializers.CharField(source='produto.nome', read_only=True)
+    material_nome = serializers.CharField(source='produto.nome', read_only=True)
+    material = serializers.IntegerField(source='produto_id', read_only=True)
     fornecedor_id = serializers.PrimaryKeyRelatedField(queryset=Fornecedor.objects.all(), source='fornecedor', write_only=True)
+    produto_id = serializers.PrimaryKeyRelatedField(queryset=Produto.objects.all(), source='produto', write_only=True)
     data = serializers.SerializerMethodField()
     total = serializers.SerializerMethodField()
 
     class Meta:
-        model = CompraMaterial
-        fields = ['id', 'material', 'material_nome', 'fornecedor_id', 'fornecedor', 'quantidade', 'preco_no_dia', 'data_compra', 'data', 'total']
+        model = CompraProduto
+        fields = [
+            'id', 'fornecedor', 'fornecedor_id', 'produto', 'produto_id', 'produto_nome',
+            'material', 'material_nome', 'quantidade', 'preco_no_dia', 'data_compra', 'data', 'total',
+        ]
 
     def get_data(self, obj):
         return _data_compra_iso_br(obj.data_compra)
@@ -362,7 +334,7 @@ class CompraSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop('fornecedor_id', None)
-        return CompraMaterial.objects.create(**validated_data)
+        return CompraProduto.objects.create(**validated_data)
 
 
 # --- Transações (entradas/saídas genéricas + pagamentos) ---

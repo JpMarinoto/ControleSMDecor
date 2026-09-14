@@ -12,11 +12,10 @@ from financeiro.models import (
     Fornecedor,
     CategoriaProduto,
     Produto,
-    Material,
     Venda,
     ItemVenda,
     Pagamento,
-    CompraMaterial,
+    CompraProduto,
     PagamentoFornecedor,
     ContaBanco,
     MovimentoBanco,
@@ -27,7 +26,7 @@ from financeiro.models import (
 
 
 class Command(BaseCommand):
-    help = "Insere dados de teste: clientes, fornecedores, produtos, materiais, vendas, compras, etc."
+    help = "Insere dados de teste: clientes, fornecedores, produtos, insumos, vendas, compras, etc."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -42,12 +41,11 @@ class Command(BaseCommand):
             ItemVenda.objects.all().delete()
             Venda.objects.all().delete()
             Pagamento.objects.all().delete()
-            CompraMaterial.objects.all().delete()
+            CompraProduto.objects.all().delete()
             PagamentoFornecedor.objects.all().delete()
             MovimentoCaixa.objects.all().delete()
             MovimentoBanco.objects.all().delete()
             Produto.objects.all().delete()
-            Material.objects.all().delete()
             ContaBanco.objects.all().delete()
             DividaGeral.objects.all().delete()
             OutrosAReceber.objects.all().delete()
@@ -116,29 +114,34 @@ class Command(BaseCommand):
             )
             produtos.append(p)
 
-        self.stdout.write("Criando materiais...")
-        materiais_data = [
+        self.stdout.write("Criando produtos de compra (com fornecedor)...")
+        insumos_data = [
             ("Frejó 45x11", cat_mat1, fornecedores[0], Decimal("0.64")),
             ("MDF 18mm", cat_mat1, fornecedores[0], Decimal("1.20")),
             ("Parafuso 4x40", cat_mat2, fornecedores[1], Decimal("0.05")),
             ("Dobradiça 35mm", cat_mat2, fornecedores[1], Decimal("3.50")),
             ("Cola PVA", cat_mat2, fornecedores[2], Decimal("28.00")),
         ]
-        materiais = []
-        for nome, cat, forn, preco in materiais_data:
-            m, _ = Material.objects.get_or_create(
+        insumos = []
+        for nome, cat, forn, preco in insumos_data:
+            m, _ = Produto.objects.get_or_create(
                 nome=nome,
                 defaults={
                     "categoria": cat,
-                    "fornecedor_padrao": forn,
-                    "preco_unitario_base": preco,
+                    "fornecedor": forn,
+                    "preco_custo": preco,
                     "estoque_atual": 100,
+                    "eh_insumo": False,
                 },
             )
-            materiais.append(m)
+            if m.fornecedor_id != forn.id or m.preco_custo != preco:
+                m.fornecedor = forn
+                m.preco_custo = preco
+                m.eh_insumo = False
+                m.save(update_fields=["eh_insumo", "fornecedor", "preco_custo"])
+            insumos.append(m)
 
         self.stdout.write("Criando vendas e itens...")
-        hoje = timezone.now()
         vendas_config = [
             (clientes[0], [(produtos[0], 1, Decimal("850.00")), (produtos[1], 4, Decimal("320.00"))]),
             (clientes[1], [(produtos[2], 1, Decimal("1200.00"))]),
@@ -161,13 +164,13 @@ class Command(BaseCommand):
         Pagamento.objects.create(cliente=clientes[0], valor=Decimal("500.00"))
         Pagamento.objects.create(cliente=clientes[1], valor=Decimal("600.00"))
 
-        self.stdout.write("Criando compras de materiais...")
-        for i, mat in enumerate(materiais[:4]):
-            CompraMaterial.objects.create(
-                material=mat,
-                fornecedor=mat.fornecedor_padrao or fornecedores[0],
+        self.stdout.write("Criando compras de produtos...")
+        for i, mat in enumerate(insumos[:4]):
+            CompraProduto.objects.create(
+                produto=mat,
+                fornecedor=mat.fornecedor or fornecedores[0],
                 quantidade=50 + i * 10,
-                preco_no_dia=mat.preco_unitario_base,
+                preco_no_dia=mat.preco_custo,
             )
 
         self.stdout.write("Criando pagamentos a fornecedores...")
@@ -200,6 +203,6 @@ class Command(BaseCommand):
             f"  - {Cliente.objects.count()} clientes, {Fornecedor.objects.count()} fornecedores"
         )
         self.stdout.write(
-            f"  - {Produto.objects.count()} produtos, {Material.objects.count()} materiais"
+            f"  - {Produto.objects.count()} produtos"
         )
-        self.stdout.write(f"  - {Venda.objects.count()} vendas, {CompraMaterial.objects.count()} compras")
+        self.stdout.write(f"  - {Venda.objects.count()} vendas, {CompraProduto.objects.count()} compras")

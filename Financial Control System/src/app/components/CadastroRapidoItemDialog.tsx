@@ -9,7 +9,7 @@ import { api } from "../lib/api";
 import { formatCurrencyBrl } from "../lib/format";
 import { toast } from "sonner";
 
-export type CadastroRapidoModo = "produto-venda" | "produto-compra" | "material-compra";
+export type CadastroRapidoModo = "produto-venda" | "produto-compra" | "material-compra"; // material-compra = produto com fornecedor + custo
 
 type Categoria = { id: number | string; nome?: string; tipo?: string };
 type Fornecedor = { id: number | string; nome?: string; nomeRazaoSocial?: string };
@@ -20,6 +20,7 @@ type Material = {
   preco_unitario_base?: number;
   precoFabricacao?: number | null;
   preco_fabricacao?: number | null;
+  fabricado?: boolean;
 };
 
 type InsumoForm = {
@@ -57,8 +58,8 @@ function precoUnitarioInsumoMaterial(m: Material): number {
 
 const TITULOS: Record<CadastroRapidoModo, string> = {
   "produto-venda": "Cadastrar produto",
-  "produto-compra": "Cadastrar produto (revenda)",
-  "material-compra": "Cadastrar material",
+  "produto-compra": "Cadastrar produto",
+  "material-compra": "Cadastrar produto",
 };
 
 type Props = {
@@ -78,7 +79,8 @@ export function CadastroRapidoItemDialog({
   fornecedorId,
   isChefe = true,
 }: Props) {
-  const isProduto = modo === "produto-venda" || modo === "produto-compra";
+  const isInsumo = modo === "material-compra";
+  const isProdutoForm = modo === "produto-venda" || modo === "produto-compra";
   const isCompraRevenda = modo === "produto-compra";
 
   const [nome, setNome] = useState("");
@@ -129,22 +131,32 @@ export function CadastroRapidoItemDialog({
       return;
     }
     if (fornecedorId) {
-      if (isProduto) setFornecedorProduto(fornecedorId);
-      else setFornecedorProduto(fornecedorId);
+      setFornecedorProduto(fornecedorId);
     }
-    const tipoCat = isProduto ? "produto" : "material";
     Promise.all([
       api.getCategorias().catch(() => []),
       api.getFornecedores().catch(() => []),
-      isProduto ? api.getMateriais().catch(() => []) : Promise.resolve([]),
-    ]).then(([cats, forns, mats]) => {
-      setCategorias(
-        (Array.isArray(cats) ? cats : []).filter((c: Categoria) => c.tipo === tipoCat),
-      );
+      api.getProdutos().catch(() => []),
+    ]).then(([cats, forns, prods]) => {
+      const allCats = Array.isArray(cats) ? cats : [];
+      setCategorias(allCats.filter((c: Categoria) => c.tipo === "produto"));
       setFornecedores(Array.isArray(forns) ? forns : []);
-      setMateriais(Array.isArray(mats) ? mats : []);
+      const list = Array.isArray(prods) ? prods : [];
+      setMateriais(
+        list
+          .filter((p: any) => !p.fabricado)
+          .map((p: any) => ({
+            id: p.id,
+            nome: p.nome,
+            precoUnitarioBase: p.preco_custo,
+            preco_unitario_base: p.preco_custo,
+            precoFabricacao: p.preco_fabricacao,
+            preco_fabricacao: p.preco_fabricacao,
+            fabricado: Boolean(p.fabricado),
+          })),
+      );
     });
-  }, [open, isProduto, fornecedorId]);
+  }, [open, isInsumo, fornecedorId]);
 
   useEffect(() => {
     if (!produtoFabricado) return;
@@ -160,7 +172,7 @@ export function CadastroRapidoItemDialog({
     const mat = materiais.find((m) => String(m.id) === String(materialInsumo));
     const qtd = parseDecimal(quantidadeInsumo);
     if (!mat || qtd == null || qtd <= 0) {
-      toast.error("Selecione material e quantidade válida");
+      toast.error("Selecione insumo e quantidade válida");
       return;
     }
     const precoBase = precoUnitarioInsumoMaterial(mat);
@@ -203,29 +215,49 @@ export function CadastroRapidoItemDialog({
       toast.error("Preço de venda inválido");
       return;
     }
+    // Na compra, o fornecedor da ordem é obrigatório e vem da prop (não depende do Select).
+    const fornIdRaw = isCompraRevenda ? (fornecedorId || fornecedorProduto) : fornecedorProduto;
+    if (isCompraRevenda && !fornIdRaw) {
+      toast.error("Fornecedor da compra é obrigatório");
+      return;
+    }
     const custo = parseDecimal(precoCusto);
     const margem = parseDecimal(margemLucro);
     const mao = parseDecimal(maoObra);
 
+    const fornNum = fornIdRaw ? Number(fornIdRaw) : null;
     const payload = {
       nome: nome.trim(),
       categoria: Number(categoriaId),
       preco_venda: q4(venda),
       descricao: "",
       revenda: isCompraRevenda,
-      fabricado: produtoFabricado,
-      fornecedor: fornecedorProduto ? Number(fornecedorProduto) : null,
+      eh_insumo: false,
+      fabricado: isCompraRevenda ? false : produtoFabricado,
+      fornecedor: fornNum != null && Number.isFinite(fornNum) ? fornNum : null,
       preco_custo: q4(custo != null && custo >= 0 ? custo : 0),
       mao_obra_unitaria: q4(mao != null && mao >= 0 ? mao : 0),
       margem_lucro_percent: q4(margem != null ? margem : 0),
-      insumos: produtoFabricado
+      insumos: !isCompraRevenda && produtoFabricado
         ? insumos.map((i) => ({ material: i.material, quantidade: q4(Number(i.quantidade)) }))
         : [],
     };
 
     setSaving(true);
     try {
-      const created = (await api.createProduto(payload)) as Record<string, unknown>;
+      let created = (await api.createProduto(payload)) as Record<string, unknown>;
+      // Garante vínculo na resposta (lista da compra filtra por fornecedor).
+      if (payload.fornecedor != null) {
+        const savedForn = created.fornecedor ?? created.fornecedor_id;
+        if (savedForn == null || savedForn === "" || String(savedForn) !== String(payload.fornecedor)) {
+          created = (await api.updateProduto(String(created.id), {
+            fornecedor: payload.fornecedor,
+          })) as Record<string, unknown>;
+        }
+        if (created.fornecedor == null || created.fornecedor === "") {
+          created.fornecedor = payload.fornecedor;
+        }
+      }
       toast.success("Produto cadastrado");
       onCreated(created);
       onOpenChange(false);
@@ -238,60 +270,59 @@ export function CadastroRapidoItemDialog({
 
   const handleSubmitMaterial = async () => {
     if (!nome.trim()) {
-      toast.error("Informe o nome do material");
+      toast.error("Informe o nome do produto");
       return;
     }
     if (!categoriaId) {
       toast.error("Selecione a categoria");
       return;
     }
-    if (!fornecedorProduto) {
-      toast.error("Selecione o fornecedor");
-      return;
-    }
 
     let preco = 0;
     if (isChefe) {
       if (!precoVenda.trim()) {
-        toast.error("Informe o preço base");
+        toast.error("Informe o preço de custo");
         return;
       }
       preco = parseDecimal(precoVenda) ?? NaN;
       if (Number.isNaN(preco) || preco < 0) {
-        toast.error("Preço base inválido");
+        toast.error("Preço de custo inválido");
         return;
       }
     }
 
+    const fornRaw = fornecedorId || fornecedorProduto;
+    if (!fornRaw) {
+      toast.error("Selecione o fornecedor");
+      return;
+    }
+    const fornNum = Number(fornRaw);
     const payload: Record<string, unknown> = {
       nome: nome.trim(),
       categoria: Number(categoriaId),
-      fornecedor_padrao: Number(fornecedorProduto),
-      preco_unitario_base: q4(preco),
-      precoUnitarioBase: q4(preco),
+      eh_insumo: false,
+      fabricado: false,
+      revenda: false,
+      fornecedor: fornNum,
+      preco_custo: q4(preco),
+      preco_venda: 0,
+      mao_obra_unitaria: 0,
+      margem_lucro_percent: 0,
+      descricao: "",
+      insumos: [],
     };
-
-    if (isChefe) {
-      const fabRaw = precoFabricacao.trim();
-      if (fabRaw) {
-        const pf = parseDecimal(fabRaw);
-        if (pf == null || pf < 0) {
-          toast.error("Preço de fabricação inválido");
-          return;
-        }
-        payload.preco_fabricacao = q4(pf);
-        payload.precoFabricacao = q4(pf);
-      }
-    }
 
     setSaving(true);
     try {
-      const created = (await api.createMaterial(payload)) as Record<string, unknown>;
-      toast.success("Material cadastrado");
+      const created = (await api.createProduto(payload)) as Record<string, unknown>;
+      if (created.fornecedor == null || created.fornecedor === "") {
+        created.fornecedor = fornNum;
+      }
+      toast.success("Produto cadastrado");
       onCreated(created);
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao cadastrar material");
+      toast.error(err instanceof Error ? err.message : "Erro ao cadastrar produto");
     } finally {
       setSaving(false);
     }
@@ -299,7 +330,7 @@ export function CadastroRapidoItemDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isProduto) void handleSubmitProduto();
+    if (isProdutoForm) void handleSubmitProduto();
     else void handleSubmitMaterial();
   };
 
@@ -311,7 +342,7 @@ export function CadastroRapidoItemDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
-            {isProduto ? (
+            {isProdutoForm ? (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
@@ -371,7 +402,7 @@ export function CadastroRapidoItemDialog({
                       onCheckedChange={(v) => setProdutoFabricado(v === true)}
                     />
                     <Label htmlFor="cr-fabricado" className="cursor-pointer font-normal">
-                      Produto fabricado (composição por materiais)
+                      Produto fabricado (composição por insumos)
                     </Label>
                   </div>
                 )}
@@ -459,10 +490,10 @@ export function CadastroRapidoItemDialog({
                     <h4 className="text-sm font-medium">Insumos do produto</h4>
                     <div className="grid gap-3 sm:grid-cols-4">
                       <div className="space-y-2 sm:col-span-2">
-                        <Label htmlFor="cr-insumo-mat">Material</Label>
+                        <Label htmlFor="cr-insumo-mat">Insumo</Label>
                         <Select value={materialInsumo} onValueChange={setMaterialInsumo}>
                           <SelectTrigger id="cr-insumo-mat">
-                            <SelectValue placeholder="Selecione o material" />
+                            <SelectValue placeholder="Selecione o insumo" />
                           </SelectTrigger>
                           <SelectContent>
                             {materiais.map((m) => (
@@ -544,12 +575,12 @@ export function CadastroRapidoItemDialog({
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="cr-nome-material">Nome do material *</Label>
+                    <Label htmlFor="cr-nome-material">Nome do produto *</Label>
                     <Input
                       id="cr-nome-material"
                       value={nome}
                       onChange={(e) => setNome(e.target.value)}
-                      placeholder="Nome do material"
+                      placeholder="Nome do produto"
                     />
                   </div>
                   <div className="space-y-2">
@@ -568,7 +599,7 @@ export function CadastroRapidoItemDialog({
                         </SelectContent>
                       </Select>
                     ) : (
-                      <p className="text-sm text-muted-foreground">Cadastre uma categoria de material primeiro.</p>
+                      <p className="text-sm text-muted-foreground">Cadastre uma categoria de produto primeiro.</p>
                     )}
                   </div>
                   <div className="space-y-2 sm:col-span-2">
@@ -587,36 +618,20 @@ export function CadastroRapidoItemDialog({
                     </Select>
                   </div>
                   {isChefe && (
-                    <>
-                      <div className="space-y-2 sm:col-span-2">
-                        <Label htmlFor="cr-preco-base">Preço base (compra e estoque) *</Label>
-                        <Input
-                          id="cr-preco-base"
-                          type="text"
-                          inputMode="decimal"
-                          value={precoVenda}
-                          onChange={(e) => setPrecoVenda(e.target.value)}
-                          placeholder="0,0000"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Usado em compras e valorização de estoque.
-                        </p>
-                      </div>
-                      <div className="space-y-2 sm:col-span-2">
-                        <Label htmlFor="cr-preco-fab-mat">Preço na fabricação (insumos)</Label>
-                        <Input
-                          id="cr-preco-fab-mat"
-                          type="text"
-                          inputMode="decimal"
-                          value={precoFabricacao}
-                          onChange={(e) => setPrecoFabricacao(e.target.value)}
-                          placeholder="Opcional — vazio usa o preço base"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Só para custo de materiais nos produtos fabricados.
-                        </p>
-                      </div>
-                    </>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="cr-preco-base">Preço de custo *</Label>
+                      <Input
+                        id="cr-preco-base"
+                        type="text"
+                        inputMode="decimal"
+                        value={precoVenda}
+                        onChange={(e) => setPrecoVenda(e.target.value)}
+                        placeholder="0,0000"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Usado em compras e valorização de estoque.
+                      </p>
+                    </div>
                   )}
                 </div>
               </>

@@ -56,7 +56,6 @@ class Fornecedor(models.Model):
 
     @property
     def saldo_devedor(self):
-        # Materiais (related_name compras) + produtos de revenda (compras_produtos)
         z = Decimal("0")
 
         def _conta_linha(c):
@@ -64,20 +63,15 @@ class Fornecedor(models.Model):
                 return True
             return not c.ordem.cancelada
 
-        total_m = sum(
-            (c.total_compra for c in self.compras.select_related('ordem').all() if _conta_linha(c)),
-            z,
-        )
-        total_p = sum(
+        total_compras = sum(
             (c.total_compra for c in self.compras_produtos.select_related('ordem').all() if _conta_linha(c)),
             z,
         )
-        total_compras = total_m + total_p
         total_pagos = sum((p.valor for p in self.pagamentos_feitos.all()), z)
         return total_compras - total_pagos
 
 # ==========================================
-# 2. PRODUTOS (PARA VENDA) E MATERIAIS (COMPRA)
+# 2. PRODUTOS (venda, revenda e insumos)
 # ==========================================
 
 class Produto(models.Model):
@@ -90,6 +84,8 @@ class Produto(models.Model):
         blank=True,
         related_name='produtos'
     )
+    # Insumo (ex-material): comprado para fabricação; revenda/fabricado continuam como antes.
+    eh_insumo = models.BooleanField(default=False, verbose_name="Insumo")
     revenda = models.BooleanField(default=False, verbose_name="Revenda")
     fabricado = models.BooleanField(default=False, verbose_name="Fabricado")
     fornecedor = models.ForeignKey(
@@ -100,59 +96,44 @@ class Produto(models.Model):
         related_name='produtos',
     )
     preco_custo = models.DecimalField(max_digits=14, decimal_places=4, default=0.00)
+    preco_fabricacao = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Opcional: preço usado só no custo de insumos de fabricados. Compras/estoque usam preco_custo.",
+    )
     mao_obra_unitaria = models.DecimalField(max_digits=14, decimal_places=4, default=0.00)
     margem_lucro_percent = models.DecimalField(max_digits=10, decimal_places=4, default=0.00)
     preco_venda = models.DecimalField(max_digits=14, decimal_places=4, default=0.00)
     descricao = models.TextField(blank=True, null=True)
     estoque_atual = models.PositiveIntegerField(default=0)
 
+    def preco_para_insumo(self):
+        """Custo unitário na composição de produtos fabricados."""
+        if self.preco_fabricacao is not None:
+            return self.preco_fabricacao
+        return self.preco_custo
+
     def __str__(self):
         return f"[{self.id}] {self.nome}"
 
-class Material(models.Model):
-    ativo = models.BooleanField(default=True, verbose_name="Ativo")
-    nome = models.CharField(max_length=200)
-    categoria = models.ForeignKey(
-        'CategoriaProduto',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='materiais',
-        limit_choices_to={'tipo': 'material'},
-    )
-    fornecedor_padrao = models.ForeignKey(Fornecedor, on_delete=models.SET_NULL, null=True, blank=True)
-    preco_unitario_base = models.DecimalField(max_digits=12, decimal_places=4)
-    preco_fabricacao = models.DecimalField(
-        max_digits=12,
-        decimal_places=4,
-        null=True,
-        blank=True,
-        help_text="Opcional: preço usado só no custo de insumos. Compras e estoque usam preco_unitario_base.",
-    )
-    estoque_atual = models.PositiveIntegerField(default=0)
-
-    def preco_para_insumo(self):
-        """Custo unitário do material na composição de produtos fabricados."""
-        if self.preco_fabricacao is not None:
-            return self.preco_fabricacao
-        return self.preco_unitario_base
-
-    def __str__(self):
-        return self.nome
-
 
 class ProdutoInsumo(models.Model):
-    """Materiais necessários para fabricar um produto e sua quantidade por unidade."""
+    """Insumos (produtos) necessários para fabricar um produto e quantidade por unidade."""
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='insumos')
-    material = models.ForeignKey(Material, on_delete=models.PROTECT)
+    insumo = models.ForeignKey(
+        Produto,
+        on_delete=models.PROTECT,
+        related_name='usado_em_fabricacoes',
+    )
     quantidade = models.DecimalField(max_digits=12, decimal_places=4, default=1)
 
     class Meta:
-        unique_together = [('produto', 'material')]
+        unique_together = [('produto', 'insumo')]
 
     def __str__(self):
-        return f"{self.produto.nome} - {self.material.nome} ({self.quantidade})"
-
+        return f"{self.produto.nome} - {self.insumo.nome} ({self.quantidade})"
 # ==========================================
 # 3. TRANSAÇÕES DE VENDA (CLIENTES)
 # ==========================================
@@ -411,37 +392,11 @@ class OrdemCompra(models.Model):
 
     @property
     def total_ordem(self):
-        return sum(item.total_compra for item in self.itens.all())
-
-
-class CompraMaterial(models.Model):
-    """Compra: preco_no_dia é o valor negociado na nota; mudança no cadastro do material não altera compras antigas."""
-    material = models.ForeignKey(Material, on_delete=models.PROTECT)
-    fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='compras')
-    quantidade = models.PositiveIntegerField()
-    preco_no_dia = models.DecimalField(max_digits=18, decimal_places=5)
-    data_lancamento = models.DateTimeField(default=timezone.now, verbose_name='Data de lançamento')
-    data_compra = models.DateTimeField(default=timezone.now, verbose_name='Data da compra')
-    ordem = models.ForeignKey(
-        OrdemCompra,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name='itens',
-    )
-    marcada_paga = models.BooleanField(
-        default=False,
-        verbose_name='Marcada como paga (avulsa)',
-        help_text='Só para linha sem ordem; com ordem, usa a marcação da ordem.',
-    )
-
-    @property
-    def total_compra(self):
-        return self.quantidade * self.preco_no_dia
+        return sum(item.total_compra for item in self.itens_produtos.all())
 
 
 class CompraProduto(models.Model):
-    """Compra de produto de revenda (produto pronto) vinculada a fornecedor."""
+    """Compra de produto (insumo ou revenda) vinculada a fornecedor. Snapshot de preço na nota."""
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT)
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='compras_produtos')
     quantidade = models.PositiveIntegerField()
@@ -464,7 +419,6 @@ class CompraProduto(models.Model):
     @property
     def total_compra(self):
         return self.quantidade * self.preco_no_dia
-
 class PagamentoFornecedor(models.Model):
     fornecedor = models.ForeignKey(Fornecedor, on_delete=models.PROTECT, related_name='pagamentos_feitos')
     valor = models.DecimalField(max_digits=10, decimal_places=2)
@@ -488,23 +442,8 @@ class MovimentoCaixa(models.Model):
         ordering = ['-data']
 
 
-class AjusteEstoque(models.Model):
-    """Histórico de entradas/saídas de estoque (ajuste manual da quantidade)."""
-    ENTRADA = 'entrada'
-    SAIDA = 'saida'
-    TIPO_CHOICES = [(ENTRADA, 'Entrada'), (SAIDA, 'Saída')]
-    material = models.ForeignKey(Material, on_delete=models.PROTECT, related_name='ajustes')
-    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
-    quantidade = models.PositiveIntegerField()
-    observacao = models.CharField(max_length=255, blank=True)
-    data = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-data']
-
-
 class AjusteEstoqueProduto(models.Model):
-    """Histórico de ajustes de estoque de produtos (contagem / definição de quantidade atual)."""
+    """Histórico de ajustes de estoque (contagem / definição de quantidade atual)."""
     produto = models.ForeignKey(Produto, on_delete=models.PROTECT, related_name='ajustes_estoque')
     quantidade = models.PositiveIntegerField()
     observacao = models.CharField(max_length=255, blank=True)
@@ -512,7 +451,6 @@ class AjusteEstoqueProduto(models.Model):
 
     class Meta:
         ordering = ['-data']
-
 
 class DividaGeral(models.Model):
     """Dívidas fixas (aluguel, funcionários, governo, etc.) que entram no total a pagar."""
@@ -729,7 +667,7 @@ class CategoriaProduto(models.Model):
     TIPO_MATERIAL = 'material'
     TIPO_CHOICES = [
         (TIPO_PRODUTO, 'Categoria de Produto'),
-        (TIPO_MATERIAL, 'Categoria de Material'),
+        (TIPO_MATERIAL, 'Categoria de Insumo'),
     ]
     nome = models.CharField(max_length=200)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default=TIPO_PRODUTO)

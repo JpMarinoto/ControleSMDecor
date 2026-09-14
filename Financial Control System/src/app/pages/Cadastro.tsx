@@ -11,7 +11,7 @@ import { Checkbox } from "../components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "../components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { UserPlus, Package, Pencil, Trash2, Tag, Truck, TreePine, Building2, Info, Search } from "lucide-react";
+import { UserPlus, Package, Pencil, Trash2, Tag, Truck, Building2, Info, Search, RotateCcw, Archive } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { api } from "../lib/api";
@@ -40,6 +40,7 @@ interface Cliente {
   cep?: string;
   cidade?: string;
   estado?: string;
+  ativo?: boolean;
   createdAt: string;
 }
 
@@ -59,6 +60,8 @@ interface Produto {
   fabricado?: boolean;
   fornecedor?: string; // id
   precoCusto?: number;
+  /** Override opcional para custo em composição (insumos). */
+  precoFabricacao?: number | null;
   maoObraUnitaria?: number;
   margemLucroPercent?: number;
   insumos?: { material: number; material_nome: string; quantidade: number; preco_unitario_base: number; total_insumo: number }[];
@@ -79,18 +82,7 @@ interface Fornecedor {
   cep?: string;
   cidade?: string;
   estado?: string;
-  createdAt: string;
-}
-
-interface Material {
-  id: string;
-  nome: string;
-  categoria: string;
-  fornecedor: string;
-  precoUnitarioBase: number;
-  /** Se definido, usado no custo de insumos; compras/estoque usam precoUnitarioBase. */
-  precoFabricacao?: number | null;
-  estoque_atual?: number;
+  ativo?: boolean;
   createdAt: string;
 }
 
@@ -141,11 +133,11 @@ function bulkProdPrecosInitialFromReference(p: Produto): { custo: string; venda:
 const CADASTRO_FORM_EDIT_SHELL =
   "sticky top-20 z-30 bg-background/95 pb-3 pt-2 -mx-1 px-1 backdrop-blur-sm border-b border-border/80 shadow-sm";
 
-/** Preço unitário do material na composição (fabricação): override opcional ou base. */
-function precoUnitarioInsumoMaterial(m: Material): number {
-  const fab = m.precoFabricacao;
+/** Preço unitário do insumo na composição (fabricação): override opcional ou custo. */
+function precoUnitarioInsumoProduto(p: Pick<Produto, "precoCusto" | "precoFabricacao">): number {
+  const fab = p.precoFabricacao;
   if (fab != null && !Number.isNaN(Number(fab))) return Number(fab);
-  return Number(m.precoUnitarioBase) || 0;
+  return Number(p.precoCusto) || 0;
 }
 
 function normalizeTextSearch(s: string): string {
@@ -337,7 +329,6 @@ export function Cadastro() {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
-  const [materiais, setMateriais] = useState<Material[]>([]);
   const [contas, setContas] = useState<ContaBancaria[]>([]);
 
   // Editing states
@@ -348,7 +339,6 @@ export function Cadastro() {
   const [editingProduto, setEditingProduto] = useState<Produto | null>(null);
   const [editingProdutoId, setEditingProdutoId] = useState<string | null>(null);
   const [editingFornecedor, setEditingFornecedor] = useState<Fornecedor | null>(null);
-  const [editingMaterial, setEditingMaterial] = useState<Material | null>(null);
   const [editingConta, setEditingConta] = useState<ContaBancaria | null>(null);
 
   // Form states - Clientes
@@ -402,12 +392,6 @@ export function Cadastro() {
   const [quantidadeInsumoProduto, setQuantidadeInsumoProduto] = useState('');
   const [insumosProduto, setInsumosProduto] = useState<{ material: number; material_nome: string; quantidade: number; preco_unitario_base: number; total_insumo: number }[]>([]);
 
-  // Form states - Materiais
-  const [nomeMaterial, setNomeMaterial] = useState('');
-  const [categoriaMaterial, setCategoriaMaterial] = useState('');
-  const [fornecedorMaterial, setFornecedorMaterial] = useState('');
-  const [precoMaterial, setPrecoMaterial] = useState('');
-  const [precoMaterialFabricacao, setPrecoMaterialFabricacao] = useState('');
 
   const [idsProdutosSelecionados, setIdsProdutosSelecionados] = useState<Set<string>>(new Set());
   const [bulkPrecosOpen, setBulkPrecosOpen] = useState(false);
@@ -418,25 +402,20 @@ export function Cadastro() {
 
   /** Seleção na aba Fornecedores (preços em massa por vínculo). */
   const [idsFornecTabProdutos, setIdsFornecTabProdutos] = useState<Set<string>>(new Set());
-  const [idsFornecTabMateriais, setIdsFornecTabMateriais] = useState<Set<string>>(new Set());
   const [buscaClientes, setBuscaClientes] = useState("");
   const [filtroProdutoNome, setFiltroProdutoNome] = useState("");
   const [filtroProdutoCategoria, setFiltroProdutoCategoria] = useState("");
   const [filtroProdutoFornecedor, setFiltroProdutoFornecedor] = useState("");
-  const [filtroMaterialNome, setFiltroMaterialNome] = useState("");
-  const [filtroMaterialCategoria, setFiltroMaterialCategoria] = useState("");
-  const [filtroMaterialFornecedor, setFiltroMaterialFornecedor] = useState("");
   const [buscaCategorias, setBuscaCategorias] = useState("");
   const [filtroCategoriaTipo, setFiltroCategoriaTipo] = useState("");
   const [buscaFornecedores, setBuscaFornecedores] = useState("");
+  const [mostrarClientesInativos, setMostrarClientesInativos] = useState(false);
+  const [mostrarFornecedoresInativos, setMostrarFornecedoresInativos] = useState(false);
   const [buscaContas, setBuscaContas] = useState("");
   const [bulkFornecPrecosOpen, setBulkFornecPrecosOpen] = useState(false);
   const [bulkFornecPrecoVenda, setBulkFornecPrecoVenda] = useState("");
   const [bulkFornecPrecoCusto, setBulkFornecPrecoCusto] = useState("");
   const [bulkFornecMargemLucro, setBulkFornecMargemLucro] = useState("");
-  const [bulkFornecMatBase, setBulkFornecMatBase] = useState("");
-  const [bulkFornecMatFab, setBulkFornecMatFab] = useState("");
-  const [bulkFornecLimparFab, setBulkFornecLimparFab] = useState(false);
   const [savingBulkFornec, setSavingBulkFornec] = useState(false);
 
   // Form states - Contas
@@ -447,7 +426,6 @@ export function Cadastro() {
   const cadastroProdutoFormRef = useRef<HTMLDivElement>(null);
   const cadastroCategoriaFormRef = useRef<HTMLDivElement>(null);
   const cadastroFornecedorFormRef = useRef<HTMLDivElement>(null);
-  const cadastroMaterialFormRef = useRef<HTMLDivElement>(null);
   const cadastroContaFormRef = useRef<HTMLDivElement>(null);
 
   const flashCadastroFormShell = (el: HTMLDivElement | null): (() => void) | undefined => {
@@ -480,10 +458,6 @@ export function Cadastro() {
     return flashCadastroFormShell(cadastroFornecedorFormRef.current);
   }, [editingFornecedor?.id]);
 
-  useLayoutEffect(() => {
-    if (!editingMaterial) return;
-    return flashCadastroFormShell(cadastroMaterialFormRef.current);
-  }, [editingMaterial?.id]);
 
   useLayoutEffect(() => {
     if (!editingConta) return;
@@ -496,12 +470,11 @@ export function Cadastro() {
 
   const loadData = async () => {
     try {
-      const [clientesRes, categoriasRes, produtosRes, fornecedoresRes, materiaisRes, contasRes] = await Promise.all([
-        api.getClientes().catch(() => []),
+      const [clientesRes, categoriasRes, produtosRes, fornecedoresRes, contasRes] = await Promise.all([
+        api.getClientes({ incluir_inativos: true }).catch(() => []),
         api.getCategorias().catch(() => []),
         api.getProdutos().catch(() => []),
-        api.getFornecedores().catch(() => []),
-        api.getMateriais().catch(() => []),
+        api.getFornecedores({ incluir_inativos: true }).catch(() => []),
         api.getContas().catch(() => []),
       ]);
       setClientes((Array.isArray(clientesRes) ? clientesRes : []).map((c: any) => ({
@@ -518,6 +491,7 @@ export function Cadastro() {
         cep: c.cep || "",
         cidade: c.cidade || "",
         estado: c.estado || "",
+        ativo: c.ativo !== false,
         createdAt: "",
       })));
       setCategorias((Array.isArray(categoriasRes) ? categoriasRes : []).map((c: any) => ({
@@ -527,19 +501,23 @@ export function Cadastro() {
         descricao: c.descricao || "",
         createdAt: "",
       })));
-      setProdutos((Array.isArray(produtosRes) ? produtosRes : []).map((p: any) => ({
-        id: sid(p.id),
-        categoria: sid(p.categoria),
-        nome: p.nome || "",
-        precoInicial: Number(p.preco_venda) || 0,
-        fabricado: Boolean(p.fabricado),
-        fornecedor: sid(p.fornecedor),
-        precoCusto: Number(p.preco_custo) || 0,
-        maoObraUnitaria: Number(p.mao_obra_unitaria) || 0,
-        margemLucroPercent: Number(p.margem_lucro_percent) || 0,
-        insumos: Array.isArray(p.insumos) ? p.insumos : [],
-        createdAt: "",
-      })));
+      setProdutos((Array.isArray(produtosRes) ? produtosRes : []).map((p: any) => {
+        const pf = p.preco_fabricacao ?? p.precoFabricacao;
+        return {
+          id: sid(p.id),
+          categoria: sid(p.categoria),
+          nome: p.nome || "",
+          precoInicial: Number(p.preco_venda) || 0,
+          fabricado: Boolean(p.fabricado),
+          fornecedor: sid(p.fornecedor),
+          precoCusto: Number(p.preco_custo) || 0,
+          precoFabricacao: pf != null && pf !== "" ? Number(pf) : null,
+          maoObraUnitaria: Number(p.mao_obra_unitaria) || 0,
+          margemLucroPercent: Number(p.margem_lucro_percent) || 0,
+          insumos: Array.isArray(p.insumos) ? p.insumos : [],
+          createdAt: "",
+        };
+      }));
       setFornecedores((Array.isArray(fornecedoresRes) ? fornecedoresRes : []).map((f: any) => ({
         id: sid(f.id),
         nomeRazaoSocial: f.nome || "",
@@ -554,21 +532,9 @@ export function Cadastro() {
         cep: f.cep || "",
         cidade: f.cidade || "",
         estado: f.estado || "",
+        ativo: f.ativo !== false,
         createdAt: "",
       })));
-      setMateriais((Array.isArray(materiaisRes) ? materiaisRes : []).map((m: any) => {
-        const pf = m.precoFabricacao ?? m.preco_fabricacao;
-        return {
-          id: sid(m.id),
-          nome: m.nome || "",
-          categoria: sid(m.categoria),
-          fornecedor: sid(m.fornecedor_padrao),
-          precoUnitarioBase: Number(m.precoUnitarioBase ?? m.preco_unitario_base) || 0,
-          precoFabricacao: pf != null && pf !== "" ? Number(pf) : null,
-          estoque_atual: Number(m.estoque_atual) || 0,
-          createdAt: "",
-        };
-      }));
       setContas((Array.isArray(contasRes) ? contasRes : []).map((c: any) => ({
         id: sid(c.id),
         nome: c.nome || c.nomeConta || "",
@@ -644,7 +610,12 @@ export function Cadastro() {
   const handleSubmitProduto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (savingProduto) return;
-    if (!nomeProduto.trim() || !categoriaProduto || !precoInicial) {
+    if (!nomeProduto.trim() || !categoriaProduto) {
+      toast.error('Preencha nome e categoria');
+      return;
+    }
+    const q4 = (x: number) => roundDecimalPlaces(x, 4);
+    if (!precoInicial) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -656,10 +627,10 @@ export function Cadastro() {
     const custo = parseFloat(String(precoCustoProduto || '').replace(',', '.'));
     const maoObra = parseFloat(String(maoObraProduto || '').replace(',', '.'));
     const margem = parseFloat(String(margemLucroProduto || '').replace(',', '.'));
-    const q4 = (x: number) => roundDecimalPlaces(x, 4);
     const payload = {
       nome: nomeProduto.trim(),
       categoria: Number(categoriaProduto) || undefined,
+      eh_insumo: false,
       preco_venda: q4(preco),
       descricao: "",
       revenda: false,
@@ -733,64 +704,6 @@ export function Cadastro() {
       toast.error('Erro ao salvar fornecedor');
     } finally {
       setSavingFornecedor(false);
-    }
-  };
-
-  const handleSubmitMaterial = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!nomeMaterial.trim()) {
-      toast.error('Nome é obrigatório');
-      return;
-    }
-    let preco: number;
-    if (isChefe) {
-      if (!precoMaterial) {
-        toast.error('Preço é obrigatório');
-        return;
-      }
-      preco = roundDecimalPlaces(parseFloat(String(precoMaterial).replace(',', '.')), 4);
-      if (isNaN(preco) || preco < 0) {
-        toast.error('Preço inválido');
-        return;
-      }
-    } else {
-      preco = editingMaterial ? Number(editingMaterial.precoUnitarioBase) || 0 : 0;
-    }
-    const payload: Record<string, unknown> = {
-      nome: nomeMaterial.trim(),
-      preco_unitario_base: preco,
-      precoUnitarioBase: preco,
-    };
-    if (isChefe) {
-      const fabRaw = String(precoMaterialFabricacao ?? "").trim();
-      if (fabRaw) {
-        const pf = roundDecimalPlaces(parseFloat(fabRaw.replace(",", ".")), 4);
-        if (Number.isNaN(pf) || pf < 0) {
-          toast.error("Preço de fabricação inválido");
-          return;
-        }
-        payload.preco_fabricacao = pf;
-        payload.precoFabricacao = pf;
-      } else if (editingMaterial) {
-        payload.preco_fabricacao = null;
-        payload.precoFabricacao = null;
-      }
-    }
-    if (categoriaMaterial) payload.categoria = Number(categoriaMaterial);
-    if (fornecedorMaterial) payload.fornecedor_padrao = Number(fornecedorMaterial);
-    try {
-      if (editingMaterial) {
-        await api.updateMaterial(editingMaterial.id, payload);
-        toast.success('Material atualizado');
-        setEditingMaterial(null);
-      } else {
-        await api.createMaterial(payload);
-        toast.success('Material cadastrado');
-      }
-      await loadData();
-      resetMaterialForm();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao salvar material');
     }
   };
 
@@ -873,14 +786,6 @@ export function Cadastro() {
     setCepFornecedor('');
     setCidadeFornecedor('');
     setEstadoFornecedor('');
-  };
-
-  const resetMaterialForm = () => {
-    setNomeMaterial('');
-    setCategoriaMaterial('');
-    setFornecedorMaterial('');
-    setPrecoMaterial('');
-    setPrecoMaterialFabricacao('');
   };
 
   const resetContaForm = () => {
@@ -974,15 +879,6 @@ export function Cadastro() {
     setEstadoFornecedor(fornecedor.estado || "");
   };
 
-  const handleEditMaterial = (material: Material) => {
-    setEditingMaterial(material);
-    setNomeMaterial(material.nome);
-    setCategoriaMaterial(material.categoria);
-    setFornecedorMaterial(material.fornecedor);
-    setPrecoMaterial(fmtDecimalPt(Number(material.precoUnitarioBase)));
-    const pf = material.precoFabricacao;
-    setPrecoMaterialFabricacao(pf != null && !Number.isNaN(Number(pf)) ? fmtDecimalPt(Number(pf)) : "");
-  };
 
   const handleEditConta = (conta: ContaBancaria) => {
     setEditingConta(conta);
@@ -1032,22 +928,36 @@ export function Cadastro() {
 
   const handleDeleteCliente = async (id: string) => {
     if (!isChefe) {
-      toast.error('Somente o chefe pode excluir ou inativar clientes.');
+      toast.error('Somente o chefe pode inativar clientes.');
       return;
     }
     try {
-      await api.deleteCliente(id);
-      toast.success('Cliente removido do cadastro. Vendas e pagamentos foram preservados.');
+      await api.inativarCliente(id);
+      toast.success('Cliente inativado. Fica em Inativos e o histórico foi preservado.');
       await loadData();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao excluir cliente');
+      toast.error(err instanceof Error ? err.message : 'Erro ao inativar cliente');
+    }
+  };
+
+  const handleReativarCliente = async (id: string) => {
+    if (!isChefe) {
+      toast.error('Somente o chefe pode reativar clientes.');
+      return;
+    }
+    try {
+      await api.reativarCliente(id);
+      toast.success('Cliente reativado.');
+      await loadData();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao reativar cliente');
     }
   };
 
   const handleDeleteCategoria = async (id: string) => {
     try {
       await api.deleteCategoria(id);
-      toast.success('Categoria removida do cadastro. Produtos e materiais vinculados mantêm o histórico.');
+      toast.success('Categoria removida do cadastro. Produtos vinculados mantêm o histórico.');
       await loadData();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Erro ao excluir categoria');
@@ -1066,27 +976,32 @@ export function Cadastro() {
 
   const handleDeleteFornecedor = async (id: string) => {
     if (!isChefe) {
-      toast.error('Somente o chefe pode excluir ou inativar fornecedores.');
+      toast.error('Somente o chefe pode inativar fornecedores.');
       return;
     }
     try {
-      await api.deleteFornecedor(id);
-      toast.success('Fornecedor removido do cadastro. Compras e pagamentos foram preservados.');
+      await api.inativarFornecedor(id);
+      toast.success('Fornecedor inativado. Fica em Inativos e o histórico foi preservado.');
       await loadData();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao excluir fornecedor');
+      toast.error(err instanceof Error ? err.message : 'Erro ao inativar fornecedor');
     }
   };
 
-  const handleDeleteMaterial = async (id: string) => {
+  const handleReativarFornecedor = async (id: string) => {
+    if (!isChefe) {
+      toast.error('Somente o chefe pode reativar fornecedores.');
+      return;
+    }
     try {
-      await api.deleteMaterial(id);
-      toast.success('Material removido do cadastro. Compras e ajustes de estoque foram preservados.');
+      await api.reativarFornecedor(id);
+      toast.success('Fornecedor reativado.');
       await loadData();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao excluir material');
+      toast.error(err instanceof Error ? err.message : 'Erro ao reativar fornecedor');
     }
   };
+
 
   const handleDeleteConta = async (id: string) => {
     try {
@@ -1109,6 +1024,14 @@ export function Cadastro() {
 
   const categoriasProduto = categorias.filter(c => c.tipo === 'produto');
   const categoriasMaterial = categorias.filter(c => c.tipo === 'material');
+  const categoriasParaProdutoForm = categoriasProduto;
+  const insumosDisponiveis = useMemo(
+    () =>
+      produtos
+        .filter((p) => !p.fabricado && (!editingProdutoId || String(p.id) !== String(editingProdutoId)))
+        .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
+    [produtos, editingProdutoId],
+  );
   const fornecedorNomePorId = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of fornecedores) {
@@ -1119,7 +1042,7 @@ export function Cadastro() {
 
   const produtosAgrupados = useMemo(() => {
     const catById = new Map<string, { id: string; nome: string }>();
-    for (const c of categoriasProduto) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
+    for (const c of categorias) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
 
     const filtros = {
       nome: filtroProdutoNome,
@@ -1146,42 +1069,16 @@ export function Cadastro() {
     out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
     out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
     return out;
-  }, [produtos, categoriasProduto, filtroProdutoNome, filtroProdutoCategoria, filtroProdutoFornecedor, fornecedorNomePorId]);
+  }, [produtos, categorias, filtroProdutoNome, filtroProdutoCategoria, filtroProdutoFornecedor, fornecedorNomePorId]);
 
-  const materiaisAgrupados = useMemo(() => {
-    const catById = new Map<string, { id: string; nome: string }>();
-    for (const c of categoriasMaterial) catById.set(String(c.id), { id: String(c.id), nome: c.nome || "(Sem nome)" });
 
-    const filtros = {
-      nome: filtroMaterialNome,
-      categoriaId: filtroMaterialCategoria,
-      fornecedorId: filtroMaterialFornecedor,
-    };
-    const lista = materiais.filter((m) => {
-      const catNome = m.categoria ? catById.get(String(m.categoria))?.nome : "";
-      const fornNome = m.fornecedor ? fornecedorNomePorId.get(String(m.fornecedor)) ?? "" : "";
-      return filtraItemPorCadastro(m, filtros, { categoriaNome: catNome, fornecedorNome: fornNome });
-    });
-
-    const groups = new Map<string, { categoriaId: string | null; categoriaNome: string; itens: typeof materiais }>();
-    for (const m of lista) {
-      const catId = m.categoria ? String(m.categoria) : "";
-      const cat = catId ? catById.get(catId) : null;
-      const k = cat ? `cat-${cat.id}` : "cat-sem";
-      const nome = cat ? cat.nome : "Sem categoria";
-      if (!groups.has(k)) groups.set(k, { categoriaId: cat ? cat.id : null, categoriaNome: nome, itens: [] });
-      groups.get(k)!.itens.push(m);
-    }
-
-    const out = Array.from(groups.values());
-    out.sort((a, b) => a.categoriaNome.localeCompare(b.categoriaNome, "pt-BR"));
-    out.forEach((g) => g.itens.sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")));
-    return out;
-  }, [materiais, categoriasMaterial, filtroMaterialNome, filtroMaterialCategoria, filtroMaterialFornecedor, fornecedorNomePorId]);
+  const clientesAtivos = useMemo(() => clientes.filter((c) => c.ativo !== false), [clientes]);
+  const clientesInativos = useMemo(() => clientes.filter((c) => c.ativo === false), [clientes]);
 
   const clientesFiltrados = useMemo(() => {
-    if (!normalizeTextSearch(buscaClientes)) return clientes;
-    return clientes.filter((c) =>
+    const base = clientesAtivos;
+    if (!normalizeTextSearch(buscaClientes)) return base;
+    return base.filter((c) =>
       cadastroCamposContemBusca(
         buscaClientes,
         c.nome,
@@ -1198,7 +1095,28 @@ export function Cadastro() {
         c.pontoReferencia,
       ),
     );
-  }, [clientes, buscaClientes]);
+  }, [clientesAtivos, buscaClientes]);
+
+  const clientesInativosFiltrados = useMemo(() => {
+    if (!normalizeTextSearch(buscaClientes)) return clientesInativos;
+    return clientesInativos.filter((c) =>
+      cadastroCamposContemBusca(
+        buscaClientes,
+        c.nome,
+        c.cpfCnpj,
+        c.telefone,
+        c.chavePix,
+        c.endereco,
+        c.logradouro,
+        c.bairro,
+        c.numero,
+        c.cidade,
+        c.estado,
+        c.cep,
+        c.pontoReferencia,
+      ),
+    );
+  }, [clientesInativos, buscaClientes]);
 
   const categoriasFiltradas = useMemo(() => {
     let lista = categorias;
@@ -1211,15 +1129,19 @@ export function Cadastro() {
         cat.nome,
         cat.tipo,
         cat.tipo === "material" ? "material" : "produto",
-        cat.tipo === "produto" ? "Produto" : "Material",
+        cat.tipo === "produto" ? "Produto" : "Insumo/Material",
         cat.descricao,
       ),
     );
   }, [categorias, buscaCategorias, filtroCategoriaTipo]);
 
+  const fornecedoresAtivos = useMemo(() => fornecedores.filter((f) => f.ativo !== false), [fornecedores]);
+  const fornecedoresInativos = useMemo(() => fornecedores.filter((f) => f.ativo === false), [fornecedores]);
+
   const fornecedoresFiltrados = useMemo(() => {
-    if (!normalizeTextSearch(buscaFornecedores)) return fornecedores;
-    return fornecedores.filter((f) =>
+    const base = fornecedoresAtivos;
+    if (!normalizeTextSearch(buscaFornecedores)) return base;
+    return base.filter((f) =>
       cadastroCamposContemBusca(
         buscaFornecedores,
         f.nomeRazaoSocial,
@@ -1236,7 +1158,28 @@ export function Cadastro() {
         f.pontoReferencia,
       ),
     );
-  }, [fornecedores, buscaFornecedores]);
+  }, [fornecedoresAtivos, buscaFornecedores]);
+
+  const fornecedoresInativosFiltrados = useMemo(() => {
+    if (!normalizeTextSearch(buscaFornecedores)) return fornecedoresInativos;
+    return fornecedoresInativos.filter((f) =>
+      cadastroCamposContemBusca(
+        buscaFornecedores,
+        f.nomeRazaoSocial,
+        f.cpfCnpj,
+        f.telefone,
+        f.chavePix,
+        f.endereco,
+        f.logradouro,
+        f.bairro,
+        f.numero,
+        f.cidade,
+        f.estado,
+        f.cep,
+        f.pontoReferencia,
+      ),
+    );
+  }, [fornecedoresInativos, buscaFornecedores]);
 
   const contasFiltradas = useMemo(() => {
     if (!normalizeTextSearch(buscaContas)) return contas;
@@ -1325,7 +1268,6 @@ export function Cadastro() {
           <TabsTrigger value="produtos">Produtos</TabsTrigger>
           <TabsTrigger value="categorias">Categorias</TabsTrigger>
           <TabsTrigger value="fornecedores">Fornecedores</TabsTrigger>
-          <TabsTrigger value="materiais">Materiais</TabsTrigger>
           {isChefe && <TabsTrigger value="contas">Contas</TabsTrigger>}
         </TabsList>
 
@@ -1475,7 +1417,7 @@ export function Cadastro() {
           </div>
 
           <div className="space-y-3">
-            {clientes.length > 0 ? (
+            {clientesAtivos.length > 0 || clientesInativos.length > 0 ? (
               <>
                 <CadastroBuscaLista
                   id="cadastro-busca-clientes"
@@ -1487,7 +1429,9 @@ export function Cadastro() {
                 {clientesFiltrados.length === 0 ? (
                   <Card>
                     <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      Nenhum cliente corresponde à busca.
+                      {clientesAtivos.length === 0
+                        ? "Nenhum cliente ativo. Veja Inativos abaixo se houver arquivo."
+                        : "Nenhum cliente corresponde à busca."}
                     </CardContent>
                   </Card>
                 ) : (
@@ -1525,21 +1469,21 @@ export function Cadastro() {
                           </Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <Trash2 className="size-4 text-destructive" />
+                              <Button variant="ghost" size="icon" title="Inativar">
+                                <Archive className="size-4 text-destructive" />
                               </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                <AlertDialogTitle>Inativar cliente?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  Tem certeza que deseja excluir este cliente?
+                                  O cliente sai da lista principal e fica em Inativos. Vendas e pagamentos são preservados.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
                                 <AlertDialogAction onClick={() => handleDeleteCliente(cliente.id)}>
-                                  Excluir
+                                  Inativar
                                 </AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
@@ -1550,6 +1494,64 @@ export function Cadastro() {
                   </Card>
                 </motion.div>
                   ))
+                )}
+
+                {clientesInativos.length > 0 && (
+                  <Card className="border-dashed">
+                    <CardHeader className="py-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-left"
+                        onClick={() => setMostrarClientesInativos((v) => !v)}
+                      >
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Archive className="size-4" />
+                          Inativos
+                          <Badge variant="secondary">{clientesInativosFiltrados.length}</Badge>
+                        </CardTitle>
+                        <span className="text-xs text-muted-foreground">
+                          {mostrarClientesInativos ? "Ocultar" : "Consultar"}
+                        </span>
+                      </button>
+                    </CardHeader>
+                    {mostrarClientesInativos && (
+                      <CardContent className="space-y-3 pt-0">
+                        {clientesInativosFiltrados.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-4 text-center">Nenhum inativo na busca.</p>
+                        ) : (
+                          clientesInativosFiltrados.map((cliente) => (
+                            <div
+                              key={cliente.id}
+                              className="flex items-center justify-between rounded-md border p-3 bg-muted/30"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium truncate text-destructive">{cliente.nome}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {[cliente.cpfCnpj, cliente.telefone].filter(Boolean).join(" · ") || "Sem documento/telefone"}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Button variant="ghost" size="icon" onClick={() => setVerDadosCliente(cliente)} title="Ver dados">
+                                  <Info className="size-4" />
+                                </Button>
+                                {isChefe && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1"
+                                    onClick={() => handleReativarCliente(cliente.id)}
+                                  >
+                                    <RotateCcw className="size-3.5" />
+                                    Reativar
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
                 )}
               </>
             ) : (
@@ -1608,10 +1610,10 @@ export function Cadastro() {
                         <SelectValue placeholder="Selecione" />
                       </SelectTrigger>
                       <SelectContent>
-                        {categoriasProduto.length > 0 ? (
-                          categoriasProduto.map((cat) => (
+                        {categoriasParaProdutoForm.length > 0 ? (
+                          categoriasParaProdutoForm.map((cat) => (
                             <SelectItem key={cat.id} value={String(cat.id)}>
-                              {cat.nome || "(Sem nome)"}
+                              {cat.nome || "(Sem nome)"}{cat.tipo === "material" ? " (material)" : ""}
                             </SelectItem>
                           ))
                         ) : (
@@ -1653,18 +1655,20 @@ export function Cadastro() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    id="produtoFabricado"
-                    checked={produtoFabricado}
-                    onCheckedChange={(v) => {
-                      const checked = v === true;
-                      setProdutoFabricado(checked);
-                    }}
-                  />
-                  <Label htmlFor="produtoFabricado" className="cursor-pointer">
-                    Produto fabricado (composição por materiais)
-                  </Label>
+                <div className="flex flex-wrap items-center gap-6">
+                  <div className="flex items-center gap-3">
+                    <Checkbox
+                      id="produtoFabricado"
+                      checked={produtoFabricado}
+                      onCheckedChange={(v) => {
+                        const checked = v === true;
+                        setProdutoFabricado(checked);
+                      }}
+                    />
+                    <Label htmlFor="produtoFabricado" className="cursor-pointer">
+                      Produto fabricado (composição por insumos)
+                    </Label>
+                  </div>
                 </div>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
@@ -1750,13 +1754,13 @@ export function Cadastro() {
                     <h4 className="text-sm font-medium">Insumos do produto</h4>
                     <div className="grid gap-4 md:grid-cols-4">
                       <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="materialInsumoProduto">Material</Label>
+                        <Label htmlFor="materialInsumoProduto">Insumo</Label>
                         <Select value={materialInsumoProduto} onValueChange={setMaterialInsumoProduto}>
                           <SelectTrigger id="materialInsumoProduto">
-                            <SelectValue placeholder="Selecione o material" />
+                            <SelectValue placeholder="Selecione o insumo" />
                           </SelectTrigger>
                           <SelectContent>
-                            {materiais.map((m) => (
+                            {insumosDisponiveis.map((m) => (
                               <SelectItem key={m.id} value={String(m.id)}>
                                 {m.nome}
                               </SelectItem>
@@ -1780,13 +1784,13 @@ export function Cadastro() {
                           type="button"
                           variant="outline"
                           onClick={() => {
-                            const mat = materiais.find((m) => String(m.id) === String(materialInsumoProduto));
+                            const mat = insumosDisponiveis.find((m) => String(m.id) === String(materialInsumoProduto));
                             const qtd = parseDecimal(quantidadeInsumoProduto);
                             if (!mat || qtd == null || qtd <= 0) {
-                              toast.error("Selecione material e quantidade válida");
+                              toast.error("Selecione insumo e quantidade válida");
                               return;
                             }
-                            const precoBase = precoUnitarioInsumoMaterial(mat);
+                            const precoBase = precoUnitarioInsumoProduto(mat);
                             const total = precoBase * qtd;
                             setInsumosProduto((prev) => {
                               const idx = prev.findIndex((i) => i.material === Number(mat.id));
@@ -1839,7 +1843,7 @@ export function Cadastro() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>Custo materiais</Label>
+                        <Label>Custo insumos</Label>
                         <Input value={fmtDecimalPt(custoMateriaisProduto)} disabled />
                       </div>
                       <div className="space-y-2">
@@ -1916,7 +1920,7 @@ export function Cadastro() {
                   onNomeChange={setFiltroProdutoNome}
                   categoriaId={filtroProdutoCategoria}
                   onCategoriaChange={setFiltroProdutoCategoria}
-                  categorias={categoriasProduto}
+                  categorias={categorias}
                   fornecedorId={filtroProdutoFornecedor}
                   onFornecedorChange={setFiltroProdutoFornecedor}
                   fornecedores={fornecedores}
@@ -2544,11 +2548,10 @@ export function Cadastro() {
           </Card>
           </div>
 
-          {isChefe &&
-            (idsFornecTabProdutos.size > 0 || idsFornecTabMateriais.size > 0) && (
+          {isChefe && idsFornecTabProdutos.size > 0 && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2">
                 <span className="text-sm text-muted-foreground tabular-nums">
-                  {idsFornecTabProdutos.size} produto(s) · {idsFornecTabMateriais.size} material(is)
+                  {idsFornecTabProdutos.size} produto(s) selecionado(s)
                 </span>
                 <Button type="button" variant="secondary" size="sm" onClick={() => setBulkFornecPrecosOpen(true)}>
                   Atualizar preços em massa
@@ -2557,10 +2560,7 @@ export function Cadastro() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    setIdsFornecTabProdutos(new Set());
-                    setIdsFornecTabMateriais(new Set());
-                  }}
+                  onClick={() => setIdsFornecTabProdutos(new Set())}
                 >
                   Limpar seleção
                 </Button>
@@ -2568,7 +2568,7 @@ export function Cadastro() {
             )}
 
           <div className="space-y-3">
-            {fornecedores.length > 0 ? (
+            {fornecedoresAtivos.length > 0 || fornecedoresInativos.length > 0 ? (
               <>
                 <CadastroBuscaLista
                   id="cadastro-busca-fornecedores"
@@ -2580,7 +2580,9 @@ export function Cadastro() {
                 {fornecedoresFiltrados.length === 0 ? (
                   <Card>
                     <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      Nenhum fornecedor corresponde à busca.
+                      {fornecedoresAtivos.length === 0
+                        ? "Nenhum fornecedor ativo. Veja Inativos abaixo se houver arquivo."
+                        : "Nenhum fornecedor corresponde à busca."}
                     </CardContent>
                   </Card>
                 ) : (
@@ -2618,21 +2620,21 @@ export function Cadastro() {
                           </Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <Trash2 className="size-4 text-destructive" />
+                              <Button variant="ghost" size="icon" title="Inativar">
+                                <Archive className="size-4 text-destructive" />
                               </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
-                                <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                                <AlertDialogTitle>Inativar fornecedor?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  Tem certeza que deseja excluir este fornecedor?
+                                  O fornecedor sai da lista principal e fica em Inativos. Compras e pagamentos são preservados.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
                                 <AlertDialogAction onClick={() => handleDeleteFornecedor(fornecedor.id)}>
-                                  Excluir
+                                  Inativar
                                 </AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
@@ -2643,147 +2645,76 @@ export function Cadastro() {
                         const produtosDoFornecedor = produtos.filter(
                           (p) => String(p.fornecedor) === String(fornecedor.id)
                         );
-                        const materiaisDoFornecedor = materiais.filter(
-                          (m) => String(m.fornecedor) === String(fornecedor.id)
-                        );
-                        if (produtosDoFornecedor.length === 0 && materiaisDoFornecedor.length === 0) return null;
+                        if (produtosDoFornecedor.length === 0) return null;
                         return (
                           <div className="border-t mt-4 pt-4">
-                            {produtosDoFornecedor.length > 0 && (
-                              <div className="space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <h4 className="font-medium text-sm">Produtos deste fornecedor</h4>
-                                  {isChefe && (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs"
-                                      onClick={() => {
-                                        const pids = produtosDoFornecedor.map((p) => p.id);
-                                        setIdsFornecTabProdutos((prev) => {
-                                          const allOn =
-                                            pids.length > 0 && pids.every((id) => prev.has(id));
-                                          const next = new Set(prev);
-                                          if (allOn) pids.forEach((id) => next.delete(id));
-                                          else pids.forEach((id) => next.add(id));
-                                          return next;
-                                        });
-                                      }}
-                                    >
-                                      {produtosDoFornecedor.every((p) => idsFornecTabProdutos.has(p.id))
-                                        ? "Desmarcar produtos"
-                                        : "Selecionar produtos"}
-                                    </Button>
-                                  )}
-                                </div>
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      {isChefe && <TableHead className="w-10" />}
-                                      <TableHead>Produto</TableHead>
-                                      <TableHead className="text-right w-32">Preço venda</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {produtosDoFornecedor.map((p) => (
-                                      <TableRow key={p.id}>
-                                        {isChefe && (
-                                          <TableCell className="w-10">
-                                            <Checkbox
-                                              checked={idsFornecTabProdutos.has(p.id)}
-                                              onCheckedChange={(v) => {
-                                                setIdsFornecTabProdutos((prev) => {
-                                                  const next = new Set(prev);
-                                                  if (v === true) next.add(p.id);
-                                                  else next.delete(p.id);
-                                                  return next;
-                                                });
-                                              }}
-                                              aria-label={`Selecionar produto ${p.nome}`}
-                                            />
-                                          </TableCell>
-                                        )}
-                                        <TableCell className="font-medium">{p.nome}</TableCell>
-                                        <TableCell className="text-right tabular-nums">
-                                          {formatCurrency(Number(p.precoInicial ?? 0))}
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <h4 className="font-medium text-sm">Produtos deste fornecedor</h4>
+                                {isChefe && (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() => {
+                                      const pids = produtosDoFornecedor.map((p) => p.id);
+                                      setIdsFornecTabProdutos((prev) => {
+                                        const allOn =
+                                          pids.length > 0 && pids.every((id) => prev.has(id));
+                                        const next = new Set(prev);
+                                        if (allOn) pids.forEach((id) => next.delete(id));
+                                        else pids.forEach((id) => next.add(id));
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    {produtosDoFornecedor.every((p) => idsFornecTabProdutos.has(p.id))
+                                      ? "Desmarcar produtos"
+                                      : "Selecionar produtos"}
+                                  </Button>
+                                )}
+                              </div>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    {isChefe && <TableHead className="w-10" />}
+                                    <TableHead>Produto</TableHead>
+                                    <TableHead className="text-right w-36">Preço</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {produtosDoFornecedor.map((p) => (
+                                    <TableRow key={p.id}>
+                                      {isChefe && (
+                                        <TableCell className="w-10">
+                                          <Checkbox
+                                            checked={idsFornecTabProdutos.has(p.id)}
+                                            onCheckedChange={(v) => {
+                                              setIdsFornecTabProdutos((prev) => {
+                                                const next = new Set(prev);
+                                                if (v === true) next.add(p.id);
+                                                else next.delete(p.id);
+                                                return next;
+                                              });
+                                            }}
+                                            aria-label={`Selecionar produto ${p.nome}`}
+                                          />
                                         </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            )}
-
-                            {materiaisDoFornecedor.length > 0 && (
-                              <div className={produtosDoFornecedor.length > 0 ? "mt-4 space-y-2" : "space-y-2"}>
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <h4 className="font-medium text-sm">Materiais deste fornecedor</h4>
-                                  {isChefe && (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 text-xs"
-                                      onClick={() => {
-                                        const mids = materiaisDoFornecedor.map((m) => m.id);
-                                        setIdsFornecTabMateriais((prev) => {
-                                          const allOn =
-                                            mids.length > 0 && mids.every((id) => prev.has(id));
-                                          const next = new Set(prev);
-                                          if (allOn) mids.forEach((id) => next.delete(id));
-                                          else mids.forEach((id) => next.add(id));
-                                          return next;
-                                        });
-                                      }}
-                                    >
-                                      {materiaisDoFornecedor.every((m) => idsFornecTabMateriais.has(m.id))
-                                        ? "Desmarcar materiais"
-                                        : "Selecionar materiais"}
-                                    </Button>
-                                  )}
-                                </div>
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      {isChefe && <TableHead className="w-10" />}
-                                      <TableHead>Material</TableHead>
-                                      {isChefe && <TableHead className="text-right w-32">Preço base</TableHead>}
-                                      <TableHead className="text-right w-24">Estoque</TableHead>
+                                      )}
+                                      <TableCell className="font-medium">
+                                        <span className="inline-flex items-center gap-2">
+                                          {p.nome}
+                                        </span>
+                                      </TableCell>
+                                      <TableCell className="text-right tabular-nums">
+                                        {formatCurrency(Number(p.precoCusto ?? 0))}
+                                      </TableCell>
                                     </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {materiaisDoFornecedor.map((m) => (
-                                      <TableRow key={m.id}>
-                                        {isChefe && (
-                                          <TableCell className="w-10">
-                                            <Checkbox
-                                              checked={idsFornecTabMateriais.has(m.id)}
-                                              onCheckedChange={(v) => {
-                                                setIdsFornecTabMateriais((prev) => {
-                                                  const next = new Set(prev);
-                                                  if (v === true) next.add(m.id);
-                                                  else next.delete(m.id);
-                                                  return next;
-                                                });
-                                              }}
-                                              aria-label={`Selecionar material ${m.nome}`}
-                                            />
-                                          </TableCell>
-                                        )}
-                                        <TableCell className="font-medium">{m.nome}</TableCell>
-                                        {isChefe && (
-                                          <TableCell className="text-right tabular-nums">
-                                            {formatCurrency(Number(m.precoUnitarioBase ?? 0))}
-                                          </TableCell>
-                                        )}
-                                        <TableCell className="text-right tabular-nums">{Number(m.estoque_atual ?? 0)}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            )}
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            </div>
                           </div>
                         );
                       })()}
@@ -2791,6 +2722,64 @@ export function Cadastro() {
                   </Card>
                 </motion.div>
                   ))
+                )}
+
+                {fornecedoresInativos.length > 0 && (
+                  <Card className="border-dashed">
+                    <CardHeader className="py-3">
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between text-left"
+                        onClick={() => setMostrarFornecedoresInativos((v) => !v)}
+                      >
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Archive className="size-4" />
+                          Inativos
+                          <Badge variant="secondary">{fornecedoresInativosFiltrados.length}</Badge>
+                        </CardTitle>
+                        <span className="text-xs text-muted-foreground">
+                          {mostrarFornecedoresInativos ? "Ocultar" : "Consultar"}
+                        </span>
+                      </button>
+                    </CardHeader>
+                    {mostrarFornecedoresInativos && (
+                      <CardContent className="space-y-3 pt-0">
+                        {fornecedoresInativosFiltrados.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-4 text-center">Nenhum inativo na busca.</p>
+                        ) : (
+                          fornecedoresInativosFiltrados.map((fornecedor) => (
+                            <div
+                              key={fornecedor.id}
+                              className="flex items-center justify-between rounded-md border p-3 bg-muted/30"
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{fornecedor.nomeRazaoSocial}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {[fornecedor.cpfCnpj, fornecedor.telefone].filter(Boolean).join(" · ") || "Sem documento/telefone"}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Button variant="ghost" size="icon" onClick={() => setVerDadosFornecedor(fornecedor)} title="Ver dados">
+                                  <Info className="size-4" />
+                                </Button>
+                                {isChefe && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1"
+                                    onClick={() => handleReativarFornecedor(fornecedor.id)}
+                                  >
+                                    <RotateCcw className="size-3.5" />
+                                    Reativar
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
                 )}
               </>
             ) : (
@@ -2810,9 +2799,6 @@ export function Cadastro() {
                 setBulkFornecPrecoVenda("");
                 setBulkFornecPrecoCusto("");
                 setBulkFornecMargemLucro("");
-                setBulkFornecMatBase("");
-                setBulkFornecMatFab("");
-                setBulkFornecLimparFab(false);
               }
             }}
           >
@@ -2821,8 +2807,7 @@ export function Cadastro() {
                 <DialogTitle>Preços em massa (fornecedores)</DialogTitle>
               </DialogHeader>
               <p className="text-sm text-muted-foreground">
-                {idsFornecTabProdutos.size} produto(s) e {idsFornecTabMateriais.size} material(is) selecionados.
-                Preencha só o que quiser alterar.
+                {idsFornecTabProdutos.size} produto(s) selecionado(s). Preencha só o que quiser alterar.
               </p>
               {idsFornecTabProdutos.size > 0 && (
                 <div className="space-y-3 rounded-md border p-3">
@@ -2868,51 +2853,6 @@ export function Cadastro() {
                   </div>
                 </div>
               )}
-              {idsFornecTabMateriais.size > 0 && (
-                <div className="space-y-3 rounded-md border p-3">
-                  <p className="text-sm font-medium">Materiais selecionados</p>
-                  <div className="space-y-2">
-                    <Label htmlFor="bulkFornecMatBase">Preço base (compra/estoque)</Label>
-                    <Input
-                      id="bulkFornecMatBase"
-                      type="text"
-                      inputMode="decimal"
-                      value={bulkFornecMatBase}
-                      onChange={(e) => setBulkFornecMatBase(e.target.value)}
-                      placeholder="Manter atual"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="bulkFornecMatFab">Preço fabricação (insumos)</Label>
-                    <Input
-                      id="bulkFornecMatFab"
-                      type="text"
-                      inputMode="decimal"
-                      value={bulkFornecMatFab}
-                      onChange={(e) => {
-                        setBulkFornecMatFab(e.target.value);
-                        if (e.target.value.trim()) setBulkFornecLimparFab(false);
-                      }}
-                      placeholder="Manter atual"
-                      disabled={bulkFornecLimparFab}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="bulkFornecLimparFab"
-                      checked={bulkFornecLimparFab}
-                      onCheckedChange={(v) => {
-                        const on = v === true;
-                        setBulkFornecLimparFab(on);
-                        if (on) setBulkFornecMatFab("");
-                      }}
-                    />
-                    <Label htmlFor="bulkFornecLimparFab" className="text-sm font-normal cursor-pointer">
-                      Remover preço de fabricação (voltar a usar o preço base nos insumos)
-                    </Label>
-                  </div>
-                </div>
-              )}
               <div className="flex justify-end gap-2 pt-2">
                 <Button
                   type="button"
@@ -2927,29 +2867,12 @@ export function Cadastro() {
                   disabled={savingBulkFornec}
                   onClick={async () => {
                     const nP = idsFornecTabProdutos.size;
-                    const nM = idsFornecTabMateriais.size;
                     const rawV = bulkFornecPrecoVenda.trim();
                     const rawC = bulkFornecPrecoCusto.trim();
                     const rawFM = bulkFornecMargemLucro.trim();
-                    const rawMB = bulkFornecMatBase.trim();
-                    const rawMF = bulkFornecMatFab.trim();
                     const wantProd = nP > 0 && (rawV !== "" || rawC !== "" || rawFM !== "");
-                    const wantMat =
-                      nM > 0 && (rawMB !== "" || rawMF !== "" || bulkFornecLimparFab);
-                    if (!wantProd && !wantMat) {
-                      toast.error(
-                        "Preencha pelo menos um preço conforme o que selecionou (produtos e/ou materiais)."
-                      );
-                      return;
-                    }
-                    if (nP > 0 && !wantProd && nM === 0) {
-                      toast.error("Você selecionou produtos: informe custo, venda e/ou %.");
-                      return;
-                    }
-                    if (nM > 0 && !wantMat && nP === 0) {
-                      toast.error(
-                        "Você selecionou materiais: informe preço base e/ou fabricação, ou marque remover fabricação."
-                      );
+                    if (!wantProd) {
+                      toast.error("Informe custo, venda e/ou % para os produtos selecionados.");
                       return;
                     }
                     let preco_venda: number | undefined;
@@ -2981,27 +2904,6 @@ export function Cadastro() {
                         margem_lucro_percent = m;
                       }
                     }
-                    let preco_unitario_base: number | undefined;
-                    let preco_fabricacao: number | null | undefined;
-                    if (wantMat) {
-                      if (rawMB) {
-                        const b = roundDecimalPlaces(parseFloat(rawMB.replace(",", ".")), 4);
-                        if (Number.isNaN(b) || b < 0) {
-                          toast.error("Preço base do material inválido");
-                          return;
-                        }
-                        preco_unitario_base = b;
-                      }
-                      if (bulkFornecLimparFab) preco_fabricacao = null;
-                      else if (rawMF) {
-                        const f = roundDecimalPlaces(parseFloat(rawMF.replace(",", ".")), 4);
-                        if (Number.isNaN(f) || f < 0) {
-                          toast.error("Preço de fabricação inválido");
-                          return;
-                        }
-                        preco_fabricacao = f;
-                      }
-                    }
                     try {
                       setSavingBulkFornec(true);
                       const parts: string[] = [];
@@ -3030,19 +2932,6 @@ export function Cadastro() {
                         parts.push(`${res.ok} produto(s)`);
                         if (res.failed > 0) toast.warning(`${res.failed} produto(s) com erro.`);
                       }
-                      if (wantMat) {
-                        const matPayload: {
-                          ids: string[];
-                          preco_unitario_base?: number;
-                          preco_fabricacao?: number | null;
-                        } = { ids: [...idsFornecTabMateriais] };
-                        if (preco_unitario_base !== undefined)
-                          matPayload.preco_unitario_base = preco_unitario_base;
-                        if (preco_fabricacao !== undefined) matPayload.preco_fabricacao = preco_fabricacao;
-                        const res = await api.bulkUpdateMateriaisPrecos(matPayload);
-                        parts.push(`${res.ok} material(is)`);
-                        if (res.failed > 0) toast.warning(`${res.failed} material(is) com erro.`);
-                      }
                       toast.success(`Atualizado: ${parts.join(" · ")}.`);
                       setBulkFornecPrecosOpen(false);
                       setBulkFornecPrecoVenda("");
@@ -3052,7 +2941,6 @@ export function Cadastro() {
                       setBulkFornecMatFab("");
                       setBulkFornecLimparFab(false);
                       setIdsFornecTabProdutos(new Set());
-                      setIdsFornecTabMateriais(new Set());
                       await loadData();
                     } catch (err) {
                       toast.error(err instanceof Error ? err.message : "Erro ao atualizar preços");
@@ -3093,241 +2981,6 @@ export function Cadastro() {
           </Dialog>
         </TabsContent>
 
-        {/* MATERIAIS */}
-        <TabsContent value="materiais" className="space-y-6">
-          <div
-            ref={cadastroMaterialFormRef}
-            className={`scroll-mt-24 ${editingMaterial ? CADASTRO_FORM_EDIT_SHELL : ""}`}
-          >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TreePine className="size-5" />
-                {editingMaterial ? 'Editar Material' : 'Novo Material'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmitMaterial} className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="nomeMaterial">Nome do Material *</Label>
-                    <Input
-                      id="nomeMaterial"
-                      value={nomeMaterial}
-                      onChange={(e) => setNomeMaterial(e.target.value)}
-                      placeholder="Nome do material"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="categoriaMaterial">Categoria *</Label>
-                    <Select value={categoriaMaterial} onValueChange={setCategoriaMaterial}>
-                      <SelectTrigger id="categoriaMaterial">
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categoriasMaterial.length > 0 ? (
-                          categoriasMaterial.map((cat) => (
-                            <SelectItem key={cat.id} value={String(cat.id)}>
-                              {cat.nome || "(Sem nome)"}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="none" disabled>
-                            Cadastre uma categoria de material
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="fornecedorMaterial">Fornecedor *</Label>
-                    <Select value={fornecedorMaterial} onValueChange={setFornecedorMaterial}>
-                      <SelectTrigger id="fornecedorMaterial">
-                        <SelectValue placeholder="Selecione" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {fornecedores.length > 0 ? (
-                          fornecedores.map((fornecedor) => (
-                            <SelectItem key={fornecedor.id} value={String(fornecedor.id)}>
-                              {fornecedor.nomeRazaoSocial || "(Sem nome)"}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="none" disabled>
-                            Cadastre um fornecedor primeiro
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {isChefe && (
-                    <>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="precoMaterial">Preço base (compra e estoque) *</Label>
-                        <Input
-                          id="precoMaterial"
-                          type="text"
-                          inputMode="decimal"
-                          value={precoMaterial}
-                          onChange={(e) => setPrecoMaterial(e.target.value)}
-                          placeholder="0,0000"
-                        />
-                        <p className="text-xs text-muted-foreground">Usado em compras e valorização de estoque; não altera histórico de notas já lançadas.</p>
-                      </div>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="precoMaterialFabricacao">Preço na fabricação (insumos)</Label>
-                        <Input
-                          id="precoMaterialFabricacao"
-                          type="text"
-                          inputMode="decimal"
-                          value={precoMaterialFabricacao}
-                          onChange={(e) => setPrecoMaterialFabricacao(e.target.value)}
-                          placeholder="Opcional — vazio usa o preço base"
-                        />
-                        <p className="text-xs text-muted-foreground">Só para custo de materiais nos produtos fabricados. Deixe vazio para usar o preço base.</p>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button type="submit">
-                    {editingMaterial ? 'Atualizar' : 'Cadastrar'}
-                  </Button>
-                  {editingMaterial && (
-                    <Button type="button" variant="outline" onClick={() => {
-                      setEditingMaterial(null);
-                      resetMaterialForm();
-                    }}>
-                      Cancelar
-                    </Button>
-                  )}
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-          </div>
-
-          <div className="space-y-3">
-            {materiais.length > 0 ? (
-              <>
-                <CadastroFiltroItens
-                  idPrefix="cadastro-materiais"
-                  titulo="Filtrar materiais"
-                  nome={filtroMaterialNome}
-                  onNomeChange={setFiltroMaterialNome}
-                  categoriaId={filtroMaterialCategoria}
-                  onCategoriaChange={setFiltroMaterialCategoria}
-                  categorias={categoriasMaterial}
-                  fornecedorId={filtroMaterialFornecedor}
-                  onFornecedorChange={setFiltroMaterialFornecedor}
-                  fornecedores={fornecedores}
-                  onLimpar={() => {
-                    setFiltroMaterialNome("");
-                    setFiltroMaterialCategoria("");
-                    setFiltroMaterialFornecedor("");
-                  }}
-                />
-                {materiaisAgrupados.length === 0 ? (
-                  <Card>
-                    <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                      Nenhum material corresponde aos filtros.
-                    </CardContent>
-                  </Card>
-                ) : (
-              materiaisAgrupados.map((grupo, gi) => (
-                <div key={grupo.categoriaId ?? `sem-${gi}`} className="space-y-2">
-                  <div className="rounded-lg border bg-muted/30 px-3 py-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="h-5 w-1.5 rounded-full bg-primary/70 shrink-0" />
-                        <div className="font-semibold truncate">{grupo.categoriaNome}</div>
-                      </div>
-                      <Badge variant="outline" className="tabular-nums shrink-0">
-                        {grupo.itens.length}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    {grupo.itens.map((material, index) => (
-                      <motion.div
-                        key={material.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.15, delay: index * 0.01 }}
-                      >
-                        <Card>
-                          <CardContent className="p-4">
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <span className="text-sm text-muted-foreground">
-                                    Fornecedor: {fornecedores.find(f => String(f.id) === String(material.fornecedor))?.nomeRazaoSocial ?? '—'}
-                                  </span>
-                                  <h3 className="font-medium">{material.nome}</h3>
-                                </div>
-                                {isChefe && (
-                                  <div className="space-y-0.5">
-                                    <p className="text-sm text-muted-foreground">
-                                      Base (compra/estoque):{" "}
-                                      <span className="font-medium text-foreground">{formatCurrency(material.precoUnitarioBase)}</span>
-                                    </p>
-                                    <p className="text-lg font-semibold text-primary">
-                                      Fabricação (insumos):{" "}
-                                      {material.precoFabricacao != null && !Number.isNaN(Number(material.precoFabricacao))
-                                        ? formatCurrency(Number(material.precoFabricacao))
-                                        : formatCurrency(material.precoUnitarioBase)}
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button variant="ghost" size="icon" onClick={() => handleEditMaterial(material)}>
-                                  <Pencil className="size-4" />
-                                </Button>
-                                {isChefe && (
-                                  <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                      <Button variant="ghost" size="icon">
-                                        <Trash2 className="size-4 text-destructive" />
-                                      </Button>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                      <AlertDialogHeader>
-                                        <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                          Tem certeza que deseja excluir este material?
-                                        </AlertDialogDescription>
-                                      </AlertDialogHeader>
-                                      <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleDeleteMaterial(material.id)}>
-                                          Excluir
-                                        </AlertDialogAction>
-                                      </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                  </AlertDialog>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
-              ))
-                )}
-              </>
-            ) : (
-              <Card>
-                <CardContent className="py-12 text-center text-muted-foreground">
-                  Nenhum material cadastrado
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </TabsContent>
 
         {/* CONTAS BANCÁRIAS - apenas chefe */}
         {isChefe && (

@@ -63,7 +63,7 @@ function DashboardFuncionario() {
                   <ShoppingCart className="size-10 text-primary" />
                 </div>
                 <h2 className="text-xl font-semibold">Nova Compra</h2>
-                <p className="text-sm text-muted-foreground mt-1 text-center">Registrar compra de materiais</p>
+                <p className="text-sm text-muted-foreground mt-1 text-center">Registrar compra de produtos</p>
               </CardContent>
             </Card>
           </motion.div>

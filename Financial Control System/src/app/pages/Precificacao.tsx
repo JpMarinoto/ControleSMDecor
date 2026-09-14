@@ -427,13 +427,14 @@ export function Precificacao() {
   };
 
   const copiarLinha = (linha: LinhaPrecificacao) => {
-    setLinhas((prev) => [
-      ...prev,
-      {
-        ...linha,
-        id: String(Date.now()),
-      },
-    ]);
+    setLinhas((prev) => {
+      const idx = prev.findIndex((l) => l.id === linha.id);
+      const copia = { ...linha, id: String(Date.now()) };
+      if (idx < 0) return [...prev, copia];
+      const next = [...prev];
+      next.splice(idx + 1, 0, copia);
+      return next;
+    });
   };
 
   const moverLinha = (id: string, direcao: -1 | 1) => {
@@ -1484,7 +1485,14 @@ function AbaTiktok({ mesReferencia: mesGlobal }: { mesReferencia: string }) {
   };
 
   const copiarLinha = (linha: LinhaTiktok) => {
-    setLinhas((prev) => [...prev, { ...linha, id: String(Date.now()) }]);
+    setLinhas((prev) => {
+      const idx = prev.findIndex((l) => l.id === linha.id);
+      const copia = { ...linha, id: String(Date.now()) };
+      if (idx < 0) return [...prev, copia];
+      const next = [...prev];
+      next.splice(idx + 1, 0, copia);
+      return next;
+    });
   };
 
   const moverLinha = (id: string, direcao: -1 | 1) => {

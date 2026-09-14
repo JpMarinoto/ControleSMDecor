@@ -522,72 +522,37 @@ export function FinancasLucros() {
           ) : loading ? (
             <p className="text-sm text-muted-foreground">Carregando…</p>
           ) : comprasData ? (
-            <div className="grid gap-6 md:grid-cols-2">
-              <div className="min-w-0">
-                <h3 className="text-sm font-medium mb-2">Materiais</h3>
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
+            <div className="min-w-0">
+              <h3 className="text-sm font-medium mb-2">Produtos</h3>
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Produto</TableHead>
+                      <TableHead className="text-right">Qtd</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {comprasData.produtos.length === 0 ? (
                       <TableRow>
-                        <TableHead>Material</TableHead>
-                        <TableHead className="text-right">Qtd</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
+                        <TableCell colSpan={3} className="text-center text-muted-foreground text-sm">
+                          Nenhuma compra de produto
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {comprasData.materiais.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={3} className="text-center text-muted-foreground text-sm">
-                            Nenhuma compra de material
+                    ) : (
+                      comprasData.produtos.map((p) => (
+                        <TableRow key={p.produto_id}>
+                          <TableCell className="font-medium max-w-[9rem] truncate" title={p.nome}>
+                            {p.nome}
                           </TableCell>
+                          <TableCell className="text-right tabular-nums">{p.quantidade}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatCurrency(safeNum(p.total_gasto))}</TableCell>
                         </TableRow>
-                      ) : (
-                        comprasData.materiais.map((m) => (
-                          <TableRow key={m.material_id}>
-                            <TableCell className="font-medium max-w-[9rem] truncate" title={m.nome}>
-                              {m.nome}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">{m.quantidade}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatCurrency(safeNum(m.total_gasto))}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-sm font-medium mb-2">Produtos (revenda)</h3>
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Produto</TableHead>
-                        <TableHead className="text-right">Qtd</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {comprasData.produtos.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={3} className="text-center text-muted-foreground text-sm">
-                            Nenhuma compra de produto
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        comprasData.produtos.map((p) => (
-                          <TableRow key={p.produto_id}>
-                            <TableCell className="font-medium max-w-[9rem] truncate" title={p.nome}>
-                              {p.nome}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">{p.quantidade}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatCurrency(safeNum(p.total_gasto))}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             </div>
           ) : (

@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from financeiro.models import Cliente, Produto, Venda, Fornecedor, Material, OrdemCompra
+from financeiro.models import Cliente, Produto, Venda, Fornecedor, OrdemCompra
 from financeiro.views_api import VendaListCreate, VendaDetail, CompraListCreate, CompraDetail, FornecedorDetalhe
 from rest_framework import status
 
@@ -104,7 +104,11 @@ class CompraDataApiTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("teste_compra", password="senha_segura_123")
         self.fornecedor = Fornecedor.objects.create(nome="Fornecedor Teste Compra")
-        self.material = Material.objects.create(nome="Material Teste", preco_unitario_base=Decimal("5.0000"))
+        self.produto = Produto.objects.create(
+            nome="Produto Teste Compra",
+            fornecedor=self.fornecedor,
+            preco_custo=Decimal("5.0000"),
+        )
 
     def test_post_com_data_grava_ordem_e_itens(self):
         factory = APIRequestFactory()
@@ -112,8 +116,8 @@ class CompraDataApiTest(TestCase):
             "fornecedor_id": self.fornecedor.id,
             "itens": [
                 {
-                    "tipo": "material",
-                    "material": self.material.id,
+                    "tipo": "produto",
+                    "produto": self.produto.id,
                     "quantidade": 2,
                     "preco_no_dia": "3.50",
                 }
@@ -136,7 +140,7 @@ class CompraDataApiTest(TestCase):
         self.assertEqual(payload.get("data"), "2024-11-10")
         ordem = OrdemCompra.objects.get(pk=payload["id"])
         self.assertEqual(ordem.data_compra.date().isoformat(), "2024-11-10")
-        item = ordem.itens.first()
+        item = ordem.itens_produtos.first()
         self.assertIsNotNone(item)
         self.assertEqual(item.data_compra.date().isoformat(), "2024-11-10")
 
@@ -146,8 +150,8 @@ class CompraDataApiTest(TestCase):
             "fornecedor_id": self.fornecedor.id,
             "itens": [
                 {
-                    "tipo": "material",
-                    "material": self.material.id,
+                    "tipo": "produto",
+                    "produto": self.produto.id,
                     "quantidade": 1,
                     "preco_no_dia": "2.00",
                 }
@@ -164,7 +168,12 @@ class CompraDataApiTest(TestCase):
         self.assertEqual(r0.status_code, 201)
         oid = r0.data["id"]
         ordem = OrdemCompra.objects.get(pk=oid)
-        lanc_iso = ordem.data_lancamento.date().isoformat() if ordem.data_lancamento else ""
+        from zoneinfo import ZoneInfo
+        from django.utils import timezone as dj_tz
+        dl = ordem.data_lancamento
+        if dl and dj_tz.is_naive(dl):
+            dl = dl.replace(tzinfo=ZoneInfo('UTC'))
+        lanc_iso = dl.astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat() if dl else ""
         req_patch = factory.patch(
             f"/api/compras/{oid}/",
             data=json.dumps({"data": "2025-04-15"}),
@@ -179,8 +188,14 @@ class CompraDataApiTest(TestCase):
         self.assertTrue(str(dl_resp).startswith(lanc_iso), msg=f"data_lancamento={dl_resp!r} deve manter o dia {lanc_iso}")
         ordem.refresh_from_db()
         self.assertEqual(ordem.data_compra.date().isoformat(), "2025-04-15")
-        self.assertEqual(ordem.data_lancamento.date().isoformat(), lanc_iso)
-        it = ordem.itens.first()
+        dl2 = ordem.data_lancamento
+        if dl2 and dj_tz.is_naive(dl2):
+            dl2 = dl2.replace(tzinfo=ZoneInfo('UTC'))
+        self.assertEqual(
+            dl2.astimezone(ZoneInfo('America/Sao_Paulo')).date().isoformat() if dl2 else "",
+            lanc_iso,
+        )
+        it = ordem.itens_produtos.first()
         self.assertEqual(it.data_compra.date().isoformat(), "2025-04-15")
 
     def test_delete_ordem_cancela_logicamente(self):
@@ -189,8 +204,8 @@ class CompraDataApiTest(TestCase):
             "fornecedor_id": self.fornecedor.id,
             "itens": [
                 {
-                    "tipo": "material",
-                    "material": self.material.id,
+                    "tipo": "produto",
+                    "produto": self.produto.id,
                     "quantidade": 1,
                     "preco_no_dia": "5.00",
                 }
@@ -222,7 +237,7 @@ class CompraDataApiTest(TestCase):
         self.assertEqual(r1.status_code, status.HTTP_204_NO_CONTENT)
         ordem = OrdemCompra.objects.get(pk=oid)
         self.assertTrue(ordem.cancelada)
-        self.assertTrue(ordem.itens.exists())
+        self.assertTrue(ordem.itens_produtos.exists())
         r2 = CompraDetail.as_view()(factory.get(f"/api/compras/{oid}/"), pk=oid)
         self.assertEqual(r2.status_code, 200)
         self.assertTrue(r2.data.get("cancelada"))
@@ -234,8 +249,8 @@ class CompraDataApiTest(TestCase):
             "fornecedor_id": self.fornecedor.id,
             "itens": [
                 {
-                    "tipo": "material",
-                    "material": self.material.id,
+                    "tipo": "produto",
+                    "produto": self.produto.id,
                     "quantidade": 2,
                     "preco_no_dia": "10.00",
                 }
@@ -258,7 +273,7 @@ class CompraDataApiTest(TestCase):
             data=json.dumps(
                 {
                     "preco_no_dia": "15.00",
-                    "tipo": "material",
+                    "tipo": "produto",
                 }
             ),
             content_type="application/json",

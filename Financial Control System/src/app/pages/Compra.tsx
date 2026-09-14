@@ -43,11 +43,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/toolti
 import { cn } from "../components/ui/utils";
 interface ItemCompra {
   id: number;
-  tipo?: "material" | "produto";
-  material?: number;
-  material_nome?: string;
+  tipo?: "produto";
   produto?: number;
   produto_nome?: string;
+  /** Legado (API antiga); preferir produto_nome */
+  material?: number;
+  material_nome?: string;
   quantidade: number;
   preco_no_dia: number;
   total: number;
@@ -74,17 +75,11 @@ function compraOptionRotulo(o: CompraPickOption): string {
   return o.nome;
 }
 
-function materialCompraOption(m: { id: number | string; nome?: string }): CompraPickOption {
-  return {
-    id: m.id,
-    nome: String(m.nome ?? "").trim() || `Material #${m.id}`,
-  };
-}
-
 function produtoCompraOption(p: { id: number | string; nome?: string }): CompraPickOption {
+  const base = String(p.nome ?? "").trim() || `Produto #${p.id}`;
   return {
     id: p.id,
-    nome: String(p.nome ?? "").trim() || `Produto #${p.id}`,
+    nome: base,
   };
 }
 
@@ -133,7 +128,7 @@ function ordemDuplicadaNumeroVenda(
   );
 }
 
-/** Lista de material ou produto com campo de pesquisa (aba Compra). */
+/** Lista de produto com campo de pesquisa (aba Compra). */
 function CompraSearchableSelect({
   value,
   onValueChange,
@@ -223,41 +218,35 @@ function sortOrdemCompraRecentFirst(a: OrdemCompra, b: OrdemCompra): number {
 
 interface NovoItemCompraForm {
   id: string;
-  materialId: string;
+  /** Sempre id do produto (unificado; insumos também são produtos). */
+  produtoId: string;
   quantidade: string;
   precoUnitario: string;
 }
 
-/** Inclui na compra se o fornecedor do produto coincide com o da ordem ou ainda não foi definido (não mistura produto de outro fornecedor). */
-function produtoDisponivelParaFornecedor(p: any, fid: string) {
-  const pf = p.fornecedor;
-  if (pf == null || pf === "" || String(pf) === "null" || String(pf) === "undefined") return true;
+/** Só produtos com fornecedor exatamente igual ao da ordem — nunca null = todos. */
+function produtoDoFornecedor(p: any, fid: string) {
+  if (!fid) return false;
+  const pf = p.fornecedor ?? p.fornecedor_id ?? p.fornecedorId;
+  if (pf == null || pf === "" || String(pf) === "null" || String(pf) === "undefined") return false;
   return String(pf) === String(fid);
-}
-
-function precoUniMaterial(m: {
-  precoUnitarioBase?: number | string | null;
-  preco_unitario_base?: number | string | null;
-} | null | undefined): string {
-  if (!m) return "";
-  const preco = m.precoUnitarioBase ?? m.preco_unitario_base;
-  return preco != null && preco !== "" ? String(preco) : "";
 }
 
 function precoUniProdutoCompra(p: {
   preco_custo?: number | string | null;
   precoCusto?: number | string | null;
+  preco_unitario_base?: number | string | null;
+  precoUnitarioBase?: number | string | null;
 } | null | undefined): string {
   if (!p) return "";
-  const preco = p.preco_custo ?? p.precoCusto;
+  const preco = p.preco_custo ?? p.precoCusto ?? p.preco_unitario_base ?? p.precoUnitarioBase;
   return preco != null && preco !== "" ? String(preco) : "";
 }
 
-/** Mesma regra da API: compra como item pronto se não é fabricado e (revenda ou tem fornecedor no cadastro). */
+/** Elegível para compra: não fabricado e com fornecedor cadastrado. */
 function produtoElegivelCompraPronta(p: any) {
   if (p.fabricado) return false;
-  if (p.revenda) return true;
-  const fid = p.fornecedor;
+  const fid = p.fornecedor ?? p.fornecedor_id ?? p.fornecedorId;
   return fid != null && fid !== "" && String(fid) !== "null" && String(fid) !== "undefined";
 }
 
@@ -284,11 +273,9 @@ function parseQtdInteira(raw: string | number): number | null {
 
 export function Compra() {
   const [ordens, setOrdens] = useState<OrdemCompra[]>([]);
-  const [materiais, setMateriais] = useState<any[]>([]);
-  const [produtosRevenda, setProdutosRevenda] = useState<any[]>([]);
+  const [produtosCompra, setProdutosCompra] = useState<any[]>([]);
   const [fornecedores, setFornecedores] = useState<any[]>([]);
 
-  const [materialId, setMaterialId] = useState('');
   const [produtoId, setProdutoId] = useState('');
   const [fornecedorId, setFornecedorId] = useState('');
 
@@ -305,7 +292,6 @@ export function Compra() {
   const [precoUnitario, setPrecoUnitario] = useState('');
   const [numeroVendaFornecedor, setNumeroVendaFornecedor] = useState('');
   const [data, setData] = useState(getTodayLocalISO());
-  const [tipoItem, setTipoItem] = useState<"material" | "produto">("material");
 
   const [itensForm, setItensForm] = useState<NovoItemCompraForm[]>([]);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -324,23 +310,14 @@ export function Compra() {
     () => (detailCompra ? fornecedorIdDaOrdem(detailCompra, fornecedores) : ""),
     [detailCompra, fornecedores],
   );
-  const materiaisDetalheCompra = useMemo(
-    () =>
-      fornecedorIdDetalheCompra
-        ? materiais.filter(
-            (m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === fornecedorIdDetalheCompra,
-          )
-        : [],
-    [materiais, fornecedorIdDetalheCompra],
-  );
   const produtosDetalheCompra = useMemo(
     () =>
       fornecedorIdDetalheCompra
-        ? produtosRevenda
-            .filter((p: any) => produtoDisponivelParaFornecedor(p, fornecedorIdDetalheCompra))
+        ? produtosCompra
+            .filter((p: any) => produtoDoFornecedor(p, fornecedorIdDetalheCompra))
             .sort((a: any, b: any) => String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"))
         : [],
-    [produtosRevenda, fornecedorIdDetalheCompra],
+    [produtosCompra, fornecedorIdDetalheCompra],
   );
   const [simpleConfirm, setSimpleConfirm] = useState<{
     title: string;
@@ -351,7 +328,7 @@ export function Compra() {
   const [excluirCompraOpen, setExcluirCompraOpen] = useState(false);
   const [excluirItemCompra, setExcluirItemCompra] = useState<{
     id: string | number;
-    tipo: 'material' | 'produto';
+    tipo: 'produto';
   } | null>(null);
   const [printPreview, setPrintPreview] = useState<{
     html: string;
@@ -360,13 +337,11 @@ export function Compra() {
   } | null>(null);
   const [editDetailDataCompra, setEditDetailDataCompra] = useState("");
   const [editDetailNumeroVendaFornecedor, setEditDetailNumeroVendaFornecedor] = useState("");
-  const [addDetailTipo, setAddDetailTipo] = useState<"material" | "produto">("material");
-  const [addDetailMaterialId, setAddDetailMaterialId] = useState("");
   const [addDetailProdutoId, setAddDetailProdutoId] = useState("");
   const [addDetailQtd, setAddDetailQtd] = useState("");
   const [addDetailPreco, setAddDetailPreco] = useState("");
   const [cadastroRapidoOpen, setCadastroRapidoOpen] = useState(false);
-  const [cadastroRapidoModo, setCadastroRapidoModo] = useState<CadastroRapidoModo>("material-compra");
+  const [cadastroRapidoModo, setCadastroRapidoModo] = useState<CadastroRapidoModo>("produto-compra");
   const [cadastroRapidoFornecedorId, setCadastroRapidoFornecedorId] = useState("");
   const cadastroRapidoOrigemRef = useRef<"nova" | "detalhe">("nova");
   const [detailSaving, setDetailSaving] = useState(false);
@@ -395,46 +370,43 @@ export function Compra() {
       toast.error("Selecione o fornecedor primeiro");
       return;
     }
-    const modo: CadastroRapidoModo =
-      origem === "detalhe"
-        ? addDetailTipo === "produto"
-          ? "produto-compra"
-          : "material-compra"
-        : tipoItem === "produto"
-          ? "produto-compra"
-          : "material-compra";
     cadastroRapidoOrigemRef.current = origem;
-    setCadastroRapidoModo(modo);
+    setCadastroRapidoModo("produto-compra");
     setCadastroRapidoFornecedorId(fid);
     setCadastroRapidoOpen(true);
   };
 
   const handleItemCriadoRapido = async (created: Record<string, unknown>) => {
-    const { origem } = cadastroRapidoOrigemRef.current;
+    const origem = cadastroRapidoOrigemRef.current;
     const id = String(created.id);
-    if (cadastroRapidoModo === "material-compra") {
-      const mats = await api.getMateriais().catch(() => []);
-      setMateriais(Array.isArray(mats) ? mats : []);
-      if (origem === "detalhe") {
-        setAddDetailMaterialId(id);
-        setAddDetailPreco(precoUniMaterial(created));
-      } else {
-        setTipoItem("material");
-        setMaterialId(id);
-        setPrecoUnitario(precoUniMaterial(created));
-      }
+    const fidFallback =
+      origem === "detalhe" ? fornecedorIdDetalheCompra : fornecedorId || cadastroRapidoFornecedorId;
+    // Garante que o item novo entre na lista mesmo se a API atrasar o fornecedor no GET.
+    const createdNorm = {
+      ...created,
+      id: created.id,
+      fornecedor: created.fornecedor ?? created.fornecedor_id ?? fidFallback,
+      fabricado: Boolean(created.fabricado),
+    };
+    const prods = await api.getProdutos().catch(() => []);
+    const all = Array.isArray(prods) ? prods : [];
+    const merged = [...all];
+    if (!merged.some((p: any) => String(p.id) === id)) {
+      merged.push(createdNorm);
     } else {
-      const prods = await api.getProdutos().catch(() => []);
-      const all = Array.isArray(prods) ? prods : [];
-      setProdutosRevenda(all.filter((p: any) => produtoElegivelCompraPronta(p)));
-      if (origem === "detalhe") {
-        setAddDetailProdutoId(id);
-        setAddDetailPreco(precoUniProdutoCompra(created));
-      } else {
-        setTipoItem("produto");
-        setProdutoId(id);
-        setPrecoUnitario(precoUniProdutoCompra(created));
+      const idx = merged.findIndex((p: any) => String(p.id) === id);
+      const cur = merged[idx];
+      if (!produtoDoFornecedor(cur, fidFallback) && fidFallback) {
+        merged[idx] = { ...cur, fornecedor: cur.fornecedor ?? fidFallback };
       }
+    }
+    setProdutosCompra(merged.filter((p: any) => produtoElegivelCompraPronta(p)));
+    if (origem === "detalhe") {
+      setAddDetailProdutoId(id);
+      setAddDetailPreco(precoUniProdutoCompra(createdNorm));
+    } else {
+      setProdutoId(id);
+      setPrecoUnitario(precoUniProdutoCompra(createdNorm));
     }
   };
 
@@ -470,53 +442,38 @@ export function Compra() {
   }, []);
 
   useEffect(() => {
-    if (tipoItem === "material" && materialId) {
-      const mat = materiais.find((m: any) => String(m.id) === materialId);
-      setPrecoUnitario(precoUniMaterial(mat));
-    } else if (tipoItem === "produto" && produtoId) {
-      const p = produtosRevenda.find((x: any) => String(x.id) === produtoId);
+    if (produtoId) {
+      const p = produtosCompra.find((x: any) => String(x.id) === produtoId);
       setPrecoUnitario(precoUniProdutoCompra(p));
     } else {
       setPrecoUnitario("");
     }
-  }, [tipoItem, materialId, produtoId, materiais, produtosRevenda]);
+  }, [produtoId, produtosCompra]);
 
   useEffect(() => {
-    if (addDetailTipo === "material" && addDetailMaterialId) {
-      const mat = materiais.find((m: any) => String(m.id) === addDetailMaterialId);
-      setAddDetailPreco(precoUniMaterial(mat));
-    } else if (addDetailTipo === "produto" && addDetailProdutoId) {
-      const p = produtosRevenda.find((x: any) => String(x.id) === addDetailProdutoId);
+    if (addDetailProdutoId) {
+      const p = produtosCompra.find((x: any) => String(x.id) === addDetailProdutoId);
       setAddDetailPreco(precoUniProdutoCompra(p));
     } else {
       setAddDetailPreco("");
     }
-  }, [addDetailTipo, addDetailMaterialId, addDetailProdutoId, materiais, produtosRevenda]);
+  }, [addDetailProdutoId, produtosCompra]);
 
-  // Ao trocar o fornecedor, limpar material selecionado se não estiver vinculado a ele
+  // Ao trocar o fornecedor, limpar produto se não estiver vinculado a ele
   useEffect(() => {
     if (!fornecedorId) {
-      setMaterialId("");
+      setProdutoId("");
       return;
     }
-    const vinculados = materiais.filter(
-      (m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === String(fornecedorId)
-    );
-    const pertence = vinculados.some((m: any) => String(m.id) === materialId);
-    if (materialId && !pertence) setMaterialId("");
-  }, [fornecedorId, materiais]);
-
-  useEffect(() => {
-    if (!fornecedorId || !produtoId) return;
-    const p = produtosRevenda.find((x: any) => String(x.id) === produtoId);
-    if (p && !produtoDisponivelParaFornecedor(p, fornecedorId)) setProdutoId("");
-  }, [fornecedorId, produtoId, produtosRevenda]);
+    if (!produtoId) return;
+    const p = produtosCompra.find((x: any) => String(x.id) === produtoId);
+    if (!p || !produtoDoFornecedor(p, fornecedorId)) setProdutoId("");
+  }, [fornecedorId, produtoId, produtosCompra]);
 
   const loadData = async () => {
     try {
-      const [ordensRes, materiaisRes, produtosRes, fornRes] = await Promise.all([
+      const [ordensRes, produtosRes, fornRes] = await Promise.all([
         api.getCompras().catch(() => []),
-        api.getMateriais().catch(() => []),
         api.getProdutos().catch(() => []),
         api.getFornecedores().catch(() => []),
       ]);
@@ -526,6 +483,12 @@ export function Compra() {
               id: o.id,
               fornecedor: o.fornecedor || "",
               fornecedor_id: o.fornecedor_id,
+              numero_venda_fornecedor:
+                typeof o.numero_venda_fornecedor === "string"
+                  ? o.numero_venda_fornecedor
+                  : o.numero_venda_fornecedor != null
+                    ? String(o.numero_venda_fornecedor)
+                    : "",
               data: o.data || "",
               data_lancamento: o.data_lancamento || "",
               cancelada: o.cancelada === true,
@@ -534,11 +497,11 @@ export function Compra() {
               ultima_alteracao_em: o.ultima_alteracao_em ?? undefined,
               itens: (o.itens || []).map((i: any) => ({
                 id: i.id,
-                tipo: (i.tipo === "produto" ? "produto" : "material") as "material" | "produto",
+                tipo: "produto" as const,
                 material: i.material,
                 material_nome: i.material_nome || "",
-                produto: i.produto,
-                produto_nome: i.produto_nome || "",
+                produto: i.produto ?? i.material,
+                produto_nome: i.produto_nome || i.material_nome || "",
                 quantidade: parseQtdInteira(i.quantidade) ?? 0,
                 preco_no_dia: Number(i.preco_no_dia) || 0,
                 total: Number(i.total) || 0,
@@ -547,9 +510,8 @@ export function Compra() {
             }))
           : []
       );
-      setMateriais(Array.isArray(materiaisRes) ? materiaisRes : []);
       const allProds = Array.isArray(produtosRes) ? produtosRes : [];
-      setProdutosRevenda(allProds.filter((p: any) => produtoElegivelCompraPronta(p)));
+      setProdutosCompra(allProds.filter((p: any) => produtoElegivelCompraPronta(p)));
       setFornecedores(Array.isArray(fornRes) ? fornRes : []);
     } catch {
       toast.error("Erro ao carregar dados");
@@ -572,8 +534,6 @@ export function Compra() {
         ...d,
         fornecedor_id: fornecedorId ? Number(fornecedorId) : d.fornecedor_id ?? ordem.fornecedor_id,
       });
-      setAddDetailTipo("material");
-      setAddDetailMaterialId("");
       setAddDetailProdutoId("");
       setAddDetailQtd("");
       setAddDetailPreco("");
@@ -725,7 +685,7 @@ export function Compra() {
     id: string | number,
     password: string,
     observacao: string,
-    tipoLinha?: 'material' | 'produto',
+    tipoLinha?: 'produto',
   ) => {
     try {
       await api.deleteCompra(String(id), {
@@ -808,7 +768,7 @@ export function Compra() {
     const itemId = String(editingItem.id);
     const ordemIdRef = editingItem.ordemId;
     const detId = detailCompra ? String(detailCompra.id) : null;
-    const tipo: 'material' | 'produto' = editingItem.tipo === 'produto' ? 'produto' : 'material';
+    const tipo: 'produto' = 'produto';
     setDetailSaving(true);
     try {
       await api.updateCompra(itemId, {
@@ -947,7 +907,7 @@ export function Compra() {
         <table>
           <thead>
             <tr>
-              <th style="width: 46%;">Material</th>
+              <th style="width: 46%;">Produto</th>
               <th class="num" style="width: 14%;">Qtd</th>
               <th class="num" style="width: 20%;">V. unitário</th>
               <th class="num" style="width: 20%;">Total item</th>
@@ -1010,15 +970,16 @@ export function Compra() {
       .filter((item) => {
         const qtd = parseQtdInteira(item.quantidade);
         const preco = parseFloat(item.precoUnitario.replace(',', '.'));
-        return item.materialId && qtd !== null && qtd > 0 && !isNaN(preco) && preco > 0;
+        return item.produtoId && qtd !== null && qtd > 0 && !isNaN(preco) && preco > 0;
       })
       .map((item) => ({
-        ...(item.materialId.startsWith("prod:") ? { tipo: "produto", produto: Number(item.materialId.replace("prod:", "")) } : { tipo: "material", material: Number(item.materialId.replace("mat:", "")) }),
+        tipo: "produto" as const,
+        produto: Number(item.produtoId),
         quantidade: parseQtdInteira(item.quantidade) as number,
         preco_no_dia: parseFloat(item.precoUnitario.replace(',', '.')),
       }));
     if (itensPayload.length === 0) {
-      toast.error("Adicione itens válidos (material, quantidade e preço)");
+      toast.error("Adicione itens válidos (produto, quantidade e preço)");
       return;
     }
     const numeroTrim = numeroVendaFornecedor.trim().slice(0, 64);
@@ -1054,7 +1015,6 @@ export function Compra() {
   };
 
   const resetForm = () => {
-    setMaterialId('');
     setProdutoId('');
     setFornecedorId('');
     setQuantidade('');
@@ -1065,7 +1025,7 @@ export function Compra() {
   };
 
   const getItemNome = (i: ItemCompra) =>
-    i.produto_nome || i.material_nome || (i.produto ? `#${i.produto}` : `#${i.material}`);
+    i.produto_nome || i.material_nome || (i.produto ? `#${i.produto}` : i.material ? `#${i.material}` : "—");
 
   const totalCompras = ordens.reduce((sum, o) => sum + o.total, 0);
 
@@ -1122,7 +1082,7 @@ export function Compra() {
                 Nova Compra
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Selecione o fornecedor e adicione os itens. Materiais só aparecem se estiverem vinculados a esse fornecedor no cadastro. Em produtos, aparecem itens de revenda ou produtos não fabricados com fornecedor cadastrado (mesmo fornecedor da compra, ou fornecedor do produto em branco).
+                Selecione o fornecedor e adicione os produtos vinculados a ele. Só aparecem itens com esse fornecedor no cadastro — produtos sem fornecedor não entram na lista.
               </p>
             </CardHeader>
             <CardContent>
@@ -1150,14 +1110,14 @@ export function Compra() {
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <Label htmlFor="materialId" className="flex-1">Item para adicionar *</Label>
+                      <Label htmlFor="produtoId" className="flex-1">Produto *</Label>
                       {fornecedorId ? (
                         <Button
                           type="button"
                           variant="outline"
                           size="icon"
                           className="h-8 w-8 shrink-0"
-                          title={tipoItem === "material" ? "Cadastrar novo material" : "Cadastrar novo produto"}
+                          title="Cadastrar novo produto"
                           onClick={() => abrirCadastroRapido("nova")}
                         >
                           <Plus className="size-4" />
@@ -1165,79 +1125,32 @@ export function Compra() {
                       ) : null}
                     </div>
                     {!fornecedorId ? (
-                      <p className="text-sm text-muted-foreground py-2">Selecione o fornecedor para ver os materiais vinculados.</p>
+                      <p className="text-sm text-muted-foreground py-2">Selecione o fornecedor para ver os produtos vinculados.</p>
                     ) : (() => {
-                      const materiaisDoFornecedor = materiais.filter(
-                        (m: any) => String(m.fornecedor_padrao ?? m.fornecedor_padrao_id) === String(fornecedorId)
-                      );
-                      const produtosLista = produtosRevenda
-                        .filter((p: any) => produtoDisponivelParaFornecedor(p, fornecedorId))
+                      const produtosLista = produtosCompra
+                        .filter((p: any) => produtoDoFornecedor(p, fornecedorId))
                         .sort((a: any, b: any) =>
                           String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR")
                         );
 
-                      return (
-                        <div className="space-y-2">
-                          <Label>Tipo de item</Label>
-                          <Select
-                            value={tipoItem}
-                            onValueChange={(v) => {
-                              const t = v as "material" | "produto";
-                              setTipoItem(t);
-                              if (t === "material") setProdutoId("");
-                              else setMaterialId("");
-                            }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="material">Material</SelectItem>
-                              <SelectItem value="produto">Produto (revenda)</SelectItem>
-                            </SelectContent>
-                          </Select>
-
-                          {tipoItem === "material" ? (
-                            materiaisDoFornecedor.length > 0 ? (
-                              <CompraSearchableSelect
-                                value={materialId}
-                                onValueChange={(id) => {
-                                  setMaterialId(id);
-                                  const mat = materiais.find((m: any) => String(m.id) === id);
-                                  setPrecoUnitario(precoUniMaterial(mat));
-                                }}
-                                options={materiaisDoFornecedor.map((m: any) => materialCompraOption(m))}
-                                placeholder="Selecione o material"
-                                triggerId="materialId"
-                                emptyHint="Nenhum material encontrado."
-                                searchPlaceholder="Pesquisar material…"
-                              />
-                            ) : (
-                              <p className="text-sm text-muted-foreground py-2">
-                                Nenhum material vinculado a este fornecedor. Vincule na aba Cadastro (materiais).
-                              </p>
-                            )
-                          ) : produtosLista.length > 0 ? (
-                            <CompraSearchableSelect
-                              value={produtoId}
-                              onValueChange={(id) => {
-                                setProdutoId(id);
-                                const p = produtosRevenda.find((x: any) => String(x.id) === id);
-                                setPrecoUnitario(precoUniProdutoCompra(p));
-                              }}
-                              options={produtosLista.map((p: any) => produtoCompraOption(p))}
-                              placeholder="Selecione o produto de revenda"
-                              triggerId="produtoId"
-                              emptyHint="Nenhum produto encontrado."
-                              searchPlaceholder="Pesquisar produto…"
-                            />
-                          ) : (
-                            <p className="text-sm text-muted-foreground py-2">
-                              Nenhum produto disponível para este fornecedor. No cadastro, marque revenda ou defina o
-                              fornecedor do produto (e não marque como fabricado).
-                            </p>
-                          )}
-                        </div>
+                      return produtosLista.length > 0 ? (
+                        <CompraSearchableSelect
+                          value={produtoId}
+                          onValueChange={(id) => {
+                            setProdutoId(id);
+                            const p = produtosCompra.find((x: any) => String(x.id) === id);
+                            setPrecoUnitario(precoUniProdutoCompra(p));
+                          }}
+                          options={produtosLista.map((p: any) => produtoCompraOption(p))}
+                          placeholder="Selecione o produto"
+                          triggerId="produtoId"
+                          emptyHint="Nenhum produto encontrado."
+                          searchPlaceholder="Pesquisar produto…"
+                        />
+                      ) : (
+                        <p className="text-sm text-muted-foreground py-2">
+                          Nenhum produto vinculado a este fornecedor. Cadastre o produto com este fornecedor (aba Cadastro).
+                        </p>
                       );
                     })()}
                   </div>
@@ -1294,9 +1207,8 @@ export function Compra() {
                         toast.error('Selecione o fornecedor primeiro');
                         return;
                       }
-                      const selectedId = tipoItem === "produto" ? produtoId : materialId;
-                      if (!selectedId || !quantidade) {
-                        toast.error(`Selecione ${tipoItem === "produto" ? "produto" : "material"} e quantidade`);
+                      if (!produtoId || !quantidade) {
+                        toast.error("Selecione produto e quantidade");
                         return;
                       }
                       const qtd = parseQtdInteira(quantidade);
@@ -1305,11 +1217,7 @@ export function Compra() {
                         return;
                       }
                       const precoBase =
-                        tipoItem === "produto"
-                          ? (produtosRevenda.find((p: any) => String(p.id) === selectedId)?.preco_custo ?? 0)
-                          : (materiais.find((m: any) => String(m.id) === selectedId)?.precoUnitarioBase ??
-                             materiais.find((m: any) => String(m.id) === selectedId)?.preco_unitario_base ??
-                             0);
+                        produtosCompra.find((p: any) => String(p.id) === produtoId)?.preco_custo ?? 0;
                       const precoParaItem = isChefe
                         ? (parseFloat(String(precoUnitario).replace(',', '.')) || Number(precoBase))
                         : Number(precoBase);
@@ -1321,12 +1229,11 @@ export function Compra() {
                         ...prev,
                         {
                           id: `${Date.now()}-${prev.length}`,
-                          materialId: tipoItem === "produto" ? `prod:${selectedId}` : `mat:${selectedId}`,
+                          produtoId,
                           quantidade: String(qtd),
                           precoUnitario: String(precoParaItem),
                         },
                       ]);
-                      setMaterialId('');
                       setProdutoId('');
                       setQuantidade('');
                       setPrecoUnitario('');
@@ -1350,19 +1257,14 @@ export function Compra() {
                     </TableHeader>
                     <TableBody>
                       {itensForm.map((item) => {
-                        const isProd = item.materialId.startsWith("prod:");
-                        const refId = item.materialId.replace("prod:", "").replace("mat:", "");
-                        const label = isProd
-                          ? compraOptionRotulo(
-                              produtoCompraOption(
-                                produtosRevenda.find((p: any) => String(p.id) === refId) ?? { id: refId, nome: `Produto #${refId}` },
-                              ),
-                            )
-                          : compraOptionRotulo(
-                              materialCompraOption(
-                                materiais.find((m: any) => String(m.id) === refId) ?? { id: refId, nome: `Material #${refId}` },
-                              ),
-                            );
+                        const label = compraOptionRotulo(
+                          produtoCompraOption(
+                            produtosCompra.find((p: any) => String(p.id) === item.produtoId) ?? {
+                              id: item.produtoId,
+                              nome: `Produto #${item.produtoId}`,
+                            },
+                          ),
+                        );
                         const qtdItem = parseQtdInteira(item.quantidade) ?? 0;
                         const precoItem = parseFloat(item.precoUnitario.replace(',', '.') || '0');
                         const isEditing = editingItemId === item.id;
@@ -1433,7 +1335,7 @@ export function Compra() {
                                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => iniciarEdicaoItem(item)} title="Editar">
                                       <Pencil className="size-4" />
                                     </Button>
-                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => copiarItemNaLista(item.id)} title="Copiar item (mesmo material, altere a quantidade)">
+                                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => copiarItemNaLista(item.id)} title="Copiar item (mesmo produto, altere a quantidade)">
                                       <Copy className="size-4" />
                                     </Button>
                                     <Button
@@ -1458,8 +1360,8 @@ export function Compra() {
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Nenhum item adicionado ainda. Selecione o fornecedor, o material e a quantidade
-                    {isChefe ? " e o preço" : ""} e clique em &quot;Adicionar material à lista&quot;.
+                    Nenhum item adicionado ainda. Selecione o fornecedor, o produto e a quantidade
+                    {isChefe ? " e o preço" : ""} e clique em &quot;Adicionar item à lista&quot;.
                   </p>
                 )}
               </div>
@@ -1542,7 +1444,7 @@ export function Compra() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="searchProduto">Produto / Material</Label>
+                  <Label htmlFor="searchProduto">Produto</Label>
                   <Input
                     id="searchProduto"
                     placeholder="Nome do item"
@@ -1763,28 +1665,14 @@ export function Compra() {
                               toast.error("Informe o preço unitário");
                               return;
                             }
-                            const payload =
-                              addDetailTipo === "material"
-                                ? {
-                                    ordemId,
-                                    tipo: "material" as const,
-                                    material: Number(addDetailMaterialId),
-                                    quantidade: qtd,
-                                    preco_no_dia: preco,
-                                  }
-                                : {
-                                    ordemId,
-                                    tipo: "produto" as const,
-                                    produto: Number(addDetailProdutoId),
-                                    quantidade: qtd,
-                                    preco_no_dia: preco,
-                                  };
-                            if (addDetailTipo === "material") {
-                              if (!addDetailMaterialId) {
-                                toast.error("Selecione o material");
-                                return;
-                              }
-                            } else if (!addDetailProdutoId) {
+                            const payload = {
+                              ordemId,
+                              tipo: "produto" as const,
+                              produto: Number(addDetailProdutoId),
+                              quantidade: qtd,
+                              preco_no_dia: preco,
+                            };
+                            if (!addDetailProdutoId) {
                               toast.error("Selecione o produto");
                               return;
                             }
@@ -1792,8 +1680,7 @@ export function Compra() {
                             try {
                               const updated = await api.addCompraItem(payload.ordemId, {
                                 tipo: payload.tipo,
-                                material: payload.tipo === "material" ? payload.material : undefined,
-                                produto: payload.tipo === "produto" ? payload.produto : undefined,
+                                produto: payload.produto,
                                 quantidade: payload.quantidade,
                                 preco_no_dia: payload.preco_no_dia,
                               });
@@ -1802,7 +1689,6 @@ export function Compra() {
                               if (detailCompra && String(detailCompra.id) === ordemId) {
                                 setDetailCompra(updated as OrdemCompra);
                               }
-                              setAddDetailMaterialId("");
                               setAddDetailProdutoId("");
                               setAddDetailQtd("");
                               setAddDetailPreco("");
@@ -1819,38 +1705,17 @@ export function Compra() {
                       </Button>
                     </div>
 
-                    <div className="mt-3 grid gap-3 md:grid-cols-4">
-                      <div className="space-y-2 md:col-span-1">
-                        <Label>Tipo</Label>
-                        <Select
-                          value={addDetailTipo}
-                          onValueChange={(v) => {
-                            const t = v as "material" | "produto";
-                            setAddDetailTipo(t);
-                            setAddDetailMaterialId("");
-                            setAddDetailProdutoId("");
-                            setAddDetailPreco("");
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="material">Material</SelectItem>
-                            <SelectItem value="produto">Produto</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2 md:col-span-1">
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                      <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <Label className="flex-1">{addDetailTipo === "material" ? "Material" : "Produto"}</Label>
+                          <Label className="flex-1">Produto</Label>
                           {fornecedorIdDetalheCompra ? (
                             <Button
                               type="button"
                               variant="outline"
                               size="icon"
                               className="h-8 w-8 shrink-0"
-                              title={addDetailTipo === "material" ? "Cadastrar novo material" : "Cadastrar novo produto"}
+                              title="Cadastrar novo produto"
                               onClick={() => abrirCadastroRapido("detalhe")}
                             >
                               <Plus className="size-4" />
@@ -1861,31 +1726,12 @@ export function Compra() {
                           <p className="text-sm text-muted-foreground py-2">
                             Fornecedor da ordem não identificado. Feche e abra o detalhe novamente.
                           </p>
-                        ) : addDetailTipo === "material" ? (
-                          materiaisDetalheCompra.length > 0 ? (
-                            <CompraSearchableSelect
-                              value={addDetailMaterialId}
-                              onValueChange={(id) => {
-                                setAddDetailMaterialId(id);
-                                const mat = materiais.find((m: any) => String(m.id) === id);
-                                setAddDetailPreco(precoUniMaterial(mat));
-                              }}
-                              options={materiaisDetalheCompra.map((m: any) => materialCompraOption(m))}
-                              placeholder="Selecione o material"
-                              emptyHint="Nenhum material encontrado."
-                              searchPlaceholder="Pesquisar material…"
-                            />
-                          ) : (
-                            <p className="text-sm text-muted-foreground py-2">
-                              Nenhum material vinculado a este fornecedor.
-                            </p>
-                          )
                         ) : produtosDetalheCompra.length > 0 ? (
                           <CompraSearchableSelect
                             value={addDetailProdutoId}
                             onValueChange={(id) => {
                               setAddDetailProdutoId(id);
-                              const p = produtosRevenda.find((x: any) => String(x.id) === id);
+                              const p = produtosCompra.find((x: any) => String(x.id) === id);
                               setAddDetailPreco(precoUniProdutoCompra(p));
                             }}
                             options={produtosDetalheCompra.map((p: any) => produtoCompraOption(p))}
@@ -1899,11 +1745,11 @@ export function Compra() {
                           </p>
                         )}
                       </div>
-                      <div className="space-y-2 md:col-span-1">
+                      <div className="space-y-2">
                         <Label>Quantidade</Label>
                         <Input value={addDetailQtd} onChange={(e) => setAddDetailQtd(e.target.value)} type="number" min={1} />
                       </div>
-                      <div className="space-y-2 md:col-span-1">
+                      <div className="space-y-2">
                         <Label>Vlr Uni</Label>
                         <Input value={addDetailPreco} onChange={(e) => setAddDetailPreco(e.target.value)} inputMode="decimal" />
                       </div>
@@ -1963,7 +1809,7 @@ export function Compra() {
                               onClick={() =>
                                 setExcluirItemCompra({
                                   id: item.id,
-                                  tipo: item.tipo === 'produto' ? 'produto' : 'material',
+                                  tipo: 'produto' as const,
                                 })
                               }
                             >

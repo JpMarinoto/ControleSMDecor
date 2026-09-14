@@ -1,0 +1,15 @@
+# Watchdog: se nginx estiver parado, sobe de novo.
+# Instalar (como root / com sudo):
+#   sudo cp deploy/systemd/nginx-watchdog.service /etc/systemd/system/
+#   sudo cp deploy/systemd/nginx-watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nginx-watchdog.timer
+#   systemctl list-timers nginx-watchdog.timer
+
+[Unit]
+Description=Sobe nginx se estiver inativo
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/usr/bin/systemctl is-active --quiet nginx.service || /usr/bin/systemctl start nginx.service'

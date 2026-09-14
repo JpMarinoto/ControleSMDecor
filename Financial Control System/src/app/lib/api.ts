@@ -328,10 +328,11 @@ export const api = {
   },
 
   // Clientes
-  getClientes: async (params?: { data_inicio?: string; data_fim?: string }) => {
+  getClientes: async (params?: { data_inicio?: string; data_fim?: string; incluir_inativos?: boolean }) => {
     const sp = new URLSearchParams();
     if (params?.data_inicio) sp.set('data_inicio', params.data_inicio);
     if (params?.data_fim) sp.set('data_fim', params.data_fim);
+    if (params?.incluir_inativos) sp.set('incluir_inativos', '1');
     const qs = sp.toString();
     const url = qs ? `${API_BASE_URL}/clientes/?${qs}` : `${API_BASE_URL}/clientes/`;
     const response = await fetch(url, { headers: authHeaders() });
@@ -363,7 +364,7 @@ export const api = {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { error?: string; code?: string; hint?: string };
-      throw new Error(body.error || body.hint || 'Erro ao excluir');
+      throw new Error(body.error || body.hint || 'Erro ao inativar');
     }
   },
 
@@ -374,6 +375,16 @@ export const api = {
       body: JSON.stringify({ ativo: false }),
     });
     if (!res.ok) throw new Error('Erro ao inativar');
+    return res.json();
+  },
+
+  reativarCliente: async (id: string) => {
+    const res = await fetch(`${API_BASE_URL}/clientes/${id}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ ativo: true }),
+    });
+    if (!res.ok) throw new Error('Erro ao reativar');
     return res.json();
   },
 
@@ -717,9 +728,13 @@ export const api = {
     return response.json();
   },
 
-  // Fornecedores (backend retorna todos por padrão)
-  getFornecedores: async () => {
-    const response = await fetch(`${API_BASE_URL}/fornecedores/`, { headers: authHeaders() });
+  // Fornecedores — por padrão só ativos; Cadastro usa incluir_inativos
+  getFornecedores: async (params?: { incluir_inativos?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (params?.incluir_inativos) sp.set('incluir_inativos', '1');
+    const qs = sp.toString();
+    const url = qs ? `${API_BASE_URL}/fornecedores/?${qs}` : `${API_BASE_URL}/fornecedores/`;
+    const response = await fetch(url, { headers: authHeaders() });
     if (!response.ok) return [];
     const data = await response.json().catch(() => null);
     return Array.isArray(data) ? data : [];
@@ -747,7 +762,7 @@ export const api = {
     const res = await fetch(`${API_BASE_URL}/fornecedores/${id}/`, { method: 'DELETE', headers: authHeaders() });
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { error?: string; code?: string; hint?: string };
-      throw new Error(body.error || body.hint || 'Erro ao excluir');
+      throw new Error(body.error || body.hint || 'Erro ao inativar');
     }
   },
 
@@ -761,32 +776,83 @@ export const api = {
     return res.json();
   },
 
-  // Materiais
-  getMateriais: async () => {
-    const response = await fetch(`${API_BASE_URL}/materiais/`, { headers: authHeaders() });
-    return response.json();
-  },
-  
-  createMaterial: async (data: any) => {
-    const response = await fetch(`${API_BASE_URL}/materiais/`, {
-      method: 'POST',
+  reativarFornecedor: async (id: string) => {
+    const res = await fetch(`${API_BASE_URL}/fornecedores/${id}/`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ativo: true }),
     });
-    return readJsonOrThrow(response);
+    if (!res.ok) throw new Error('Erro ao reativar');
+    return res.json();
+  },
+
+  /**
+   * Compat: materiais = produtos (proxy legado).
+   * Preferir getProdutos / createProduto / updateProduto no frontend novo.
+   */
+  getMateriais: async () => {
+    const produtos = await api.getProdutos();
+    const list = Array.isArray(produtos) ? produtos : [];
+    return list.map((p: any) => ({
+      id: p.id,
+      nome: p.nome,
+      categoria: p.categoria,
+      fornecedor_padrao: p.fornecedor,
+      fornecedor_padrao_id: p.fornecedor,
+      fornecedor_padrao_nome: p.fornecedor_nome,
+      preco_unitario_base: p.preco_custo,
+      precoUnitarioBase: p.preco_custo,
+      preco_fabricacao: p.preco_fabricacao,
+      precoFabricacao: p.preco_fabricacao,
+      estoque_atual: p.estoque_atual,
+      eh_insumo: false,
+    }));
+  },
+
+  createMaterial: async (data: any) => {
+    const fornecedor =
+      data.fornecedor ?? data.fornecedor_padrao ?? data.fornecedorPadrao ?? null;
+    const preco =
+      data.preco_custo ?? data.preco_unitario_base ?? data.precoUnitarioBase ?? 0;
+    const payload: Record<string, unknown> = {
+      nome: data.nome,
+      categoria: data.categoria,
+      eh_insumo: false,
+      fabricado: false,
+      revenda: false,
+      fornecedor: fornecedor != null && fornecedor !== "" ? Number(fornecedor) : null,
+      preco_custo: preco,
+      preco_venda: data.preco_venda ?? 0,
+      mao_obra_unitaria: 0,
+      margem_lucro_percent: 0,
+      descricao: data.descricao ?? "",
+      insumos: [],
+    };
+    if ("preco_fabricacao" in data || "precoFabricacao" in data) {
+      payload.preco_fabricacao = data.preco_fabricacao ?? data.precoFabricacao ?? null;
+    }
+    return api.createProduto(payload);
   },
 
   updateMaterial: async (id: string, data: any) => {
-    const response = await fetch(`${API_BASE_URL}/materiais/${id}/`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    });
-    return readJsonOrThrow(response);
+    const payload: Record<string, unknown> = { eh_insumo: false };
+    if (data.nome != null) payload.nome = data.nome;
+    if (data.categoria != null) payload.categoria = data.categoria;
+    if ("fornecedor" in data || "fornecedor_padrao" in data || "fornecedorPadrao" in data) {
+      const f = data.fornecedor ?? data.fornecedor_padrao ?? data.fornecedorPadrao;
+      payload.fornecedor = f != null && f !== "" ? Number(f) : null;
+    }
+    if ("preco_custo" in data || "preco_unitario_base" in data || "precoUnitarioBase" in data) {
+      payload.preco_custo = data.preco_custo ?? data.preco_unitario_base ?? data.precoUnitarioBase;
+    }
+    if ("preco_fabricacao" in data || "precoFabricacao" in data) {
+      payload.preco_fabricacao = data.preco_fabricacao ?? data.precoFabricacao ?? null;
+    }
+    return api.updateProduto(id, payload);
   },
 
   deleteMaterial: async (id: string) => {
-    await fetch(`${API_BASE_URL}/materiais/${id}/`, { method: 'DELETE', headers: authHeaders() });
+    await api.deleteProduto(id);
   },
 
   // Categorias
@@ -857,6 +923,13 @@ export const api = {
   getDividasGerais: async () => {
     const response = await fetch(`${API_BASE_URL}/dividas-gerais/`, { headers: authHeaders() });
     return response.json();
+  },
+
+  /** Snapshot financeiro ao fim do dia (23:59 America/Sao_Paulo). data = YYYY-MM-DD */
+  getFinancasSnapshot: async (data: string) => {
+    const sp = new URLSearchParams({ data });
+    const response = await fetch(`${API_BASE_URL}/financas/snapshot/?${sp}`, { headers: authHeaders() });
+    return readJsonOrThrow(response);
   },
   createDividaGeral: async (data: { nome: string; valor: number }) => {
     const response = await fetch(`${API_BASE_URL}/dividas-gerais/`, {
@@ -985,16 +1058,21 @@ export const api = {
     return data && typeof data === 'object' && 'last_update' in data ? (data as any) : { last_update: null };
   },
   ajusteEstoque: async (data: {
-    material_id: number;
+    produto_id?: number;
+    material_id?: number;
     tipo?: 'entrada' | 'saida';
     quantidade?: number;
     quantidade_nova?: number;
     observacao?: string;
   }) => {
+    const payload = {
+      ...data,
+      produto_id: data.produto_id ?? data.material_id,
+    };
     const response = await fetch(`${API_BASE_URL}/estoque/ajuste/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
     return response.json();
   },

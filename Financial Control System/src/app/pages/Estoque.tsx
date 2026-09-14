@@ -7,7 +7,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { Package, Archive, Layers, FolderOpen, Sparkles } from "lucide-react";
+import { Package, Archive, FolderOpen, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "motion/react";
 import { useAuth } from "../contexts/AuthContext";
@@ -40,46 +40,34 @@ export function Estoque() {
   const { user } = useAuth();
   const isChefe = user?.is_chefe === true;
 
-  const [materiais, setMateriais] = useState<ItemEstoque[]>([]);
   const [produtos, setProdutos] = useState<ItemEstoque[]>([]);
   const [loading, setLoading] = useState(true);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<null | {
-    kind: "material" | "produto";
+    kind: string;
     data: string | null;
     item_nome: string;
     detalhe: string;
     observacao?: string;
   }>(null);
   const [open, setOpen] = useState(false);
-  const [tipoAjusteItem, setTipoAjusteItem] = useState<"material" | "produto">("material");
-  const [modoAjuste, setModoAjuste] = useState<"entrada_saida" | "valor_fixo">(
-    "valor_fixo"
-  );
-  const [materialId, setMaterialId] = useState("");
+  const [modoAjuste, setModoAjuste] = useState<"entrada_saida" | "valor_fixo">("valor_fixo");
   const [produtoId, setProdutoId] = useState("");
   const [tipo, setTipo] = useState<"entrada" | "saida">("entrada");
   const [quantidade, setQuantidade] = useState("");
   const [quantidadeNova, setQuantidadeNova] = useState("");
   const [observacao, setObservacao] = useState("");
 
-  // Contagem por categoria: materialId -> quantidade digitada
   const [contagem, setContagem] = useState<Record<number, string>>({});
   const [aplicandoContagem, setAplicandoContagem] = useState<number | null>(null);
-  // Contagem produtos
-  const [contagemProdutos, setContagemProdutos] = useState<Record<number, string>>({});
-  const [aplicandoContagemProduto, setAplicandoContagemProduto] = useState<number | null>(null);
 
   const load = () => {
     setLoading(true);
     api.getEstoque()
       .then((data) => {
-        setMateriais(data.materiais ?? []);
-        setProdutos(data.produtos ?? []);
+        const list = Array.isArray(data.produtos) ? data.produtos : [];
+        setProdutos(list);
       })
-      .catch(() => {
-        setMateriais([]);
-        setProdutos([]);
-      })
+      .catch(() => setProdutos([]))
       .finally(() => setLoading(false));
     api.getEstoqueUltimaAtualizacao()
       .then((res) => setUltimaAtualizacao(res.last_update))
@@ -92,86 +80,58 @@ export function Estoque() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (tipoAjusteItem === "material") {
-      if (!materialId) {
-        toast.error("Selecione o material.");
-        return;
-      }
-      const materialIdNum = parseInt(materialId, 10);
-      try {
-        if (modoAjuste === "valor_fixo") {
-          const nova = parseInt(quantidadeNova, 10);
-          if (isNaN(nova) || nova < 0) {
-            toast.error("Informe a quantidade atual (número >= 0).");
-            return;
-          }
-          const res = await api.ajusteEstoque({
-            material_id: materialIdNum,
-            quantidade_nova: nova,
-            observacao: observacao.trim() || undefined,
-          });
-          if (res.error) {
-            toast.error(res.error || "Erro no ajuste");
-            return;
-          }
-          toast.success("Quantidade atual definida");
-        } else {
-          const qty = parseInt(quantidade, 10);
-          if (isNaN(qty) || qty <= 0) {
-            toast.error("Informe quantidade positiva.");
-            return;
-          }
-          const res = await api.ajusteEstoque({
-            material_id: materialIdNum,
-            tipo,
-            quantidade: qty,
-            observacao: observacao.trim() || undefined,
-          });
-          if (res.error) {
-            toast.error(res.error || "Erro no ajuste");
-            return;
-          }
-          toast.success("Ajuste realizado");
-        }
-        setMaterialId("");
-        setQuantidade("");
-        setQuantidadeNova("");
-        setObservacao("");
-        setOpen(false);
-        load();
-      } catch {
-        toast.error("Erro ao ajustar estoque");
-      }
-      return;
-    }
-    // Produto
     if (!produtoId) {
       toast.error("Selecione o produto.");
       return;
     }
-    const nova = parseInt(quantidadeNova, 10);
-    if (isNaN(nova) || nova < 0) {
-      toast.error("Informe a quantidade atual (número >= 0).");
-      return;
-    }
+    const produtoIdNum = parseInt(produtoId, 10);
     try {
-      const res = await api.ajusteEstoqueProduto({
-        produto_id: parseInt(produtoId, 10),
-        quantidade_nova: nova,
-        observacao: observacao.trim() || undefined,
-      });
-      if (res.error) {
-        toast.error(res.error || "Erro no ajuste");
-        return;
+      if (modoAjuste === "valor_fixo") {
+        const nova = parseInt(quantidadeNova, 10);
+        if (isNaN(nova) || nova < 0) {
+          toast.error("Informe a quantidade atual (número >= 0).");
+          return;
+        }
+        const res = await api.ajusteEstoque({
+          produto_id: produtoIdNum,
+          quantidade_nova: nova,
+          observacao: observacao.trim() || undefined,
+        } as any);
+        if (res.error) {
+          toast.error(res.error || "Erro no ajuste");
+          return;
+        }
+        toast.success("Quantidade atual definida");
+      } else {
+        if (!isChefe) {
+          toast.error("Apenas o chefe pode fazer entrada/saída.");
+          return;
+        }
+        const qty = parseInt(quantidade, 10);
+        if (isNaN(qty) || qty <= 0) {
+          toast.error("Informe quantidade positiva.");
+          return;
+        }
+        const res = await api.ajusteEstoque({
+          produto_id: produtoIdNum,
+          tipo,
+          quantidade: qty,
+          observacao: observacao.trim() || undefined,
+        } as any);
+        if (res.error) {
+          toast.error(res.error || "Erro no ajuste");
+          return;
+        }
+        toast.success("Ajuste realizado");
       }
-      toast.success("Quantidade do produto atualizada");
       setProdutoId("");
+      setQuantidade("");
       setQuantidadeNova("");
       setObservacao("");
       setOpen(false);
       load();
     } catch {
-      toast.error("Erro ao ajustar estoque do produto");
+      toast.error("Erro ao ajustar estoque");
     }
   };
 
@@ -185,54 +145,10 @@ export function Estoque() {
     setAplicandoContagem(id);
     try {
       const res = await api.ajusteEstoque({
-        material_id: id,
-        quantidade_nova: nova,
-        observacao: "Contagem pelo funcionário",
-      });
-      if (res.error) {
-        toast.error(res.error || "Erro no ajuste");
-        return;
-      }
-      toast.success("Contagem aplicada ao sistema");
-      setMateriais((prev) =>
-        prev.map((m) =>
-          m.id === id
-            ? {
-                ...m,
-                estoque_atual: nova,
-                total: totalEstoqueItem({ estoque_atual: nova, preco_unitario_base: m.preco_unitario_base }),
-                alterado_hoje: true,
-              }
-            : m
-        )
-      );
-      setContagem((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      load();
-    } catch {
-      toast.error("Erro ao aplicar contagem");
-    } finally {
-      setAplicandoContagem(null);
-    }
-  };
-
-  const aplicarContagemProduto = async (id: number) => {
-    const valor = contagemProdutos[id];
-    const nova = valor === "" ? null : parseInt(String(valor).trim(), 10);
-    if (nova === null || isNaN(nova) || nova < 0) {
-      toast.error("Informe a quantidade contada (número >= 0).");
-      return;
-    }
-    setAplicandoContagemProduto(id);
-    try {
-      const res = await api.ajusteEstoqueProduto({
         produto_id: id,
         quantidade_nova: nova,
         observacao: "Contagem pelo funcionário",
-      });
+      } as any);
       if (res.error) {
         toast.error(res.error || "Erro no ajuste");
         return;
@@ -250,7 +166,7 @@ export function Estoque() {
             : p
         )
       );
-      setContagemProdutos((prev) => {
+      setContagem((prev) => {
         const next = { ...prev };
         delete next[id];
         return next;
@@ -259,28 +175,16 @@ export function Estoque() {
     } catch {
       toast.error("Erro ao aplicar contagem");
     } finally {
-      setAplicandoContagemProduto(null);
+      setAplicandoContagem(null);
     }
   };
 
-  const somaTotalMateriais = materiais.reduce((s, i) => s + totalEstoqueItem(i), 0);
-  const somaTotalProdutos = produtos.reduce((s, i) => s + totalEstoqueItem(i), 0);
+  const somaTotal = produtos.reduce((s, i) => s + totalEstoqueItem(i), 0);
 
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
-  // Agrupar por categoria para a aba "Por categoria"
   const porCategoria = useMemo(() => {
-    const map = new Map<string, ItemEstoque[]>();
-    for (const item of materiais) {
-      const key = item.categoria_nome ?? "Sem categoria";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(item);
-    }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [materiais]);
-
-  const porCategoriaProdutos = useMemo(() => {
     const map = new Map<string, ItemEstoque[]>();
     for (const item of produtos) {
       const key = item.categoria_nome ?? "Sem categoria";
@@ -291,8 +195,6 @@ export function Estoque() {
   }, [produtos]);
 
   const colCount = isChefe ? 4 : 2;
-  const colCountCatMateriais = isChefe ? 6 : 4;
-  const colCountCatProdutos = isChefe ? 6 : 4;
 
   return (
     <div className="space-y-6">
@@ -300,7 +202,7 @@ export function Estoque() {
         <div>
           <h1 className="text-3xl font-semibold">Estoque</h1>
           <p className="text-muted-foreground">
-            {isChefe ? "Materiais, valores e ajustes" : "Contagem e ajustes por categoria (sem valores)"}
+            {isChefe ? "Produtos, valores e ajustes" : "Contagem e ajustes por categoria (sem valores)"}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
             Última atualização:{" "}
@@ -311,9 +213,7 @@ export function Estoque() {
                 </span>
                 {" — "}
                 <span className="font-medium text-foreground">{ultimaAtualizacao.item_nome}</span>
-                {" ("}
-                {ultimaAtualizacao.kind}
-                {") — "}
+                {" — "}
                 {ultimaAtualizacao.detalhe}
                 {ultimaAtualizacao.observacao ? ` — ${ultimaAtualizacao.observacao}` : ""}
               </>
@@ -322,25 +222,13 @@ export function Estoque() {
             )}
           </p>
         </div>
-        {isChefe && (materiais.length > 0 || produtos.length > 0) && (
-          <div className="flex flex-wrap gap-4">
-            {materiais.length > 0 && (
-              <Card className="px-6 py-3">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Archive className="size-4" /> Total materiais
-                </p>
-                <p className="text-2xl font-semibold">{formatCurrency(somaTotalMateriais)}</p>
-              </Card>
-            )}
-            {produtos.length > 0 && (
-              <Card className="px-6 py-3">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Package className="size-4" /> Total produtos
-                </p>
-                <p className="text-2xl font-semibold">{formatCurrency(somaTotalProdutos)}</p>
-              </Card>
-            )}
-          </div>
+        {isChefe && produtos.length > 0 && (
+          <Card className="px-6 py-3">
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              <Package className="size-4" /> Total estoque
+            </p>
+            <p className="text-2xl font-semibold">{formatCurrency(somaTotal)}</p>
+          </Card>
         )}
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -358,115 +246,63 @@ export function Estoque() {
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label>Ajustar</Label>
-                <Select
-                  value={tipoAjusteItem}
-                  onValueChange={(v) => {
-                    setTipoAjusteItem(v as "material" | "produto");
-                    setMaterialId("");
-                    setProdutoId("");
-                  }}
-                >
+                <Label>Produto</Label>
+                <Select value={produtoId} onValueChange={setProdutoId}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Selecione" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="material">Material</SelectItem>
-                    <SelectItem value="produto">Produto</SelectItem>
+                    {produtos.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.nome} (atual: {p.estoque_atual})
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-              {tipoAjusteItem === "material" && (
-                <div>
-                  <Label>Material</Label>
-                  <Select value={materialId} onValueChange={setMaterialId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {materiais.map((m) => (
-                        <SelectItem key={m.id} value={String(m.id)}>
-                          {m.nome} (atual: {m.estoque_atual})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {tipoAjusteItem === "produto" && (
-                <div>
-                  <Label>Produto</Label>
-                  <Select value={produtoId} onValueChange={setProdutoId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {produtos.map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.nome} (atual: {p.estoque_atual})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {tipoAjusteItem === "material" && (
-                <Tabs value={modoAjuste} onValueChange={(v) => setModoAjuste(v as "entrada_saida" | "valor_fixo")}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="entrada_saida" disabled={!isChefe}>
-                      Entrada / Saída
-                    </TabsTrigger>
-                    <TabsTrigger value="valor_fixo">Definir quantidade atual</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="entrada_saida" className="space-y-4 pt-2">
-                    <div>
-                      <Label>Tipo</Label>
-                      <Select value={tipo} onValueChange={(v) => setTipo(v as "entrada" | "saida")}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="entrada">Entrada</SelectItem>
-                          <SelectItem value="saida">Saída</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Quantidade</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={quantidade}
-                        onChange={(e) => setQuantidade(e.target.value)}
-                      />
-                    </div>
-                  </TabsContent>
-                  <TabsContent value="valor_fixo" className="space-y-4 pt-2">
-                    <div>
-                      <Label>Quantidade atual (ex: contou 325 unidades)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={quantidadeNova}
-                        onChange={(e) => setQuantidadeNova(e.target.value)}
-                        placeholder={materialId ? String(materiais.find((m) => String(m.id) === materialId)?.estoque_atual ?? "") : "0"}
-                      />
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              )}
-              {tipoAjusteItem === "produto" && (
-                <div>
-                  <Label>Quantidade atual (ex: contou 325 unidades)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={quantidadeNova}
-                    onChange={(e) => setQuantidadeNova(e.target.value)}
-                    placeholder={produtoId ? String(produtos.find((p) => String(p.id) === produtoId)?.estoque_atual ?? "") : "0"}
-                  />
-                </div>
-              )}
+              <Tabs value={modoAjuste} onValueChange={(v) => setModoAjuste(v as "entrada_saida" | "valor_fixo")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="entrada_saida" disabled={!isChefe}>
+                    Entrada / Saída
+                  </TabsTrigger>
+                  <TabsTrigger value="valor_fixo">Definir quantidade atual</TabsTrigger>
+                </TabsList>
+                <TabsContent value="entrada_saida" className="space-y-4 pt-2">
+                  <div>
+                    <Label>Tipo</Label>
+                    <Select value={tipo} onValueChange={(v) => setTipo(v as "entrada" | "saida")}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="entrada">Entrada</SelectItem>
+                        <SelectItem value="saida">Saída</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Quantidade</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={quantidade}
+                      onChange={(e) => setQuantidade(e.target.value)}
+                    />
+                  </div>
+                </TabsContent>
+                <TabsContent value="valor_fixo" className="space-y-4 pt-2">
+                  <div>
+                    <Label>Quantidade atual (ex: contou 325 unidades)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={quantidadeNova}
+                      onChange={(e) => setQuantidadeNova(e.target.value)}
+                      placeholder={produtoId ? String(produtos.find((p) => String(p.id) === produtoId)?.estoque_atual ?? "") : "0"}
+                    />
+                  </div>
+                </TabsContent>
+              </Tabs>
               <div>
                 <Label>Observação (opcional)</Label>
                 <Input
@@ -507,71 +343,12 @@ export function Estoque() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Archive className="size-5" />
-                  Materiais em estoque
-                </CardTitle>
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
-                  <Sparkles className="size-3.5 text-amber-600" />
-                  Materiais alterados hoje são destacados.
-                </p>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <p className="text-muted-foreground">Carregando...</p>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Material</TableHead>
-                        <TableHead className="text-right">Qtd</TableHead>
-                          {isChefe && <TableHead className="text-right">Custo unit.</TableHead>}
-                          {isChefe && <TableHead className="text-right">Total (custo)</TableHead>}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {materiais.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={colCount} className="text-center text-muted-foreground">
-                            Nenhum material
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        materiais.map((item) => (
-                          <TableRow key={`m-${item.id}`} className={item.alterado_hoje ? "bg-amber-50 dark:bg-amber-950/20" : ""}>
-                            <TableCell className="font-medium">
-                              <span className="flex items-center gap-2">
-                                {item.nome}
-                                {item.alterado_hoje && (
-                                  <Sparkles className="size-4 text-amber-600 shrink-0" aria-label="Alterado hoje" />
-                                )}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right">{item.estoque_atual}</TableCell>
-                            {isChefe && (
-                              <TableCell className="text-right text-muted-foreground">
-                                {formatCurrency(item.preco_unitario_base)}
-                              </TableCell>
-                            )}
-                            {isChefe && (
-                              <TableCell className="text-right">{formatCurrency(totalEstoqueItem(item))}</TableCell>
-                            )}
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
                   <Package className="size-5" />
                   Produtos em estoque
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                   <Sparkles className="size-3.5 text-amber-600" />
-                  Produtos alterados hoje são destacados.
+                  Itens alterados hoje são destacados.
                 </p>
               </CardHeader>
               <CardContent>
@@ -597,17 +374,14 @@ export function Estoque() {
                       ) : (
                         produtos.map((item) => (
                           <TableRow
-                            key={`p-${item.id}`}
+                            key={item.id}
                             className={item.alterado_hoje ? "bg-amber-50 dark:bg-amber-950/20" : ""}
                           >
                             <TableCell className="font-medium">
                               <span className="flex items-center gap-2">
                                 {item.nome}
                                 {item.alterado_hoje && (
-                                  <Sparkles
-                                    className="size-4 text-amber-600 shrink-0"
-                                    aria-label="Alterado hoje"
-                                  />
+                                  <Sparkles className="size-4 text-amber-600 shrink-0" aria-label="Alterado hoje" />
                                 )}
                               </span>
                             </TableCell>
@@ -630,22 +404,17 @@ export function Estoque() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="categorias" className="space-y-8">
+          <TabsContent value="categorias" className="space-y-6">
             <p className="text-sm text-muted-foreground">
-              Conte o estoque por categoria e informe a quantidade contada. Materiais e produtos ficam em seções separadas.
+              Conte o estoque por categoria e informe a quantidade contada.
             </p>
-            <div className="space-y-6">
-              <h3 className="text-lg font-medium flex items-center gap-2">
-                <Archive className="size-5" />
-                Materiais por categoria
-              </h3>
             {loading ? (
               <p className="text-muted-foreground">Carregando...</p>
             ) : porCategoria.length === 0 ? (
-              <p className="text-muted-foreground">Nenhum material cadastrado.</p>
+              <p className="text-muted-foreground">Nenhum produto cadastrado.</p>
             ) : (
               porCategoria.map(([categoriaNome, itensCat]) => (
-                <Card key={`mat-${categoriaNome}`}>
+                <Card key={categoriaNome}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-lg flex items-center gap-2">
                       <FolderOpen className="size-5" />
@@ -656,12 +425,10 @@ export function Estoque() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Material</TableHead>
+                          <TableHead>Produto</TableHead>
                           <TableHead className="text-right w-24">Qtd no sistema</TableHead>
-                          <>
-                            <TableHead className="text-right w-36">Qtd contada</TableHead>
-                            <TableHead className="w-28"></TableHead>
-                          </>
+                          <TableHead className="text-right w-36">Qtd contada</TableHead>
+                          <TableHead className="w-28"></TableHead>
                           {isChefe && (
                             <>
                               <TableHead className="text-right">Custo unit.</TableHead>
@@ -682,30 +449,28 @@ export function Estoque() {
                               </span>
                             </TableCell>
                             <TableCell className="text-right">{item.estoque_atual}</TableCell>
-                            <>
-                              <TableCell className="text-right">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  className="h-9 w-full max-w-28 text-right"
-                                  placeholder="Contou"
-                                  value={contagem[item.id] ?? ""}
-                                  onChange={(e) =>
-                                    setContagem((prev) => ({ ...prev, [item.id]: e.target.value }))
-                                  }
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  disabled={aplicandoContagem === item.id}
-                                  onClick={() => aplicarContagem(item.id)}
-                                >
-                                  {aplicandoContagem === item.id ? "..." : "Atualizar"}
-                                </Button>
-                              </TableCell>
-                            </>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                min={0}
+                                className="h-9 w-full max-w-28 text-right"
+                                placeholder="Contou"
+                                value={contagem[item.id] ?? ""}
+                                onChange={(e) =>
+                                  setContagem((prev) => ({ ...prev, [item.id]: e.target.value }))
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={aplicandoContagem === item.id}
+                                onClick={() => aplicarContagem(item.id)}
+                              >
+                                {aplicandoContagem === item.id ? "..." : "Atualizar"}
+                              </Button>
+                            </TableCell>
                             {isChefe && (
                               <>
                                 <TableCell className="text-right text-muted-foreground">
@@ -722,100 +487,6 @@ export function Estoque() {
                 </Card>
               ))
             )}
-            </div>
-            <div className="space-y-6">
-              <h3 className="text-lg font-medium flex items-center gap-2">
-                <Package className="size-5" />
-                Produtos por categoria
-              </h3>
-              {porCategoriaProdutos.length === 0 ? (
-                <p className="text-muted-foreground">Nenhum produto cadastrado.</p>
-              ) : (
-                porCategoriaProdutos.map(([categoriaNome, itensCat]) => (
-                  <Card key={`prod-${categoriaNome}`}>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <FolderOpen className="size-5" />
-                        {categoriaNome}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Produto</TableHead>
-                            <TableHead className="text-right w-24">Qtd no sistema</TableHead>
-                            <>
-                              <TableHead className="text-right w-36">Qtd contada</TableHead>
-                              <TableHead className="w-28"></TableHead>
-                            </>
-                            {isChefe && (
-                              <>
-                                <TableHead className="text-right">Custo unit.</TableHead>
-                                <TableHead className="text-right">Total (custo)</TableHead>
-                              </>
-                            )}
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {itensCat.map((item) => (
-                            <TableRow
-                              key={item.id}
-                              className={item.alterado_hoje ? "bg-amber-50 dark:bg-amber-950/20" : ""}
-                            >
-                              <TableCell className="font-medium">
-                                <span className="flex items-center gap-2">
-                                  {item.nome}
-                                  {item.alterado_hoje && (
-                                    <Sparkles
-                                      className="size-4 text-amber-600 shrink-0"
-                                      aria-label="Alterado hoje"
-                                    />
-                                  )}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">{item.estoque_atual}</TableCell>
-                              <>
-                                <TableCell className="text-right">
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    className="h-9 w-full max-w-28 text-right"
-                                    placeholder="Contou"
-                                    value={contagemProdutos[item.id] ?? ""}
-                                    onChange={(e) =>
-                                      setContagemProdutos((prev) => ({ ...prev, [item.id]: e.target.value }))
-                                    }
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    disabled={aplicandoContagemProduto === item.id}
-                                    onClick={() => aplicarContagemProduto(item.id)}
-                                  >
-                                    {aplicandoContagemProduto === item.id ? "..." : "Atualizar"}
-                                  </Button>
-                                </TableCell>
-                              </>
-                              {isChefe && (
-                                <>
-                                  <TableCell className="text-right text-muted-foreground">
-                                    {formatCurrency(item.preco_unitario_base)}
-                                  </TableCell>
-                                  <TableCell className="text-right">{formatCurrency(totalEstoqueItem(item))}</TableCell>
-                                </>
-                              )}
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </div>
           </TabsContent>
         </Tabs>
       </motion.div>

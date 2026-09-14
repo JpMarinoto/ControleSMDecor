@@ -37,15 +37,18 @@ export function fornecedorNomeProduto(produto: {
   return "";
 }
 
+/** @deprecated Prefer fornecedorNomeProduto — insumos são produtos. */
 export function fornecedorNomeMaterial(material: {
   fornecedor_padrao_nome?: string | null;
+  fornecedor_nome?: string | null;
   fornecedor_padrao?: number | string | null;
   fornecedor_padrao_id?: number | string | null;
+  fornecedor?: number | string | null;
 } | null | undefined, fornecedoresPorId?: Map<string, string>): string {
   if (!material) return "";
-  const direto = String(material.fornecedor_padrao_nome ?? "").trim();
+  const direto = String(material.fornecedor_nome ?? material.fornecedor_padrao_nome ?? "").trim();
   if (direto) return direto;
-  const fid = material.fornecedor_padrao ?? material.fornecedor_padrao_id;
+  const fid = material.fornecedor ?? material.fornecedor_padrao ?? material.fornecedor_padrao_id;
   if (fornecedoresPorId && fid != null) {
     return fornecedoresPorId.get(String(fid)) ?? "";
   }

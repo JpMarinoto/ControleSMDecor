@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from django.db.models import Sum, F, Q, Value, DecimalField, ExpressionWrapper
+from django.db.models import Sum, F, Q, Value, DecimalField, ExpressionWrapper, OuterRef, Subquery
 from django.db.models.functions import Coalesce
 from rest_framework import status
 from rest_framework.views import APIView
@@ -22,13 +22,11 @@ from .models import (
     Cliente,
     Fornecedor,
     Produto,
-    Material,
     CategoriaProduto,
     Venda,
     ItemVenda,
     Pagamento,
     PrecoClienteProduto,
-    CompraMaterial,
     CompraProduto,
     ProdutoInsumo,
     OrdemCompra,
@@ -39,7 +37,6 @@ from .models import (
     DividaGeral,
     OutrosAReceber,
     LogSistema,
-    AjusteEstoque,
     AjusteEstoqueProduto,
     Funcionario,
     FuncionarioHoraExtra,
@@ -53,12 +50,10 @@ from .serializers import (
     ClienteSerializer,
     FornecedorSerializer,
     ProdutoSerializer,
-    MaterialSerializer,
     CategoriaSerializer,
     ContaBancoSerializer,
     VendaSerializer,
     OrdemCompraSerializer,
-    ItemCompraMaterialSerializer,
     ItemCompraProdutoSerializer,
     CompraSerializer,
     _lancamento_iso_datetime_br,
@@ -86,23 +81,23 @@ def _cliente_tem_historico(cliente):
 
 def _fornecedor_tem_historico(fornecedor):
     return (
-        fornecedor.compras.exists()
-        or fornecedor.compras_produtos.exists()
+        fornecedor.compras_produtos.exists()
         or fornecedor.pagamentos_feitos.exists()
         or fornecedor.ordens_compra.exists()
     )
 
 
-def _material_tem_historico(material):
+def _produto_tem_historico(produto):
     return (
-        CompraMaterial.objects.filter(material=material).exists()
-        or AjusteEstoque.objects.filter(material=material).exists()
-        or ProdutoInsumo.objects.filter(material=material).exists()
+        CompraProduto.objects.filter(produto=produto).exists()
+        or AjusteEstoqueProduto.objects.filter(produto=produto).exists()
+        or ProdutoInsumo.objects.filter(insumo=produto).exists()
+        or ItemVenda.objects.filter(produto=produto).exists()
     )
 
 
 def _categoria_tem_historico(categoria):
-    return categoria.produtos.exists() or categoria.materiais.exists()
+    return categoria.produtos.exists()
 
 
 def _conta_tem_historico(conta):
@@ -113,8 +108,27 @@ def _conta_tem_historico(conta):
     )
 
 
+def _inativar_cadastro(request, obj, entidade_log):
+    """Sempre inativa (nunca apaga) — histórico e consulta futura preservados."""
+    nome = getattr(obj, 'nome', str(obj))
+    pk = obj.pk
+    if getattr(obj, 'ativo', True) is False:
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    obj.ativo = False
+    obj.save(update_fields=['ativo'])
+    _api_log(
+        request,
+        "Inativar",
+        entidade_log,
+        f"{entidade_log} inativado: {nome} (ID {pk})",
+    )
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 def _excluir_cadastro_preservando_historico(request, obj, entidade_log, tem_historico_fn):
-    """Inativa se houver histórico; apaga só registros nunca usados."""
+    """Inativa se houver histórico; apaga só registros nunca usados.
+    Cliente/Fornecedor usam _inativar_cadastro (sempre soft-delete).
+    """
     nome = getattr(obj, 'nome', str(obj))
     pk = obj.pk
     if tem_historico_fn(obj):
@@ -260,49 +274,50 @@ def _validar_numero_venda_fornecedor_unico(fornecedor, numero, exclude_ordem_id=
 
 
 def _resolve_compra_linha_por_pk(pk, tipo_hint=None):
-    """
-    CompraMaterial e CompraProduto têm sequências de ID independentes; o mesmo número pode
-    existir nas duas tabelas. tipo_hint: 'material', 'produto' ou None.
-    Retorna (obj, kind) com kind em {'material','produto'}, (None, None) se não existir,
-    ou (None, 'ambiguous') se existirem os dois e tipo_hint não desambiguar.
-    """
+    """Resolve linha de CompraProduto pelo pk. tipo_hint é ignorado (legado material/produto)."""
     try:
         pk_int = int(pk)
     except (ValueError, TypeError):
         return None, None
-    mat = (
-        CompraMaterial.objects.select_related('fornecedor', 'material', 'ordem')
-        .filter(pk=pk_int)
-        .first()
-    )
     prod = (
         CompraProduto.objects.select_related('fornecedor', 'produto', 'ordem')
         .filter(pk=pk_int)
         .first()
     )
-    if mat and prod:
-        t = (tipo_hint or '').strip().lower()
-        if t == 'produto':
-            return prod, 'produto'
-        if t == 'material':
-            return mat, 'material'
-        return None, 'ambiguous'
-    if mat:
-        return mat, 'material'
     if prod:
         return prod, 'produto'
     return None, None
 
 
-def _produto_elegivel_compra_pronta(produto):
-    """Linha de ordem de compra como produto pronto: não fabricado e (revenda ou fornecedor cadastrado)."""
-    if not produto.ativo:
+def _produto_elegivel_compra(produto, fornecedor_id=None):
+    """Produto comprável: ativo, não fabricado, com fornecedor; se fornecedor_id, deve bater."""
+    if not produto.ativo or produto.fabricado:
         return False
-    if produto.fabricado:
+    if not produto.fornecedor_id:
         return False
-    if produto.revenda:
-        return True
-    return bool(produto.fornecedor_id)
+    if fornecedor_id is not None and int(produto.fornecedor_id) != int(fornecedor_id):
+        return False
+    # insumos, revenda ou qualquer não-fabricado com fornecedor
+    return True
+
+
+def _material_shape(p):
+    """JSON compatível com o antigo MaterialSerializer (proxy sobre Produto)."""
+    fab = p.preco_fabricacao
+    return {
+        'id': p.id,
+        'ativo': bool(p.ativo),
+        'nome': p.nome,
+        'precoUnitarioBase': _safe_float(p.preco_custo),
+        'preco_unitario_base': _safe_float(p.preco_custo),
+        'precoFabricacao': _safe_float(fab) if fab is not None else None,
+        'preco_fabricacao': _safe_float(fab) if fab is not None else None,
+        'estoque_atual': int(p.estoque_atual or 0),
+        'categoria': p.categoria_id,
+        'fornecedor_padrao': p.fornecedor_id,
+        'fornecedor_padrao_nome': (p.fornecedor.nome if p.fornecedor_id and p.fornecedor else None),
+        'descricao': p.descricao or '',
+    }
 
 
 # --- Clientes ---
@@ -364,9 +379,7 @@ class ClienteDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        return _excluir_cadastro_preservando_historico(
-            request, obj, "Cliente", _cliente_tem_historico
-        )
+        return _inativar_cadastro(request, obj, "Cliente")
 
     def patch(self, request, pk):
         obj = self.get_object(pk)
@@ -386,10 +399,11 @@ class ClienteDetail(APIView):
 @method_decorator(csrf_exempt, name='dispatch')
 class FornecedorListCreate(APIView):
     def get(self, request):
-        # Por padrão retorna todos (ativos e inativos) para listagem/cadastro
+        # Padrão: só ativos (como clientes). Cadastro passa incluir_inativos=1 para o arquivo.
+        incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
         apenas_ativos = request.GET.get('apenas_ativos', '').strip() == '1'
         qs = Fornecedor.objects.all().order_by('nome')
-        if apenas_ativos:
+        if apenas_ativos or not incluir_inativos:
             qs = qs.filter(ativo=True)
         serializer = FornecedorSerializer(qs, many=True)
         out = list(serializer.data)
@@ -429,9 +443,7 @@ class FornecedorDetail(APIView):
 
     def delete(self, request, pk):
         obj = self.get_object(pk)
-        return _excluir_cadastro_preservando_historico(
-            request, obj, "Fornecedor", _fornecedor_tem_historico
-        )
+        return _inativar_cadastro(request, obj, "Fornecedor")
 
     def patch(self, request, pk):
         obj = self.get_object(pk)
@@ -460,18 +472,18 @@ class ProdutoListCreate(APIView):
         for item in insumos:
             if not isinstance(item, dict):
                 continue
-            material_id = item.get('material')
+            insumo_id = item.get('insumo') if item.get('insumo') is not None else item.get('material')
             qtd = item.get('quantidade')
-            if not material_id or qtd is None:
+            if not insumo_id or qtd is None:
                 continue
             try:
-                material = Material.objects.get(pk=int(material_id))
+                insumo = Produto.objects.get(pk=int(insumo_id))
                 q = Decimal(str(qtd).replace(',', '.'))
-            except (Material.DoesNotExist, ValueError, TypeError, InvalidOperation):
+            except (Produto.DoesNotExist, ValueError, TypeError, InvalidOperation):
                 continue
             if q <= 0:
                 continue
-            novos.append(ProdutoInsumo(produto=produto, material=material, quantidade=q))
+            novos.append(ProdutoInsumo(produto=produto, insumo=insumo, quantidade=q))
         if novos:
             ProdutoInsumo.objects.bulk_create(novos)
 
@@ -479,7 +491,7 @@ class ProdutoListCreate(APIView):
         incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
         qs = (
             Produto.objects.select_related('categoria', 'fornecedor')
-            .prefetch_related('insumos__material')
+            .prefetch_related('insumos__insumo')
             .all()
             .order_by('nome')
         )
@@ -489,8 +501,22 @@ class ProdutoListCreate(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        data = request.data.copy()
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        if hasattr(data, 'dict') and not isinstance(data, dict):
+            data = data.dict()
+        if not isinstance(data, dict):
+            data = dict(data)
         insumos = data.pop('insumos', None)
+        # Normaliza fornecedor vindo do front (id numérico ou string vazia)
+        if 'fornecedor' in data:
+            raw_f = data.get('fornecedor')
+            if raw_f in ('', 'null', 'undefined', None):
+                data['fornecedor'] = None
+            else:
+                try:
+                    data['fornecedor'] = int(raw_f)
+                except (TypeError, ValueError):
+                    pass
         serializer = ProdutoSerializer(data=data)
         if serializer.is_valid():
             obj = serializer.save()
@@ -683,7 +709,7 @@ class ProdutoBulkPrecos(APIView):
 
 @method_decorator(csrf_exempt, name='dispatch')
 class MaterialBulkPrecos(APIView):
-    """Atualiza preco_unitario_base e/ou preco_fabricacao de vários materiais (apenas chefe)."""
+    """Atualiza preco_custo e/ou preco_fabricacao de produtos — proxy legado /materiais."""
 
     def post(self, request):
         try:
@@ -760,14 +786,14 @@ class MaterialBulkPrecos(APIView):
         ok = 0
         errors = []
         for mid in id_ints:
-            mat = Material.objects.filter(pk=mid).first()
+            mat = Produto.objects.filter(pk=mid).first()
             if not mat:
-                errors.append({'id': mid, 'error': 'Material não encontrado'})
+                errors.append({'id': mid, 'error': 'Produto não encontrado'})
                 continue
             fields = []
             if has_base:
-                mat.preco_unitario_base = preco_base_val
-                fields.append('preco_unitario_base')
+                mat.preco_custo = preco_base_val
+                fields.append('preco_custo')
             if has_fab:
                 mat.preco_fabricacao = preco_fab_val
                 fields.append('preco_fabricacao')
@@ -778,58 +804,133 @@ class MaterialBulkPrecos(APIView):
         return Response({'ok': ok, 'failed': len(errors), 'errors': errors}, status=status.HTTP_200_OK)
 
 
-# --- Materiais ---
+# --- Materiais (proxy: Produto — compat legado, sem exigir eh_insumo) ---
 @method_decorator(csrf_exempt, name='dispatch')
 class MaterialListCreate(APIView):
     def get(self, request):
         incluir_inativos = request.GET.get('incluir_inativos', '').strip() == '1'
-        qs = Material.objects.select_related('fornecedor_padrao').all().order_by('nome')
+        qs = Produto.objects.select_related('fornecedor', 'categoria').order_by('nome')
         if not incluir_inativos:
             qs = qs.filter(ativo=True)
-        serializer = MaterialSerializer(qs, many=True)
-        return Response(serializer.data)
+        return Response([_material_shape(p) for p in qs])
 
     def post(self, request):
-        data = request.data.copy()
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data or {})
         if 'precoUnitarioBase' in data and 'preco_unitario_base' not in data:
             data['preco_unitario_base'] = data['precoUnitarioBase']
-        serializer = MaterialSerializer(data=data)
-        if serializer.is_valid():
-            serializer.save()
-            _api_log(request, "Criar", "Material", f"Material criado: {serializer.data.get('nome', '')}")
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if 'precoFabricacao' in data and 'preco_fabricacao' not in data:
+            data['preco_fabricacao'] = data['precoFabricacao']
+        nome = (data.get('nome') or '').strip()
+        if not nome:
+            return Response({'nome': ['Obrigatório']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            preco = Decimal(str(data.get('preco_unitario_base', data.get('preco_custo', 0))).replace(',', '.'))
+        except (ValueError, TypeError, InvalidOperation):
+            return Response({'preco_unitario_base': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+        fab = data.get('preco_fabricacao')
+        preco_fab = None
+        if fab is not None and fab != '':
+            try:
+                preco_fab = Decimal(str(fab).replace(',', '.'))
+            except (ValueError, TypeError, InvalidOperation):
+                return Response({'preco_fabricacao': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+        forn_id = data.get('fornecedor_padrao') if data.get('fornecedor_padrao') is not None else data.get('fornecedor')
+        cat_id = data.get('categoria')
+        obj = Produto.objects.create(
+            nome=nome,
+            eh_insumo=False,
+            preco_custo=preco,
+            preco_fabricacao=preco_fab,
+            fornecedor_id=int(forn_id) if forn_id else None,
+            categoria_id=int(cat_id) if cat_id else None,
+            estoque_atual=int(data.get('estoque_atual') or 0),
+            descricao=(data.get('descricao') or '') or None,
+            ativo=True if data.get('ativo') is None else bool(data.get('ativo')),
+        )
+        obj = Produto.objects.select_related('fornecedor', 'categoria').get(pk=obj.pk)
+        _api_log(request, "Criar", "Material", f"Material criado: {obj.nome}")
+        return Response(_material_shape(obj), status=status.HTTP_201_CREATED)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class MaterialDetail(APIView):
     def get_object(self, pk):
-        return Material.objects.get(pk=pk)
+        return Produto.objects.select_related('fornecedor', 'categoria').get(pk=pk)
 
     def get(self, request, pk):
-        serializer = MaterialSerializer(self.get_object(pk))
-        return Response(serializer.data)
+        try:
+            return Response(_material_shape(self.get_object(pk)))
+        except Produto.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     def put(self, request, pk):
-        obj = self.get_object(pk)
-        data = request.data.copy()
+        try:
+            obj = self.get_object(pk)
+        except Produto.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data or {})
         if 'precoUnitarioBase' in data:
             data['preco_unitario_base'] = data['precoUnitarioBase']
-        serializer = MaterialSerializer(obj, data=data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            _api_log(request, "Editar", "Material", f"Material ID {pk} atualizado: {obj.nome}")
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        if 'precoFabricacao' in data:
+            data['preco_fabricacao'] = data['precoFabricacao']
+        fields = []
+        if 'nome' in data and data.get('nome') is not None:
+            obj.nome = str(data.get('nome')).strip()
+            fields.append('nome')
+        if 'preco_unitario_base' in data or 'preco_custo' in data:
+            raw = data.get('preco_unitario_base', data.get('preco_custo'))
+            try:
+                obj.preco_custo = Decimal(str(raw).replace(',', '.'))
+                fields.append('preco_custo')
+            except (ValueError, TypeError, InvalidOperation):
+                return Response({'preco_unitario_base': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+        if 'preco_fabricacao' in data:
+            rawf = data.get('preco_fabricacao')
+            if rawf is None or rawf == '':
+                obj.preco_fabricacao = None
+            else:
+                try:
+                    obj.preco_fabricacao = Decimal(str(rawf).replace(',', '.'))
+                except (ValueError, TypeError, InvalidOperation):
+                    return Response({'preco_fabricacao': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+            fields.append('preco_fabricacao')
+        if 'fornecedor_padrao' in data or 'fornecedor' in data:
+            forn_id = data.get('fornecedor_padrao') if 'fornecedor_padrao' in data else data.get('fornecedor')
+            obj.fornecedor_id = int(forn_id) if forn_id else None
+            fields.append('fornecedor')
+        if 'categoria' in data:
+            cat_id = data.get('categoria')
+            obj.categoria_id = int(cat_id) if cat_id else None
+            fields.append('categoria')
+        if 'estoque_atual' in data and data.get('estoque_atual') is not None:
+            try:
+                obj.estoque_atual = int(data.get('estoque_atual'))
+                fields.append('estoque_atual')
+            except (ValueError, TypeError):
+                return Response({'estoque_atual': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
+        if 'descricao' in data:
+            obj.descricao = data.get('descricao') or None
+            fields.append('descricao')
+        if fields:
+            obj.save(update_fields=list(dict.fromkeys(fields)))
+        obj = Produto.objects.select_related('fornecedor', 'categoria').get(pk=obj.pk)
+        _api_log(request, "Editar", "Material", f"Material ID {pk} atualizado: {obj.nome}")
+        return Response(_material_shape(obj))
 
     def delete(self, request, pk):
-        obj = self.get_object(pk)
+        try:
+            obj = self.get_object(pk)
+        except Produto.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         return _excluir_cadastro_preservando_historico(
-            request, obj, "Material", _material_tem_historico
+            request, obj, "Material", _produto_tem_historico
         )
 
     def patch(self, request, pk):
-        obj = self.get_object(pk)
+        try:
+            obj = self.get_object(pk)
+        except Produto.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if request.data.get('ativo') is False:
             obj.ativo = False
             obj.save(update_fields=['ativo'])
@@ -838,8 +939,8 @@ class MaterialDetail(APIView):
             obj.ativo = True
             obj.save(update_fields=['ativo'])
             _api_log(request, "Reativar", "Material", f"Material reativado: {obj.nome} (ID {pk})")
-        serializer = MaterialSerializer(obj)
-        return Response(serializer.data)
+        obj = Produto.objects.select_related('fornecedor', 'categoria').get(pk=obj.pk)
+        return Response(_material_shape(obj))
 
 
 # --- Categorias ---
@@ -1425,32 +1526,15 @@ class RelatorioComprasPeriodo(APIView):
         # total_gasto antes de quantidade: senão F('quantidade') vira Sum(quantidade) e Sum aninha Sum (FieldError no Django 6).
         linha_valor = ExpressionWrapper(F('quantidade') * F('preco_no_dia'), output_field=money)
 
-        mat_base = CompraMaterial.objects.filter(
+        base = CompraProduto.objects.filter(
             filtro_ordem_ok,
             data_compra__date__gte=di,
             data_compra__date__lte=df,
         )
         materiais = []
-        for row in (
-            mat_base.values('material_id', 'material__nome')
-            .annotate(total_gasto=Sum(linha_valor), quantidade=Sum('quantidade'))
-            .order_by('-quantidade')
-        ):
-            materiais.append({
-                'material_id': row['material_id'],
-                'nome': row['material__nome'] or '',
-                'quantidade': int(row['quantidade'] or 0),
-                'total_gasto': _safe_float(row['total_gasto'] or 0),
-            })
-
-        prod_base = CompraProduto.objects.filter(
-            filtro_ordem_ok,
-            data_compra__date__gte=di,
-            data_compra__date__lte=df,
-        )
         produtos = []
         for row in (
-            prod_base.values('produto_id', 'produto__nome')
+            base.values('produto_id', 'produto__nome')
             .annotate(total_gasto=Sum(linha_valor), quantidade=Sum('quantidade'))
             .order_by('-quantidade')
         ):
@@ -1469,6 +1553,220 @@ class RelatorioComprasPeriodo(APIView):
         })
 
 
+@method_decorator(csrf_exempt, name='dispatch')
+class FinancasSnapshot(APIView):
+    """Snapshot financeiro na data (cutoff 23:59:59.999999 America/Sao_Paulo)."""
+
+    def get(self, request):
+        if not getattr(request.user, 'is_authenticated', False):
+            return Response({'error': 'Não autenticado.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        data_str = (request.GET.get('data') or '').strip()
+        dia = _parse_data_request(data_str)
+        if not dia:
+            return Response(
+                {'error': 'Parâmetro data obrigatório (YYYY-MM-DD).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tz_br = ZoneInfo('America/Sao_Paulo')
+        cutoff = datetime(
+            dia.year, dia.month, dia.day,
+            23, 59, 59, 999999,
+            tzinfo=tz_br,
+        )
+        cutoff_date = dia  # Pagamento.cliente usa DateField
+        zero = Decimal('0')
+        money = DecimalField(max_digits=18, decimal_places=5)
+        linha_item = ExpressionWrapper(F('quantidade') * F('preco_unitario'), output_field=money)
+        linha_compra = ExpressionWrapper(F('quantidade') * F('preco_no_dia'), output_field=money)
+
+        # --- Clientes (inclui inativos) ---
+        vendas_por_cliente = {
+            row['venda__cliente_id']: row['total'] or zero
+            for row in (
+                ItemVenda.objects.filter(
+                    venda__cancelada=False,
+                    venda__data_venda__lte=cutoff,
+                )
+                .values('venda__cliente_id')
+                .annotate(total=Sum(linha_item))
+            )
+        }
+        pagos_por_cliente = {
+            row['cliente_id']: row['total'] or zero
+            for row in (
+                Pagamento.objects.filter(data_pagamento__lte=cutoff_date)
+                .values('cliente_id')
+                .annotate(total=Sum('valor'))
+            )
+        }
+        clientes_out = []
+        a_receber = zero
+        for c in Cliente.objects.all().order_by('nome').only('id', 'nome', 'ativo'):
+            total_vendas = Decimal(vendas_por_cliente.get(c.id, zero) or 0)
+            total_pagos = Decimal(pagos_por_cliente.get(c.id, zero) or 0)
+            saldo = total_vendas - total_pagos
+            a_receber += saldo
+            clientes_out.append({
+                'id': c.id,
+                'nome': c.nome,
+                'saldo_devedor': _safe_float(saldo),
+                'ativo': bool(c.ativo),
+            })
+
+        # --- Fornecedores ---
+        filtro_ordem_ok = Q(ordem__isnull=True) | Q(ordem__cancelada=False)
+        compras_por_forn = {
+            row['fornecedor_id']: row['total'] or zero
+            for row in (
+                CompraProduto.objects.filter(data_compra__lte=cutoff)
+                .filter(filtro_ordem_ok)
+                .values('fornecedor_id')
+                .annotate(total=Sum(linha_compra))
+            )
+        }
+        pagos_por_forn = {
+            row['fornecedor_id']: row['total'] or zero
+            for row in (
+                PagamentoFornecedor.objects.filter(data_pagamento__lte=cutoff)
+                .values('fornecedor_id')
+                .annotate(total=Sum('valor'))
+            )
+        }
+        fornecedores_out = []
+        a_pagar_fornecedores = zero
+        for f in Fornecedor.objects.all().order_by('nome').only('id', 'nome', 'ativo'):
+            total_compras = Decimal(compras_por_forn.get(f.id, zero) or 0)
+            total_pagos = Decimal(pagos_por_forn.get(f.id, zero) or 0)
+            saldo = total_compras - total_pagos
+            a_pagar_fornecedores += saldo
+            fornecedores_out.append({
+                'id': f.id,
+                'nome': f.nome,
+                'saldo_devedor': _safe_float(saldo),
+                'ativo': bool(f.ativo),
+            })
+
+        dividas_gerais = []
+        total_dividas = zero
+        for d in DividaGeral.objects.all().order_by('nome'):
+            val = Decimal(d.valor or 0)
+            total_dividas += val
+            dividas_gerais.append({'id': d.id, 'nome': d.nome, 'valor': _safe_float(val)})
+        a_pagar = a_pagar_fornecedores + total_dividas
+
+        # --- Contas bancárias: saldo_atual - entradas pós-cutoff + saídas pós-cutoff ---
+        movs_depois = (
+            MovimentoBanco.objects.filter(data__gt=cutoff)
+            .values('conta_id', 'tipo')
+            .annotate(total=Sum('valor'))
+        )
+        entradas_depois = {}
+        saidas_depois = {}
+        for row in movs_depois:
+            cid = row['conta_id']
+            tot = Decimal(row['total'] or 0)
+            if row['tipo'] == MovimentoBanco.ENTRADA:
+                entradas_depois[cid] = entradas_depois.get(cid, zero) + tot
+            elif row['tipo'] == MovimentoBanco.SAIDA:
+                saidas_depois[cid] = saidas_depois.get(cid, zero) + tot
+
+        contas_out = []
+        total_saldo_contas = zero
+        for conta in ContaBanco.objects.all().order_by('nome').only('id', 'nome', 'saldo_atual'):
+            saldo_em = (
+                Decimal(conta.saldo_atual or 0)
+                - Decimal(entradas_depois.get(conta.id, zero) or 0)
+                + Decimal(saidas_depois.get(conta.id, zero) or 0)
+            )
+            total_saldo_contas += saldo_em
+            contas_out.append({
+                'id': conta.id,
+                'nome': conta.nome,
+                'saldo_atual': _safe_float(saldo_em),
+            })
+
+        # --- Estoque na data ---
+        # Fonte da verdade = estoque_atual (igual à tela ao vivo).
+        # Ajustes migrados de AjusteEstoque guardam DELTA em quantidade com prefixo
+        # [entrada]/[saida]; a API nova grava quantidade ABSOLUTA (contagem).
+        # Para datas passadas: desfazemos do atual só o que for confiável após o cutoff.
+        def _obs_eh_delta(obs: str) -> bool:
+            low = (obs or '').strip().lower()
+            return low.startswith('[entrada]') or low.startswith('[saida]')
+
+        def _estoque_no_cutoff(produto_id: int, atual: int) -> int:
+            qtd = int(atual or 0)
+            posteriores = list(
+                AjusteEstoqueProduto.objects.filter(produto_id=produto_id, data__gt=cutoff)
+                .order_by('-data', '-pk')
+                .only('id', 'data', 'quantidade', 'observacao')
+            )
+            for adj in posteriores:
+                obs = adj.observacao or ''
+                q = int(adj.quantidade or 0)
+                low = obs.strip().lower()
+                if low.startswith('[entrada]'):
+                    qtd -= q
+                elif low.startswith('[saida]'):
+                    qtd += q
+                else:
+                    # Absoluto (contagem / quantidade fixa): volta ao absoluto anterior, se houver
+                    prev = (
+                        AjusteEstoqueProduto.objects.filter(produto_id=produto_id)
+                        .filter(Q(data__lt=adj.data) | Q(data=adj.data, pk__lt=adj.pk))
+                        .order_by('-data', '-pk')
+                        .only('quantidade', 'observacao')
+                        .first()
+                    )
+                    if prev is not None and not _obs_eh_delta(prev.observacao or ''):
+                        qtd = int(prev.quantidade or 0)
+                    # sem absoluto anterior: não dá para desfazer a contagem com segurança
+            return max(0, qtd)
+
+        estoque_produtos = []
+        estoque_total = zero
+        for p in (
+            Produto.objects.filter(ativo=True)
+            .select_related('categoria')
+            .order_by('nome')
+        ):
+            qtd = _estoque_no_cutoff(p.id, int(p.estoque_atual or 0))
+            preco = Decimal(p.preco_custo or 0)
+            total = Decimal(qtd) * preco
+            estoque_total += total
+            cat = p.categoria
+            estoque_produtos.append({
+                'id': p.id,
+                'nome': p.nome,
+                'estoque_atual': qtd,
+                'preco_unitario_base': _safe_float(preco),
+                'total': _safe_float(total),
+                'categoria_id': cat.id if cat else None,
+                'categoria_nome': cat.nome if cat else None,
+                'eh_insumo': bool(p.eh_insumo),
+            })
+
+        saldo_geral = a_receber + total_saldo_contas + estoque_total - a_pagar
+
+        return Response({
+            'data': dia.isoformat(),
+            'cutoff': cutoff.isoformat(),
+            'clientes': clientes_out,
+            'fornecedores': fornecedores_out,
+            'contas': contas_out,
+            'dividas_gerais': dividas_gerais,
+            'estoque_produtos': estoque_produtos,
+            'estoque_materiais': [],
+            'a_receber': _safe_float(a_receber),
+            'a_pagar': _safe_float(a_pagar),
+            'total_saldo_contas': _safe_float(total_saldo_contas),
+            'estoque_total': _safe_float(estoque_total),
+            'saldo_geral': _safe_float(saldo_geral),
+        })
+
+
 # --- Compras (ordem com itens, como Venda) ---
 @method_decorator(csrf_exempt, name='dispatch')
 class CompraListCreate(APIView):
@@ -1477,11 +1775,8 @@ class CompraListCreate(APIView):
             tz_br = ZoneInfo('America/Sao_Paulo')
             ordens = list(
                 OrdemCompra.objects
-                .prefetch_related('itens__material', 'itens_produtos__produto')
+                .prefetch_related('itens_produtos__produto')
                 .select_related('fornecedor')
-            )
-            itens_sem_ordem_mat = list(
-                CompraMaterial.objects.filter(ordem__isnull=True).select_related('fornecedor', 'material')
             )
             itens_sem_ordem_prod = list(
                 CompraProduto.objects.filter(ordem__isnull=True).select_related('fornecedor', 'produto')
@@ -1498,9 +1793,6 @@ class CompraListCreate(APIView):
             for o in ordens:
                 dt = o.data_lancamento or o.data_compra
                 merged.append((_ts(dt), o.id or 0, 'ordem', o))
-            for c in itens_sem_ordem_mat:
-                dt = c.data_lancamento or c.data_compra
-                merged.append((_ts(dt), c.id or 0, 'mat', c))
             for c in itens_sem_ordem_prod:
                 dt = c.data_lancamento or c.data_compra
                 merged.append((_ts(dt), c.id or 0, 'prod', c))
@@ -1511,19 +1803,6 @@ class CompraListCreate(APIView):
             for _, _, kind, obj in merged:
                 if kind == 'ordem':
                     out.append(OrdemCompraSerializer(obj).data)
-                elif kind == 'mat':
-                    c = obj
-                    d_iso = _data_historico_iso(c.data_compra)
-                    dl_iso = _lancamento_iso_datetime_br(getattr(c, 'data_lancamento', None) or c.data_compra)
-                    out.append({
-                        'id': f'item-mat-{c.id}',
-                        'fornecedor': c.fornecedor.nome,
-                        'fornecedor_id': c.fornecedor_id,
-                        'data': d_iso if d_iso else None,
-                        'data_lancamento': dl_iso if dl_iso else None,
-                        'itens': [ItemCompraMaterialSerializer(c).data],
-                        'total': float(c.total_compra),
-                    })
                 else:
                     c = obj
                     d_iso = _data_historico_iso(c.data_compra)
@@ -1580,63 +1859,45 @@ class CompraListCreate(APIView):
             numero_venda_fornecedor=numero_venda,
         )
         created = []
+        rejeitados = []
         for item in itens:
-            item_tipo = (item.get('tipo') or '').strip().lower()
-            material_id = item.get('material')
-            produto_id = item.get('produto')
+            produto_id = item.get('produto') if item.get('produto') is not None else item.get('material')
             qtd = item.get('quantidade')
             preco = item.get('preco_no_dia')
-            if qtd is None or preco is None:
+            if produto_id is None or qtd is None or preco is None:
                 continue
             try:
                 q = _int_quantidade_item(qtd)
                 p = Decimal(str(preco).replace(',', '.'))
-            except (ValueError, TypeError):
+                prod = Produto.objects.get(pk=int(produto_id))
+            except (Produto.DoesNotExist, ValueError, TypeError):
                 continue
             if q <= 0 or p < 0:
                 continue
-            # Se não veio tipo explícito, tenta inferir por presença do campo
-            if not item_tipo:
-                item_tipo = 'produto' if produto_id else 'material'
-
-            if item_tipo == 'produto' or produto_id:
-                if not produto_id:
-                    continue
-                try:
-                    prod = Produto.objects.get(pk=produto_id)
-                except Produto.DoesNotExist:
-                    continue
-                if not _produto_elegivel_compra_pronta(prod):
-                    continue
-                c = CompraProduto.objects.create(
-                    ordem=ordem,
-                    fornecedor=fornecedor,
-                    produto=prod,
-                    quantidade=q,
-                    preco_no_dia=p,
-                    data_compra=data_hora_compra,
-                )
-                created.append(c)
-            else:
-                if not material_id:
-                    continue
-                try:
-                    material = Material.objects.get(pk=material_id)
-                except Material.DoesNotExist:
-                    continue
-                if not material.ativo:
-                    continue
-                c = CompraMaterial.objects.create(
-                    ordem=ordem,
-                    fornecedor=fornecedor,
-                    material=material,
-                    quantidade=q,
-                    preco_no_dia=p,
-                    data_compra=data_hora_compra,
-                )
-                created.append(c)
+            if not _produto_elegivel_compra(prod, fornecedor.id):
+                rejeitados.append(int(produto_id))
+                continue
+            c = CompraProduto.objects.create(
+                ordem=ordem,
+                fornecedor=fornecedor,
+                produto=prod,
+                quantidade=q,
+                preco_no_dia=p,
+                data_compra=data_hora_compra,
+            )
+            created.append(c)
         if not created:
             ordem.delete()
+            if rejeitados:
+                return Response(
+                    {
+                        'itens': [
+                            'Nenhum item válido. Produto deve estar ativo, não fabricado e com o mesmo fornecedor da ordem.',
+                        ],
+                        'rejeitados': rejeitados,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response({'itens': ['Nenhum item válido.']}, status=status.HTTP_400_BAD_REQUEST)
         _api_log(request, "Criar", "Compra", f"Ordem #{ordem.id} - {len(created)} itens - Fornecedor {fornecedor.nome} (ID {fornecedor.id})")
         return Response(OrdemCompraSerializer(ordem).data, status=status.HTTP_201_CREATED)
@@ -1653,24 +1914,9 @@ class CompraDetail(APIView):
         except (ValueError, TypeError):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         try:
-            ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
+            ordem = OrdemCompra.objects.prefetch_related('itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
             if ordem:
                 return Response(OrdemCompraSerializer(ordem).data)
-            item = CompraMaterial.objects.select_related('fornecedor', 'material').filter(pk=pk_int).first()
-            if item:
-                if item.ordem_id:
-                    return Response(OrdemCompraSerializer(item.ordem).data)
-                d_iso = _data_historico_iso(item.data_compra)
-                dl_iso = _data_historico_iso(getattr(item, 'data_lancamento', None) or item.data_compra)
-                return Response({
-                    'id': f'item-mat-{item.id}',
-                    'fornecedor': item.fornecedor.nome,
-                    'fornecedor_id': item.fornecedor_id,
-                    'data': d_iso if d_iso else None,
-                    'data_lancamento': dl_iso if dl_iso else None,
-                    'itens': [ItemCompraMaterialSerializer(item).data],
-                    'total': float(item.total_compra),
-                })
             itemp = CompraProduto.objects.select_related('fornecedor', 'produto').filter(pk=pk_int).first()
             if itemp:
                 if itemp.ordem_id:
@@ -1735,7 +1981,6 @@ class CompraDetail(APIView):
             ordem.data_compra = data_hora
             update_fields.append('data_compra')
             log_partes.append(f'data da compra {data_antiga} → {data_enviada.isoformat()}')
-            ordem.itens.update(data_compra=data_hora)
             ordem.itens_produtos.update(data_compra=data_hora)
         if alterar_numero:
             numero_venda = _normalizar_numero_venda_fornecedor(data.get('numero_venda_fornecedor'))
@@ -1759,12 +2004,12 @@ class CompraDetail(APIView):
             f"Ordem #{pk_int} - {resumo_alteracao}",
         )
         ordem = OrdemCompra.objects.prefetch_related(
-            'itens__material', 'itens_produtos__produto'
+            'itens_produtos__produto'
         ).select_related('fornecedor').get(pk=pk_int)
         return Response(OrdemCompraSerializer(ordem).data)
 
     def post(self, request, pk):
-        """Adiciona um item (material/produto) numa ordem existente."""
+        """Adiciona um item (produto/insumo) numa ordem existente."""
         try:
             pk_int = int(pk)
         except (ValueError, TypeError):
@@ -1775,7 +2020,6 @@ class CompraDetail(APIView):
         if ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         data = request.data if isinstance(request.data, dict) else {}
-        item_tipo = (data.get('tipo') or '').strip().lower()
         qtd = data.get('quantidade')
         preco = data.get('preco_no_dia')
         if qtd is None or preco is None:
@@ -1788,62 +2032,36 @@ class CompraDetail(APIView):
         if q <= 0 or p < 0:
             return Response({'detail': 'Quantidade deve ser > 0 e preço >= 0.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Default: inferir tipo pelo campo presente
-        material_id = data.get('material')
-        produto_id = data.get('produto')
-        if not item_tipo:
-            item_tipo = 'produto' if produto_id else 'material'
+        produto_id = data.get('produto') if data.get('produto') is not None else data.get('material')
+        if not produto_id:
+            return Response({'produto': ['Informe o produto (ou material legado).']}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            prod = Produto.objects.get(pk=int(produto_id))
+        except (Produto.DoesNotExist, ValueError, TypeError):
+            return Response({'produto': ['Produto inválido.']}, status=status.HTTP_400_BAD_REQUEST)
+        if not _produto_elegivel_compra(prod, ordem.fornecedor_id):
+            return Response(
+                {'produto': ['Produto não elegível: ativo, não fabricado e com o mesmo fornecedor da ordem.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        item = CompraProduto.objects.create(
+            ordem=ordem,
+            fornecedor=ordem.fornecedor,
+            produto=prod,
+            quantidade=q,
+            preco_no_dia=p,
+            data_compra=ordem.data_compra,
+        )
+        resumo = f"item produto adicionado (linha #{item.id}, produto {prod.id}, qtd {q}, preço {float(p)})"
+        _api_log(
+            request,
+            "Editar",
+            "Compra",
+            f"Ordem #{pk_int} - {resumo}",
+        )
+        _set_ultima_alteracao_ordem(pk_int, resumo)
 
-        if item_tipo == 'produto' or produto_id:
-            if not produto_id:
-                return Response({'produto': ['Informe o produto.']}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                prod = Produto.objects.get(pk=int(produto_id))
-            except (Produto.DoesNotExist, ValueError, TypeError):
-                return Response({'produto': ['Produto inválido.']}, status=status.HTTP_400_BAD_REQUEST)
-            if not _produto_elegivel_compra_pronta(prod):
-                return Response({'produto': ['Produto não elegível para compra como item pronto.']}, status=status.HTTP_400_BAD_REQUEST)
-            item = CompraProduto.objects.create(
-                ordem=ordem,
-                fornecedor=ordem.fornecedor,
-                produto=prod,
-                quantidade=q,
-                preco_no_dia=p,
-                data_compra=ordem.data_compra,
-            )
-            resumo = f"item produto adicionado (linha #{item.id}, produto {prod.id}, qtd {q}, preço {float(p)})"
-            _api_log(
-                request,
-                "Editar",
-                "Compra",
-                f"Ordem #{pk_int} - {resumo}",
-            )
-            _set_ultima_alteracao_ordem(pk_int, resumo)
-        else:
-            if not material_id:
-                return Response({'material': ['Informe o material.']}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                material = Material.objects.get(pk=int(material_id))
-            except (Material.DoesNotExist, ValueError, TypeError):
-                return Response({'material': ['Material inválido.']}, status=status.HTTP_400_BAD_REQUEST)
-            item = CompraMaterial.objects.create(
-                ordem=ordem,
-                fornecedor=ordem.fornecedor,
-                material=material,
-                quantidade=q,
-                preco_no_dia=p,
-                data_compra=ordem.data_compra,
-            )
-            resumo = f"item material adicionado (linha #{item.id}, material {material.id}, qtd {q}, preço {float(p)})"
-            _api_log(
-                request,
-                "Editar",
-                "Compra",
-                f"Ordem #{pk_int} - {resumo}",
-            )
-            _set_ultima_alteracao_ordem(pk_int, resumo)
-
-        ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').get(pk=pk_int)
+        ordem = OrdemCompra.objects.prefetch_related('itens_produtos__produto').select_related('fornecedor').get(pk=pk_int)
         return Response(OrdemCompraSerializer(ordem).data, status=status.HTTP_200_OK)
 
     def put(self, request, pk):
@@ -1852,21 +2070,12 @@ class CompraDetail(APIView):
             pk = pk.replace('mat-', '').replace('prod-', '')
         tipo_hint = request.data.get('tipo') if isinstance(request.data, dict) else None
         obj, kind = _resolve_compra_linha_por_pk(pk, tipo_hint)
-        if kind == 'ambiguous':
-            return Response(
-                {
-                    'detail': 'Existem uma linha de material e uma de produto com o mesmo ID numérico. Envie "tipo": "material" ou "produto".',
-                    'tipo': ['Obrigatório para desambiguar esta linha.'],
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         if obj is None:
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if obj.ordem_id and obj.ordem.cancelada:
             return Response({'detail': 'Ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
         old_q = obj.quantidade
         old_p = float(obj.preco_no_dia or 0)
-        old_mat = getattr(obj, 'material_id', None)
         old_prod = getattr(obj, 'produto_id', None)
         old_forn = getattr(obj, 'fornecedor_id', None)
         if request.data.get('quantidade') is not None:
@@ -1879,20 +2088,19 @@ class CompraDetail(APIView):
                 obj.preco_no_dia = Decimal(str(request.data.get('preco_no_dia')).replace(',', '.'))
             except (ValueError, TypeError):
                 pass
-        if kind == 'material' and request.data.get('material') is not None:
+        new_pid_raw = request.data.get('produto')
+        if new_pid_raw is None:
+            new_pid_raw = request.data.get('material')
+        if new_pid_raw is not None:
             try:
-                obj.material_id = int(request.data.get('material'))
-            except (ValueError, TypeError):
-                pass
-        if kind == 'produto' and request.data.get('produto') is not None:
-            try:
-                new_pid = int(request.data.get('produto'))
+                new_pid = int(new_pid_raw)
                 np = Produto.objects.filter(pk=new_pid).first()
                 if not np:
                     return Response({'produto': ['Produto não encontrado.']}, status=status.HTTP_400_BAD_REQUEST)
-                if not np.ativo:
+                forn_check = obj.ordem.fornecedor_id if obj.ordem_id else obj.fornecedor_id
+                if not _produto_elegivel_compra(np, forn_check):
                     return Response(
-                        {'produto': ['Produto inativo no cadastro; escolha um produto ativo.']},
+                        {'produto': ['Produto não elegível para esta compra (fornecedor/ativo/fabricado).']},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 obj.produto_id = new_pid
@@ -1909,9 +2117,7 @@ class CompraDetail(APIView):
             mud.append(f"qtd {old_q}→{obj.quantidade}")
         if request.data.get('preco_no_dia') is not None and old_p != float(obj.preco_no_dia or 0):
             mud.append(f"preço {old_p}→{float(obj.preco_no_dia or 0)}")
-        if kind == 'material' and request.data.get('material') is not None and old_mat != obj.material_id:
-            mud.append(f"material {old_mat}→{obj.material_id}")
-        if kind == 'produto' and request.data.get('produto') is not None and old_prod != obj.produto_id:
+        if new_pid_raw is not None and old_prod != obj.produto_id:
             mud.append(f"produto {old_prod}→{obj.produto_id}")
         if request.data.get('fornecedor') is not None and old_forn != obj.fornecedor_id:
             mud.append(f"fornecedor_linha {old_forn}→{obj.fornecedor_id}")
@@ -1923,8 +2129,6 @@ class CompraDetail(APIView):
             f"{'Ordem #' + str(obj.ordem_id) if obj.ordem_id else 'Compra avulsa'} linha #{pk} ({kind}): {det}",
         )
         _set_ultima_alteracao_ordem(obj.ordem_id, det)
-        if kind == 'material':
-            return Response(CompraSerializer(obj).data)
         return Response(ItemCompraProdutoSerializer(obj).data)
 
     def delete(self, request, pk):
@@ -1959,14 +2163,6 @@ class CompraDetail(APIView):
             return Response(status=status.HTTP_204_NO_CONTENT)
         tipo_hint = request.data.get('tipo') if isinstance(request.data, dict) else None
         obj, kind = _resolve_compra_linha_por_pk(pk_int, tipo_hint)
-        if kind == 'ambiguous':
-            return Response(
-                {
-                    'detail': 'Existem linha de material e de produto com o mesmo ID numérico. Envie "tipo": "material" ou "produto".',
-                    'tipo': ['Obrigatório para desambiguar.'],
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         if obj is None:
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
         if obj.ordem_id and obj.ordem.cancelada:
@@ -1980,16 +2176,10 @@ class CompraDetail(APIView):
         ordem = obj.ordem
         if ordem:
             _set_ultima_alteracao_ordem(ordem.pk, observacao)
-        if kind == 'produto':
-            obj.delete()
-            if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
-                ordem.delete()
-            _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
-            return Response(status=status.HTTP_204_NO_CONTENT)
         obj.delete()
-        if ordem and (not ordem.itens.exists()) and (not ordem.itens_produtos.exists()):
+        if ordem and (not ordem.itens_produtos.exists()):
             ordem.delete()
-        _api_log(request, "Excluir", "Compra", f"Compra #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
+        _api_log(request, "Excluir", "Compra", f"Compra produto #{pk} excluída. Motivo: {motivo}. Obs.: {observacao}")
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -2003,7 +2193,7 @@ class CompraCopiar(APIView):
             pk_int = int(pk)
         except (ValueError, TypeError):
             return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-        ordem = OrdemCompra.objects.prefetch_related('itens__material', 'itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
+        ordem = OrdemCompra.objects.prefetch_related('itens_produtos__produto').select_related('fornecedor').filter(pk=pk_int).first()
         if ordem:
             if ordem.cancelada:
                 return Response({'detail': 'Não é possível copiar uma ordem cancelada.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2011,15 +2201,6 @@ class CompraCopiar(APIView):
                 fornecedor=ordem.fornecedor,
                 data_compra=ordem.data_compra,
             )
-            for item in ordem.itens.all():
-                CompraMaterial.objects.create(
-                    ordem=nova_ordem,
-                    fornecedor=ordem.fornecedor,
-                    material=item.material,
-                    quantidade=item.quantidade,
-                    preco_no_dia=item.preco_no_dia,
-                    data_compra=ordem.data_compra,
-                )
             for item in ordem.itens_produtos.all():
                 CompraProduto.objects.create(
                     ordem=nova_ordem,
@@ -2031,16 +2212,6 @@ class CompraCopiar(APIView):
                 )
             _api_log(request, "Criar", "Compra", f"Ordem #{nova_ordem.id} copiada da ordem #{pk}")
             return Response(OrdemCompraSerializer(nova_ordem).data, status=status.HTTP_201_CREATED)
-        item = CompraMaterial.objects.select_related('fornecedor', 'material').filter(pk=pk_int).first()
-        if item:
-            nova = CompraMaterial.objects.create(
-                fornecedor=item.fornecedor,
-                material=item.material,
-                quantidade=item.quantidade,
-                preco_no_dia=item.preco_no_dia,
-            )
-            _api_log(request, "Criar", "Compra", f"Compra #{nova.id} copiada da compra #{pk}")
-            return Response(CompraSerializer(nova).data, status=status.HTTP_201_CREATED)
         itemp = CompraProduto.objects.select_related('fornecedor', 'produto').filter(pk=pk_int).first()
         if itemp:
             nova = CompraProduto.objects.create(
@@ -2405,40 +2576,23 @@ class SaidasListCreate(APIView):
             return Response({'valor': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# --- Estoque (materiais + produtos separados) ---
+# --- Estoque (produtos; materiais = insumos espelhados para transição) ---
 @method_decorator(csrf_exempt, name='dispatch')
 class EstoqueList(APIView):
     def get(self, request):
         from django.utils import timezone
         hoje = timezone.now().date()
         ids_alterados_hoje = set(
-            AjusteEstoque.objects.filter(data__date=hoje).values_list('material_id', flat=True)
-        )
-        ids_produtos_alterados_hoje = set(
             AjusteEstoqueProduto.objects.filter(data__date=hoje).values_list('produto_id', flat=True)
         )
-        materiais_qs = Material.objects.select_related('categoria').all().order_by('nome')
-        out_materiais = []
-        for m in materiais_qs:
-            cat = m.categoria
-            out_materiais.append({
-                'id': m.id,
-                'nome': m.nome,
-                'estoque_atual': m.estoque_atual or 0,
-                'preco_unitario_base': float(m.preco_unitario_base),
-                'total': float((m.estoque_atual or 0) * (m.preco_unitario_base or 0)),
-                'categoria_id': cat.id if cat else None,
-                'categoria_nome': cat.nome if cat else None,
-                'alterado_hoje': m.id in ids_alterados_hoje,
-            })
         produtos_qs = Produto.objects.select_related('categoria').filter(ativo=True).order_by('nome')
         out_produtos = []
+        out_materiais = []
         for p in produtos_qs:
             cat = p.categoria
-            # Estoque deve refletir custo (investimento), não preço de venda.
             preco = float(p.preco_custo or 0)
             qtd = p.estoque_atual or 0
-            out_produtos.append({
+            entry = {
                 'id': p.id,
                 'nome': p.nome,
                 'estoque_atual': qtd,
@@ -2446,21 +2600,17 @@ class EstoqueList(APIView):
                 'total': float(qtd * preco),
                 'categoria_id': cat.id if cat else None,
                 'categoria_nome': cat.nome if cat else None,
-                'alterado_hoje': p.id in ids_produtos_alterados_hoje,
-            })
+                'alterado_hoje': p.id in ids_alterados_hoje,
+                'eh_insumo': False,
+            }
+            out_produtos.append(entry)
         return Response({'materiais': out_materiais, 'produtos': out_produtos})
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class EstoqueUltimaAtualizacao(APIView):
-    """Retorna a última atualização de estoque (material ou produto)."""
+    """Retorna a última atualização de estoque (produto)."""
     def get(self, request):
-        last_mat = (
-            AjusteEstoque.objects.select_related('material')
-            .order_by('-data')
-            .values('id', 'data', 'tipo', 'quantidade', 'observacao', 'material__nome')
-            .first()
-        )
         last_prod = (
             AjusteEstoqueProduto.objects.select_related('produto')
             .order_by('-data')
@@ -2468,68 +2618,55 @@ class EstoqueUltimaAtualizacao(APIView):
             .first()
         )
 
-        if not last_mat and not last_prod:
+        if not last_prod:
             return Response({'last_update': None})
-
-        def _dt(v):
-            return v.get('data') if v else None
-
-        pick = None
-        kind = None
-        if last_mat and last_prod:
-            pick = last_mat if _dt(last_mat) >= _dt(last_prod) else last_prod
-            kind = 'material' if pick is last_mat else 'produto'
-        elif last_mat:
-            pick = last_mat
-            kind = 'material'
-        else:
-            pick = last_prod
-            kind = 'produto'
-
-        if kind == 'material':
-            detalhe = f"{pick.get('tipo')} {pick.get('quantidade')}"
-            item_nome = pick.get('material__nome') or ''
-        else:
-            detalhe = f"quantidade → {pick.get('quantidade')}"
-            item_nome = pick.get('produto__nome') or ''
 
         return Response({
             'last_update': {
-                'kind': kind,
-                'data': pick.get('data').isoformat() if pick.get('data') else None,
-                'item_nome': item_nome,
-                'detalhe': detalhe,
-                'observacao': pick.get('observacao') or '',
+                'kind': 'produto',
+                'data': last_prod.get('data').isoformat() if last_prod.get('data') else None,
+                'item_nome': last_prod.get('produto__nome') or '',
+                'detalhe': f"quantidade → {last_prod.get('quantidade')}",
+                'observacao': last_prod.get('observacao') or '',
             }
         })
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class EstoqueAjuste(APIView):
+    """
+    Ajuste de estoque via produto_id.
+    material_id legado é aceito como alias de produto_id, mas após a unificação
+    os IDs antigos de Material NÃO coincidem com os novos IDs de Produto — use produto_id.
+    """
     def post(self, request):
-        material_id = request.data.get('material_id')
+        produto_id = request.data.get('produto_id')
+        if produto_id is None:
+            produto_id = request.data.get('material_id')
         tipo = request.data.get('tipo')  # 'entrada' | 'saida'
         quantidade = request.data.get('quantidade')
-        quantidade_nova = request.data.get('quantidade_nova')  # ajuste por valor fixo: definir qtd atual
+        quantidade_nova = request.data.get('quantidade_nova')
         observacao = request.data.get('observacao', '')
-        if not material_id:
-            return Response({'error': 'material_id obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+        if not produto_id:
+            return Response(
+                {'error': 'produto_id obrigatório (material_id legado é alias, mas IDs antigos de Material estão inválidos)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            material = Material.objects.get(pk=material_id)
-            atual = material.estoque_atual or 0
+            produto = Produto.objects.get(pk=produto_id)
+            atual = produto.estoque_atual or 0
             if quantidade_nova is not None:
                 nova = int(quantidade_nova)
                 if nova < 0:
                     return Response({'quantidade_nova': ['Deve ser >= 0']}, status=status.HTTP_400_BAD_REQUEST)
-                diff = nova - atual
-                if diff > 0:
-                    AjusteEstoque.objects.create(material=material, tipo='entrada', quantidade=diff, observacao=observacao or 'Ajuste para quantidade fixa')
-                    material.estoque_atual = nova
-                elif diff < 0:
-                    AjusteEstoque.objects.create(material=material, tipo='saida', quantidade=abs(diff), observacao=observacao or 'Ajuste para quantidade fixa')
-                    material.estoque_atual = nova
-                material.save()
-                _api_log(request, "Ajuste estoque", "AjusteEstoque", f"{material.nome} quantidade fixa → {nova}")
+                produto.estoque_atual = nova
+                produto.save(update_fields=['estoque_atual'])
+                AjusteEstoqueProduto.objects.create(
+                    produto=produto,
+                    quantidade=nova,
+                    observacao=observacao or 'Ajuste para quantidade fixa',
+                )
+                _api_log(request, "Ajuste estoque", "AjusteEstoqueProduto", f"{produto.nome} quantidade fixa → {nova}")
                 return Response({'success': True}, status=status.HTTP_201_CREATED)
             if tipo not in ('entrada', 'saida') or quantidade is None:
                 return Response({'error': 'tipo e quantidade obrigatórios (ou use quantidade_nova)'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2538,17 +2675,22 @@ class EstoqueAjuste(APIView):
                 return Response({'quantidade': ['Deve ser positivo']}, status=status.HTTP_400_BAD_REQUEST)
             if tipo == 'saida' and atual < qty:
                 return Response({'error': 'Estoque insuficiente'}, status=status.HTTP_400_BAD_REQUEST)
-            AjusteEstoque.objects.create(material=material, tipo=tipo, quantidade=qty, observacao=observacao)
             if tipo == 'entrada':
-                material.estoque_atual = atual + qty
-                _api_log(request, "Entrada estoque", "AjusteEstoque", f"{material.nome} +{qty}")
+                nova = atual + qty
+                _api_log(request, "Entrada estoque", "AjusteEstoqueProduto", f"{produto.nome} +{qty}")
             else:
-                material.estoque_atual = atual - qty
-                _api_log(request, "Saída estoque", "AjusteEstoque", f"{material.nome} -{qty}")
-            material.save()
+                nova = atual - qty
+                _api_log(request, "Saída estoque", "AjusteEstoqueProduto", f"{produto.nome} -{qty}")
+            produto.estoque_atual = nova
+            produto.save(update_fields=['estoque_atual'])
+            AjusteEstoqueProduto.objects.create(
+                produto=produto,
+                quantidade=nova,
+                observacao=observacao or f'Ajuste {tipo} {qty}',
+            )
             return Response({'success': True}, status=status.HTTP_201_CREATED)
-        except Material.DoesNotExist:
-            return Response({'error': 'Material não encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        except Produto.DoesNotExist:
+            return Response({'error': 'Produto não encontrado'}, status=status.HTTP_404_NOT_FOUND)
         except (ValueError, TypeError):
             return Response({'quantidade': ['Inválido']}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -3300,11 +3442,11 @@ class ClientePrecosProdutos(APIView):
 # --- Fornecedor: materiais vinculados (fornecedor padrão) ---
 @method_decorator(csrf_exempt, name='dispatch')
 class FornecedorMateriais(APIView):
-    """Lista materiais cujo fornecedor padrão é este (para ajuste rápido de preço na tela do fornecedor)."""
+    """Lista produtos cujo fornecedor é este (proxy legado de materiais)."""
     def get(self, request, pk):
-        materiais = Material.objects.filter(fornecedor_padrao_id=pk).order_by('nome')
+        materiais = Produto.objects.filter(fornecedor_id=pk, ativo=True).order_by('nome')
         data = [
-            {'id': m.id, 'nome': m.nome, 'preco_unitario_base': float(m.preco_unitario_base)}
+            {'id': m.id, 'nome': m.nome, 'preco_unitario_base': float(m.preco_custo or 0)}
             for m in materiais
         ]
         return Response(data)
@@ -3313,7 +3455,7 @@ class FornecedorMateriais(APIView):
 # --- Fornecedor: produtos vinculados ---
 @method_decorator(csrf_exempt, name='dispatch')
 class FornecedorProdutos(APIView):
-    """Lista produtos cujo fornecedor é este (para consulta rápida no detalhe do fornecedor)."""
+    """Lista produtos cujo fornecedor é este."""
     def get(self, request, pk):
         produtos = Produto.objects.filter(fornecedor_id=pk, ativo=True).order_by('nome')
         data = [
@@ -3321,8 +3463,10 @@ class FornecedorProdutos(APIView):
                 'id': p.id,
                 'nome': p.nome,
                 'preco_venda': float(p.preco_venda or 0),
+                'preco_custo': float(p.preco_custo or 0),
                 'estoque_atual': int(p.estoque_atual or 0),
                 'ativo': bool(p.ativo),
+                'eh_insumo': False,
             }
             for p in produtos
         ]
@@ -3337,15 +3481,13 @@ class FornecedorDetalhe(APIView):
         from django.db import connection
         try:
             fornecedor = Fornecedor.objects.get(pk=pk)
-            compras_mat = CompraMaterial.objects.filter(fornecedor=fornecedor).select_related('material', 'ordem')
             compras_prod = CompraProduto.objects.filter(fornecedor=fornecedor).select_related('produto', 'ordem')
 
             def _compra_linha_conta_saldo(c):
                 return c.ordem_id is None or not c.ordem.cancelada
 
             total_compras = _safe_float(
-                sum(_safe_float(c.total_compra) for c in compras_mat if _compra_linha_conta_saldo(c))
-                + sum(_safe_float(c.total_compra) for c in compras_prod if _compra_linha_conta_saldo(c))
+                sum(_safe_float(c.total_compra) for c in compras_prod if _compra_linha_conta_saldo(c))
             )
             # Pagamentos: usar raw SQL para evitar decimal.InvalidOperation ao ler valor fora do range do Decimal
             table = PagamentoFornecedor._meta.db_table
@@ -3376,29 +3518,6 @@ class FornecedorDetalhe(APIView):
                 })
             saldo = _safe_float(total_compras - total_pago)
             linhas = []
-            for c in compras_mat:
-                if c.ordem_id and c.ordem:
-                    linha_mp = bool(c.ordem.marcada_paga)
-                else:
-                    linha_mp = bool(getattr(c, 'marcada_paga', False))
-                linhas.append(
-                    {
-                        'sort_dt': c.data_compra,
-                        'id': f'mat-{c.id}',
-                        'ordem_id': c.ordem_id,
-                        'ordem_cancelada': bool(c.ordem_id and c.ordem.cancelada),
-                        'ordem_numero_venda_fornecedor': (
-                            (c.ordem.numero_venda_fornecedor or '').strip()
-                            if c.ordem_id and c.ordem else ''
-                        ),
-                        'data': c.data_compra.date().isoformat() if c.data_compra else '',
-                        'material': c.material.nome,
-                        'quantidade': int(c.quantidade),
-                        'preco_unitario': _safe_float(c.preco_no_dia),
-                        'total': _safe_float(c.total_compra),
-                        'marcada_paga': linha_mp,
-                    }
-                )
             for c in compras_prod:
                 if c.ordem_id and c.ordem:
                     linha_mp = bool(c.ordem.marcada_paga)
@@ -3522,27 +3641,10 @@ class FornecedorCompraMarcacaoPaga(APIView):
             return Response({'ok': True, 'ordem_id': oid, 'marcada_paga': mp})
         if linha_id is not None:
             s = str(linha_id).strip()
-            if s.startswith('mat-'):
+            if s.startswith('mat-') or s.startswith('prod-'):
                 try:
-                    cid = int(s[4:])
-                except ValueError:
-                    return Response({'error': 'linha_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
-                c = CompraMaterial.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem', 'material').first()
-                if not c:
-                    return Response({'error': 'Linha não encontrada'}, status=status.HTTP_404_NOT_FOUND)
-                if c.ordem_id and c.ordem:
-                    c.ordem.marcada_paga = mp
-                    c.ordem.save(update_fields=['marcada_paga'])
-                    log_msg = f'Fornecedor «{fnome}» — Ordem nº {c.ordem.id} — {est_paga}'
-                else:
-                    c.marcada_paga = mp
-                    c.save(update_fields=['marcada_paga'])
-                    mat_nome = c.material.nome if getattr(c, 'material', None) else 'material'
-                    log_msg = f'Fornecedor «{fnome}» — Compra avulsa (material: {mat_nome}) — {est_paga}'
-            elif s.startswith('prod-'):
-                try:
-                    cid = int(s[5:])
-                except ValueError:
+                    cid = int(s.split('-', 1)[1])
+                except (ValueError, IndexError):
                     return Response({'error': 'linha_id inválido'}, status=status.HTTP_400_BAD_REQUEST)
                 c = CompraProduto.objects.filter(pk=cid, fornecedor_id=pk).select_related('ordem', 'produto').first()
                 if not c:

@@ -10,14 +10,13 @@ from .models import (
     Cliente,
     Fornecedor,
     Produto,
-    Material,
-    CompraMaterial,
+    CompraProduto,
     Venda,
     ItemVenda,
     Pagamento,
     PagamentoFornecedor,
     MovimentoCaixa,
-    AjusteEstoque,
+    AjusteEstoqueProduto,
     DividaGeral,
     OutrosAReceber,
     ContaBanco,
@@ -45,8 +44,8 @@ def dashboard(request):
     total_outros_a_receber = OutrosAReceber.objects.aggregate(Sum('valor'))['valor__sum'] or Decimal('0')
     saldo_banco = ContaBanco.objects.aggregate(Sum('saldo_atual'))['saldo_atual__sum'] or Decimal('0')
     valor_estoque = sum(
-        (m.estoque_atual or 0) * (m.preco_unitario_base or 0)
-        for m in Material.objects.all()
+        (m.estoque_atual or 0) * (m.preco_custo or 0)
+        for m in Produto.objects.all()
     )
     saldo_geral = saldo_caixa + total_a_receber + total_outros_a_receber + saldo_banco - total_dividas_fornecedores - dividas_gerais
 
@@ -75,12 +74,12 @@ def dashboard(request):
 
     # Estoque: materiais com quantidade e valor total
     estoque_lista = []
-    for m in Material.objects.all().order_by('nome'):
-        total_item = (m.estoque_atual or 0) * (m.preco_unitario_base or 0)
+    for m in Produto.objects.order_by('nome'):
+        total_item = (m.estoque_atual or 0) * (m.preco_custo or 0)
         estoque_lista.append({
             'material': m,
             'quantidade': m.estoque_atual or 0,
-            'valor_unit': m.preco_unitario_base or 0,
+            'valor_unit': m.preco_custo or 0,
             'total': total_item,
         })
     soma_estoque = sum(e['total'] for e in estoque_lista)
@@ -315,7 +314,7 @@ def excluir_fornecedor(request, id):
 def detalhe_fornecedor(request, id):
     from datetime import datetime
     fornecedor = get_object_or_404(Fornecedor, id=id)
-    compras = CompraMaterial.objects.filter(fornecedor=fornecedor).select_related('material').order_by('-data_compra')
+    compras = CompraProduto.objects.filter(fornecedor=fornecedor).select_related('produto').order_by('-data_compra')
     pagamentos = PagamentoFornecedor.objects.filter(fornecedor=fornecedor).order_by('-data_pagamento')
     periodo = request.GET.get('periodo', '')
     data_inicio = request.GET.get('data_inicio', '')
@@ -367,22 +366,23 @@ def pagar_fornecedor(request, id):
 
 def detalhe_compra(request, id):
     """Visualizar uma compra (registro único de CompraMaterial)."""
-    compra = get_object_or_404(CompraMaterial.objects.select_related('material', 'fornecedor'), id=id)
+    compra = get_object_or_404(CompraProduto.objects.select_related('produto', 'fornecedor'), id=id)
     return render(request, 'financeiro/fornecedores/detalhe_compra.html', {'compra': compra})
 
 # --- MATERIAIS ---
 def lista_materiais(request):
-    materiais = Material.objects.select_related('categoria', 'fornecedor_padrao').all()
+    materiais = Produto.objects.select_related('categoria', 'fornecedor')
     return render(request, 'financeiro/materiais/lista.html', {'materiais': materiais})
 
 def cadastrar_material(request):
     if request.method == 'POST':
         nome = request.POST.get('nome')
-        Material.objects.create(
+        Produto.objects.create(
             nome=nome,
+            eh_insumo=False,
             categoria_id=request.POST.get('categoria') or None,
-            fornecedor_padrao_id=request.POST.get('fornecedor') or None,
-            preco_unitario_base=request.POST.get('preco') or 0,
+            fornecedor_id=request.POST.get('fornecedor') or None,
+            preco_custo=request.POST.get('preco') or 0,
             estoque_atual=request.POST.get('estoque_atual') or request.POST.get('estoque_inicial') or 0
         )
         _registrar_log(request, 'Criar', 'Material', f'Material criado: {nome}')
@@ -395,12 +395,12 @@ def cadastrar_material(request):
 
 
 def editar_material(request, id):
-    material = get_object_or_404(Material, id=id)
+    material = get_object_or_404(Produto, id=id)
     if request.method == 'POST':
         material.nome = request.POST.get('nome')
         material.categoria_id = request.POST.get('categoria') or None
-        material.fornecedor_padrao_id = request.POST.get('fornecedor') or None
-        material.preco_unitario_base = request.POST.get('preco') or 0
+        material.fornecedor_id = request.POST.get('fornecedor') or None
+        material.preco_custo = request.POST.get('preco') or 0
         material.estoque_atual = request.POST.get('estoque_atual') or material.estoque_atual
         material.save()
         _registrar_log(request, 'Editar', 'Material', f'Material ID {id} atualizado: {material.nome}')
@@ -415,7 +415,7 @@ def editar_material(request, id):
 
 
 def excluir_material(request, id):
-    material = get_object_or_404(Material, id=id)
+    material = get_object_or_404(Produto, id=id)
     nome = material.nome
     material.delete()
     _registrar_log(request, 'Excluir', 'Material', f'Material excluído: {nome} (ID {id})')
@@ -424,12 +424,12 @@ def excluir_material(request, id):
 def buscar_ultimo_custo(request):
     material_id = request.GET.get('material_id')
     fornecedor_id = request.GET.get('fornecedor_id')
-    ultima = CompraMaterial.objects.filter(material_id=material_id, fornecedor_id=fornecedor_id).order_by('-data_compra').first()
+    ultima = CompraProduto.objects.filter(produto_id=material_id, fornecedor_id=fornecedor_id).order_by('-data_compra').first()
     if ultima:
         return JsonResponse({'sucesso': True, 'preco': str(ultima.preco_no_dia)})
     try:
-        m = Material.objects.get(id=material_id)
-        return JsonResponse({'sucesso': True, 'preco': str(m.preco_unitario_base)})
+        m = Produto.objects.get(id=material_id)
+        return JsonResponse({'sucesso': True, 'preco': str(m.preco_custo)})
     except: return JsonResponse({'sucesso': False})
 
 # --- CATEGORIAS DE PRODUTO ---
@@ -665,13 +665,13 @@ def registrar_compra(request):
         q_td = int(request.POST.get('quantidade'))
         f_id = request.POST.get('fornecedor')
         preco = request.POST.get('preco')
-        CompraMaterial.objects.create(material_id=m_id, fornecedor_id=f_id, quantidade=q_td, preco_no_dia=preco)
-        mat = Material.objects.get(id=m_id)
+        CompraProduto.objects.create(produto_id=m_id, fornecedor_id=f_id, quantidade=q_td, preco_no_dia=preco)
+        mat = Produto.objects.get(id=m_id)
         mat.estoque_atual += q_td
         mat.save()
         _registrar_log(request, 'Criar', 'Compra', f'Compra de material ID {m_id} - Qtd {q_td} - Fornecedor ID {f_id} - R$ {preco}')
         return redirect('lista_fornecedores')
-    return render(request, 'financeiro/fornecedores/form_compra.html', {'materiais': Material.objects.all(), 'fornecedores': Fornecedor.objects.all()})
+    return render(request, 'financeiro/fornecedores/form_compra.html', {'materiais': Produto.objects.all(), 'fornecedores': Fornecedor.objects.all()})
 
 # --- MOVIMENTAÇÕES (ENTRADAS/SAÍDAS GENÉRICAS) ---
 def lista_movimentacoes(request):
@@ -697,15 +697,15 @@ def nova_movimentacao(request):
 
 # --- ESTOQUE (AJUSTE DE QUANTIDADE) ---
 def estoque_ajuste(request):
-    """Aba estoque: listar materiais com quantidade e valor; dar entrada ou saída."""
-    materiais = Material.objects.all().order_by('nome')
+    """Aba estoque: listar produtos com quantidade e valor; dar entrada ou saída."""
+    materiais = Produto.objects.order_by('nome')
     estoque_lista = []
     for m in materiais:
-        total_item = (m.estoque_atual or 0) * (m.preco_unitario_base or 0)
+        total_item = (m.estoque_atual or 0) * (m.preco_custo or 0)
         estoque_lista.append({
             'material': m,
             'quantidade': m.estoque_atual or 0,
-            'valor_unit': m.preco_unitario_base or 0,
+            'valor_unit': m.preco_custo or 0,
             'total': total_item,
         })
     soma_estoque = sum(e['total'] for e in estoque_lista)
@@ -716,7 +716,7 @@ def estoque_ajuste(request):
 
 
 def estoque_ajuste_lancar(request):
-    """Lançar entrada ou saída de estoque para um material."""
+    """Lançar entrada ou saída de estoque para um produto."""
     if request.method != 'POST':
         return redirect('estoque_ajuste')
     material_id = request.POST.get('material_id')
@@ -729,12 +729,14 @@ def estoque_ajuste_lancar(request):
         qty = int(quantidade)
         if qty <= 0:
             return redirect('estoque_ajuste')
-        material = get_object_or_404(Material, id=material_id)
+        material = get_object_or_404(Produto, id=material_id)
         if tipo == 'entrada':
             material.estoque_atual = (material.estoque_atual or 0) + qty
             material.save()
-            AjusteEstoque.objects.create(material=material, tipo='entrada', quantidade=qty, observacao=observacao)
-            _registrar_log(request, 'Entrada estoque', 'AjusteEstoque', f'{material.nome} +{qty}')
+            AjusteEstoqueProduto.objects.create(
+                produto=material, quantidade=material.estoque_atual, observacao=observacao or f'entrada {qty}'
+            )
+            _registrar_log(request, 'Entrada estoque', 'AjusteEstoqueProduto', f'{material.nome} +{qty}')
         else:
             atual = material.estoque_atual or 0
             if qty > atual:
@@ -742,8 +744,10 @@ def estoque_ajuste_lancar(request):
             if qty > 0:
                 material.estoque_atual = atual - qty
                 material.save()
-                AjusteEstoque.objects.create(material=material, tipo='saida', quantidade=qty, observacao=observacao)
-                _registrar_log(request, 'Saída estoque', 'AjusteEstoque', f'{material.nome} -{qty}')
+                AjusteEstoqueProduto.objects.create(
+                    produto=material, quantidade=material.estoque_atual, observacao=observacao or f'saida {qty}'
+                )
+                _registrar_log(request, 'Saída estoque', 'AjusteEstoqueProduto', f'{material.nome} -{qty}')
     except (ValueError, TypeError):
         pass
     return redirect('estoque_ajuste')

@@ -39,15 +39,15 @@ Caso queira pegar o mais recente
 cd "/home/deploy/ControleSMDecor"
 ls -1t backups/db/db-*.sqlite3 | head -1
 
-Depois dar o comando
+Depois dar o comando para copiar o banco do backup para pasta que esta no pc
 
-scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/db-2026-07-03_193957.sqlite3 "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-07-03_193957.sqlite3"
+scp deploy@129.121.53.239:/home/deploy/ControleSMDecor/backups/db/db-2026-09-14_193837.sqlite3 "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-09-14_193837.sqlite3.sqlite3"
 
 
 Se quiser pegar o banco do backup e colocar na localhost voce da
 
 DA PASTA POR FORA DE BACKUP
-copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-07-03_193957.sqlite3 " db.sqlite3
+copy /Y "C:\Users\jpsma\OneDrive\Documentos\BackupBancoControle\db-2026-09-14_193837.sqlite3" db.sqlite3
 python manage.py migrate --noinput
 
 
