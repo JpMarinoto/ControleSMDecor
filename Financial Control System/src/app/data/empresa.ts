@@ -15,19 +15,19 @@ export const empresa = {
   /** Inscrição estadual */
   ie: "191053530110",
   /** Logradouro */
-  endereco: "Rua José Barbosa",
+  endereco: "Rua João Antonio de Brito",
   /** Número */
   numero: "5876",
   /** Complemento */
   complemento: "",
   /** Bairro */
-  bairro: "Centro",
+  bairro: "Residencial Pedro Caleguer",
   /** Cidade */
   cidade: "Auriflama",
   /** UF (ex: SP) */
   estado: "SP",
   /** CEP */
-  cep: "15350-007",
+  cep: "15352-214",
   /** Telefone */
   telefone: "(17) 99178-1988",
   /** E-mail */
