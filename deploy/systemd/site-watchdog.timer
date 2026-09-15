@@ -1,0 +1,12 @@
+[Unit]
+Description=Verifica site ControleSMDecor a cada 2 minutos
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=30s
+Persistent=true
+Unit=site-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+# Watchdog do site: sobe nginx e financeiro se estiverem parados,
+# e reinicia o Gunicorn se a porta 8000 não responder.
+#
+# Instalar:
+#   sudo bash scripts/install_site_watchdog.sh
+
+[Unit]
+Description=Watchdog ControleSMDecor (nginx + financeiro)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/deploy/ControleSMDecor/scripts/site_watchdog.sh

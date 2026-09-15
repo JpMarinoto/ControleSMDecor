@@ -42,6 +42,17 @@ URLs:
 
 ## Estabilidade (SQLite): o unit acima usa workers=1 — não voltar ao Gunicorn default
 
+## Watchdog (uma vez na VPS — evita quedas de nginx/Gunicorn)
+
+```bash
+cd "/home/deploy/ControleSMDecor"
+git pull
+chmod +x scripts/site_watchdog.sh scripts/install_site_watchdog.sh
+sudo bash scripts/install_site_watchdog.sh
+```
+
+Ver: `QUEDA_SERVIDOR.MD`
+
 ## Backup automático diário (instalar UMA vez na VPS)
 
 ssh deploy@129.121.53.239
