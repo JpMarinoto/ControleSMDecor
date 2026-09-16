@@ -96,7 +96,12 @@ export function Layout() {
       : navFuncionarioGroups;
   const isFuncionario = !user?.is_chefe;
   const mainContentFullWidth =
-    location.pathname === "/precificacao" || location.pathname.startsWith("/precificacao/");
+    location.pathname === "/precificacao" ||
+    location.pathname.startsWith("/precificacao/") ||
+    location.pathname.startsWith("/fornecedores/") ||
+    location.pathname.startsWith("/clientes/");
+  const isFornecedorRoute =
+    location.pathname === "/fornecedores" || location.pathname.startsWith("/fornecedores/");
 
   const NavLinks = ({ mobile = false, compact = false }: { mobile?: boolean; compact?: boolean }) => (
     <>
@@ -122,14 +127,14 @@ export function Layout() {
                 to={item.path}
                 onClick={() => mobile && setOpen(false)}
                 className={`flex items-center rounded-md transition-colors ${
-                  compact ? "gap-2 px-3 py-2 text-sm" : isFuncionario ? "gap-2.5 px-4 py-3 text-base" : "gap-2.5 px-4 py-3 text-base"
+                  compact ? "gap-2 px-3.5 py-2.5 text-sm" : isFuncionario ? "gap-2.5 px-4 py-3 text-base" : "gap-2.5 px-4 py-3 text-base"
                 } ${
                   isActive
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                 }`}
               >
-                <Icon className={compact ? "size-5" : isFuncionario ? "size-5 shrink-0" : "size-5 md:size-5"} />
+                <Icon className={compact ? "size-5 shrink-0" : isFuncionario ? "size-5 shrink-0" : "size-5 md:size-5"} />
                 <span>{item.name}</span>
               </Link>
             );
@@ -149,11 +154,7 @@ export function Layout() {
       >
         <div className="flex h-14 md:h-16 w-full items-center justify-between gap-6 md:gap-8 px-2 md:px-4">
           <div className="flex items-center gap-2 min-w-0 flex-shrink-0 max-w-[200px] md:max-w-none">
-            <div
-              className={`flex shrink-0 items-center justify-center object-contain transition-all duration-200 ${
-                headerCompact ? "h-7 w-7 md:h-8 md:w-8" : "h-8 w-8 md:h-9 md:w-9"
-              }`}
-            >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center object-contain md:h-9 md:w-9">
               {!logoError ? (
                 <img
                   src={logoTryPng ? "/logo/logo.png" : "/logo/logo.jpg"}
@@ -168,11 +169,7 @@ export function Layout() {
               )}
             </div>
             <Link to="/" className="truncate text-foreground" onClick={() => setOpen(false)}>
-              <span
-                className={`font-bold truncate text-foreground transition-all duration-200 ${
-                  headerCompact ? "text-xs md:text-sm" : "text-sm md:text-base"
-                }`}
-              >
+              <span className="text-sm md:text-base font-bold truncate text-foreground">
                 Controle SM Decor
               </span>
             </Link>
@@ -181,12 +178,12 @@ export function Layout() {
           {/* Desktop: nav em uma linha, scroll horizontal só dentro do header */}
           <nav className="hidden md:flex items-center gap-1 md:gap-2 justify-start flex-1 min-w-0 overflow-x-auto whitespace-nowrap py-1 ml-2 [scrollbar-width:thin]">
             <NavLinks compact={headerCompact} />
-            <div className="flex items-center gap-1 ml-auto shrink-0">
+            <div className="flex items-center gap-2 ml-auto shrink-0">
               {user && (
                 <Link
                   to="/meus-dados"
-                  className={`text-muted-foreground hover:text-foreground truncate max-w-[90px] transition-all duration-200 ${
-                    headerCompact ? "text-[10px]" : "text-xs"
+                  className={`font-medium text-foreground/80 hover:text-foreground truncate max-w-[160px] md:max-w-[200px] transition-all duration-200 ${
+                    headerCompact ? "text-sm" : "text-sm md:text-base"
                   }`}
                   title={`${user.nome} — Meus dados`}
                 >
@@ -196,10 +193,10 @@ export function Layout() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 w-7 p-0 text-muted-foreground"
+                className="h-8 w-8 p-0 text-muted-foreground"
                 onClick={() => setLogoutConfirmOpen(true)}
               >
-                <LogOut className="size-3.5 md:size-4" />
+                <LogOut className="size-4" />
               </Button>
             </div>
           </nav>
@@ -216,7 +213,7 @@ export function Layout() {
                 <NavLinks mobile />
                 {user && (
                   <div className="pt-4 border-t mt-4">
-                    <p className="text-sm text-muted-foreground px-2">{user.nome}</p>
+                    <p className="text-base font-medium text-foreground px-2">{user.nome}</p>
                     <Link
                       to="/meus-dados"
                       onClick={() => setOpen(false)}
@@ -246,9 +243,11 @@ export function Layout() {
       {/* Main Content */}
       <main
         className={
-          mainContentFullWidth
-            ? "mx-auto w-full max-w-none px-3 sm:px-4 md:px-6 py-3 md:py-4 text-foreground [overflow-anchor:none]"
-            : "container mx-auto px-2 md:px-3 py-3 md:py-4 text-foreground [overflow-anchor:none]"
+          isFornecedorRoute
+            ? "mx-auto w-full max-w-none px-8 sm:px-12 md:px-16 lg:px-20 xl:px-24 py-6 md:py-8 text-foreground [overflow-anchor:none]"
+            : mainContentFullWidth
+              ? "mx-auto w-full max-w-none px-6 sm:px-8 md:px-12 lg:px-16 py-5 md:py-7 text-foreground [overflow-anchor:none]"
+              : "container mx-auto px-4 md:px-8 py-5 md:py-7 text-foreground [overflow-anchor:none]"
         }
       >
         <Outlet />

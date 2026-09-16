@@ -41,6 +41,7 @@ interface Cliente {
   cidade?: string;
   estado?: string;
   ativo?: boolean;
+  saldoDevedor?: number;
   createdAt: string;
 }
 
@@ -374,7 +375,6 @@ export function Cadastro() {
 
   // Form states - Categorias
   const [nomeCategoria, setNomeCategoria] = useState('');
-  const [tipoCategoria, setTipoCategoria] = useState<'produto' | 'material'>('produto');
   const [descricaoCategoria, setDescricaoCategoria] = useState('');
 
   // Form states - Produtos
@@ -407,7 +407,6 @@ export function Cadastro() {
   const [filtroProdutoCategoria, setFiltroProdutoCategoria] = useState("");
   const [filtroProdutoFornecedor, setFiltroProdutoFornecedor] = useState("");
   const [buscaCategorias, setBuscaCategorias] = useState("");
-  const [filtroCategoriaTipo, setFiltroCategoriaTipo] = useState("");
   const [buscaFornecedores, setBuscaFornecedores] = useState("");
   const [mostrarClientesInativos, setMostrarClientesInativos] = useState(false);
   const [mostrarFornecedoresInativos, setMostrarFornecedoresInativos] = useState(false);
@@ -492,6 +491,7 @@ export function Cadastro() {
         cidade: c.cidade || "",
         estado: c.estado || "",
         ativo: c.ativo !== false,
+        saldoDevedor: Number(c.saldo_devedor ?? 0) || 0,
         createdAt: "",
       })));
       setCategorias((Array.isArray(categoriasRes) ? categoriasRes : []).map((c: any) => ({
@@ -590,7 +590,7 @@ export function Cadastro() {
       toast.error('Nome é obrigatório');
       return;
     }
-    const payload = { nome: nomeCategoria.trim(), tipo: tipoCategoria, descricao: descricaoCategoria };
+    const payload = { nome: nomeCategoria.trim(), tipo: "produto" as const, descricao: descricaoCategoria };
     try {
       if (editingCategoria) {
         await api.updateCategoria(editingCategoria.id, payload);
@@ -753,7 +753,6 @@ export function Cadastro() {
 
   const resetCategoriaForm = () => {
     setNomeCategoria('');
-    setTipoCategoria('produto');
     setDescricaoCategoria('');
   };
 
@@ -813,7 +812,6 @@ export function Cadastro() {
   const handleEditCategoria = (categoria: Categoria) => {
     setEditingCategoria(categoria);
     setNomeCategoria(categoria.nome);
-    setTipoCategoria(categoria.tipo);
     setDescricaoCategoria(categoria.descricao || '');
   };
 
@@ -1120,20 +1118,15 @@ export function Cadastro() {
 
   const categoriasFiltradas = useMemo(() => {
     let lista = categorias;
-    if (filtroCategoriaTipo === "produto") lista = lista.filter((c) => c.tipo === "produto");
-    else if (filtroCategoriaTipo === "material") lista = lista.filter((c) => c.tipo === "material");
     if (!normalizeTextSearch(buscaCategorias)) return lista;
     return lista.filter((cat) =>
       cadastroCamposContemBusca(
         buscaCategorias,
         cat.nome,
-        cat.tipo,
-        cat.tipo === "material" ? "material" : "produto",
-        cat.tipo === "produto" ? "Produto" : "Insumo/Material",
         cat.descricao,
       ),
     );
-  }, [categorias, buscaCategorias, filtroCategoriaTipo]);
+  }, [categorias, buscaCategorias]);
 
   const fornecedoresAtivos = useMemo(() => fornecedores.filter((f) => f.ativo !== false), [fornecedores]);
   const fornecedoresInativos = useMemo(() => fornecedores.filter((f) => f.ativo === false), [fornecedores]);
@@ -1263,12 +1256,26 @@ export function Cadastro() {
       </div>
 
       <Tabs defaultValue="clientes" className="space-y-6">
-        <TabsList className={`grid w-full ${isChefe ? "grid-cols-6" : "grid-cols-5"}`}>
-          <TabsTrigger value="clientes">Clientes</TabsTrigger>
-          <TabsTrigger value="produtos">Produtos</TabsTrigger>
-          <TabsTrigger value="categorias">Categorias</TabsTrigger>
-          <TabsTrigger value="fornecedores">Fornecedores</TabsTrigger>
-          {isChefe && <TabsTrigger value="contas">Contas</TabsTrigger>}
+        <TabsList
+          className={`mt-1 mb-2 grid h-12 w-full gap-1.5 p-1.5 ${isChefe ? "grid-cols-5" : "grid-cols-4"}`}
+        >
+          <TabsTrigger value="clientes" className="h-9 px-4 text-sm font-medium sm:text-base">
+            Clientes
+          </TabsTrigger>
+          <TabsTrigger value="produtos" className="h-9 px-4 text-sm font-medium sm:text-base">
+            Produtos
+          </TabsTrigger>
+          <TabsTrigger value="categorias" className="h-9 px-4 text-sm font-medium sm:text-base">
+            Categorias
+          </TabsTrigger>
+          <TabsTrigger value="fornecedores" className="h-9 px-4 text-sm font-medium sm:text-base">
+            Fornecedores
+          </TabsTrigger>
+          {isChefe && (
+            <TabsTrigger value="contas" className="h-9 px-4 text-sm font-medium sm:text-base">
+              Contas
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* CLIENTES */}
@@ -1525,7 +1532,15 @@ export function Cadastro() {
                               className="flex items-center justify-between rounded-md border p-3 bg-muted/30"
                             >
                               <div className="min-w-0">
-                                <p className="font-medium truncate text-destructive">{cliente.nome}</p>
+                                <p
+                                  className={`font-medium truncate ${
+                                    Number(cliente.saldoDevedor ?? 0) > 0
+                                      ? "text-destructive"
+                                      : "text-foreground"
+                                  }`}
+                                >
+                                  {cliente.nome}
+                                </p>
                                 <p className="text-xs text-muted-foreground truncate">
                                   {[cliente.cpfCnpj, cliente.telefone].filter(Boolean).join(" · ") || "Sem documento/telefone"}
                                 </p>
@@ -2226,7 +2241,7 @@ export function Cadastro() {
             <CardContent>
               <form onSubmit={handleSubmitCategoria} className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
+                  <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="nomeCategoria">Nome *</Label>
                     <Input
                       id="nomeCategoria"
@@ -2234,18 +2249,6 @@ export function Cadastro() {
                       onChange={(e) => setNomeCategoria(e.target.value)}
                       placeholder="Nome da categoria"
                     />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="tipoCategoria">Tipo de Categoria *</Label>
-                    <Select value={tipoCategoria} onValueChange={(v) => setTipoCategoria(v as 'produto' | 'material')}>
-                      <SelectTrigger id="tipoCategoria">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="produto">Produto</SelectItem>
-                        <SelectItem value="material">Material</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="descricaoCategoria">Descrição (Opcional)</Label>
@@ -2282,7 +2285,7 @@ export function Cadastro() {
                 <div className="mb-4 space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Label className="text-sm font-medium">Filtrar categorias</Label>
-                    {(buscaCategorias.trim() || filtroCategoriaTipo) && (
+                    {buscaCategorias.trim() && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -2290,47 +2293,26 @@ export function Cadastro() {
                         className="h-8 text-xs"
                         onClick={() => {
                           setBuscaCategorias("");
-                          setFiltroCategoriaTipo("");
                         }}
                       >
                         Limpar filtros
                       </Button>
                     )}
                   </div>
-                  <div className="grid gap-3 max-w-2xl sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="cadastro-busca-categorias-nome" className="text-xs text-muted-foreground">
-                        Nome
-                      </Label>
-                      <div className="relative">
-                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          id="cadastro-busca-categorias-nome"
-                          className="h-9 pl-8 text-sm"
-                          placeholder="Buscar por nome…"
-                          value={buscaCategorias}
-                          onChange={(e) => setBuscaCategorias(e.target.value)}
-                          autoComplete="off"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="cadastro-filtro-categoria-tipo" className="text-xs text-muted-foreground">
-                        Tipo
-                      </Label>
-                      <Select
-                        value={filtroCategoriaTipo || FILTRO_TODAS}
-                        onValueChange={(v) => setFiltroCategoriaTipo(v === FILTRO_TODAS ? "" : v)}
-                      >
-                        <SelectTrigger id="cadastro-filtro-categoria-tipo" className="h-9">
-                          <SelectValue placeholder="Todos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FILTRO_TODAS}>Produto e material</SelectItem>
-                          <SelectItem value="produto">Produto</SelectItem>
-                          <SelectItem value="material">Material</SelectItem>
-                        </SelectContent>
-                      </Select>
+                  <div className="max-w-md space-y-1.5">
+                    <Label htmlFor="cadastro-busca-categorias-nome" className="text-xs text-muted-foreground">
+                      Nome
+                    </Label>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="cadastro-busca-categorias-nome"
+                        className="h-9 pl-8 text-sm"
+                        placeholder="Buscar por nome…"
+                        value={buscaCategorias}
+                        onChange={(e) => setBuscaCategorias(e.target.value)}
+                        autoComplete="off"
+                      />
                     </div>
                   </div>
                 </div>
@@ -2354,7 +2336,6 @@ export function Cadastro() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <h3 className="font-medium">{categoria.nome}</h3>
-                            <Badge>{categoria.tipo === 'produto' ? 'Produto' : 'Material'}</Badge>
                           </div>
                           {categoria.descricao && (
                             <p className="text-sm text-muted-foreground">{categoria.descricao}</p>

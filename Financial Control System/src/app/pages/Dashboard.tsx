@@ -40,9 +40,9 @@ function DashboardFuncionario() {
             className="h-full"
           >
             <Card className="h-full border-2 border-primary/20 hover:border-primary/50 hover:bg-primary/5 transition-colors cursor-pointer">
-              <CardContent className="flex flex-col items-center justify-center py-12 px-6">
-                <div className="rounded-full bg-primary/10 p-4 mb-4">
-                  <TrendingUp className="size-10 text-primary" />
+              <CardContent className="flex flex-col items-center justify-center py-[3.15rem] px-6 min-h-[13.65rem]">
+                <div className="rounded-full bg-primary/10 p-[1.05rem] mb-4">
+                  <TrendingUp className="size-[2.625rem] text-primary" />
                 </div>
                 <h2 className="text-xl font-semibold">Nova Venda</h2>
                 <p className="text-sm text-muted-foreground mt-1 text-center">Registrar venda para cliente</p>
@@ -58,9 +58,9 @@ function DashboardFuncionario() {
             className="h-full"
           >
             <Card className="h-full border-2 border-primary/20 hover:border-primary/50 hover:bg-primary/5 transition-colors cursor-pointer">
-              <CardContent className="flex flex-col items-center justify-center py-12 px-6">
-                <div className="rounded-full bg-primary/10 p-4 mb-4">
-                  <ShoppingCart className="size-10 text-primary" />
+              <CardContent className="flex flex-col items-center justify-center py-[3.15rem] px-6 min-h-[13.65rem]">
+                <div className="rounded-full bg-primary/10 p-[1.05rem] mb-4">
+                  <ShoppingCart className="size-[2.625rem] text-primary" />
                 </div>
                 <h2 className="text-xl font-semibold">Nova Compra</h2>
                 <p className="text-sm text-muted-foreground mt-1 text-center">Registrar compra de produtos</p>
@@ -76,9 +76,9 @@ function DashboardFuncionario() {
             className="h-full"
           >
             <Card className="h-full border-2 border-primary/20 hover:border-primary/50 hover:bg-primary/5 transition-colors cursor-pointer">
-              <CardContent className="flex flex-col items-center justify-center py-12 px-6">
-                <div className="rounded-full bg-primary/10 p-4 mb-4">
-                  <PackageIcon className="size-10 text-primary" />
+              <CardContent className="flex flex-col items-center justify-center py-[3.15rem] px-6 min-h-[13.65rem]">
+                <div className="rounded-full bg-primary/10 p-[1.05rem] mb-4">
+                  <PackageIcon className="size-[2.625rem] text-primary" />
                 </div>
                 <h2 className="text-xl font-semibold">Estoque</h2>
                 <p className="text-sm text-muted-foreground mt-1 text-center">Contagem e ajustes por categoria</p>
@@ -94,9 +94,9 @@ function DashboardFuncionario() {
             className="h-full"
           >
             <Card className="h-full border-2 border-primary/20 hover:border-primary/50 hover:bg-primary/5 transition-colors cursor-pointer">
-              <CardContent className="flex flex-col items-center justify-center py-12 px-6">
-                <div className="rounded-full bg-primary/10 p-4 mb-4">
-                  <Users className="size-10 text-primary" />
+              <CardContent className="flex flex-col items-center justify-center py-[3.15rem] px-6 min-h-[13.65rem]">
+                <div className="rounded-full bg-primary/10 p-[1.05rem] mb-4">
+                  <Users className="size-[2.625rem] text-primary" />
                 </div>
                 <h2 className="text-xl font-semibold">Cadastro</h2>
                 <p className="text-sm text-muted-foreground mt-1 text-center">Clientes, fornecedores e produtos</p>
@@ -186,15 +186,15 @@ function ChefeLinkCard({ to, title, description, icon: Icon, delay }: ChefeLink)
         className="h-full"
       >
         <Card className="h-full border border-border hover:border-primary/40 hover:bg-muted/30 transition-colors cursor-pointer">
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-2 pt-5">
             <CardTitle className="flex items-center gap-2 text-base font-semibold">
-              <span className="rounded-md bg-primary/10 p-2 text-primary">
-                <Icon className="size-5 shrink-0" />
+              <span className="rounded-md bg-primary/10 p-2.5 text-primary">
+                <Icon className="size-[1.3125rem] shrink-0" />
               </span>
               {title}
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pb-5 min-h-[5.5rem]">
             <p className="text-sm text-muted-foreground leading-snug">{description}</p>
             <p className="text-xs text-primary mt-3 font-medium">Abrir →</p>
           </CardContent>

@@ -1,5 +1,5 @@
-// Autenticação por Token: o login devolve um token; guardamos em localStorage e enviamos em Authorization em todos os pedidos.
-// Em homologação (Vite base /homolog/) a API fica em /homolog/api/.
+// Autenticação por Token: o login devolve um token; guardamos em sessionStorage
+// (some com o fechamento do navegador). Em homologação (Vite base /homolog/) a API fica em /homolog/api/.
 function resolveApiBase(): string {
   const explicit = import.meta.env?.VITE_API_URL;
   if (explicit) return String(explicit).replace(/\/$/, "");
@@ -36,35 +36,35 @@ function isAuthFailureMessage(msg: string): boolean {
 
 export function getAuthToken(): string | null {
   if (typeof window === "undefined") return null;
-  const cur = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY);
+  const cur = sessionStorage.getItem(AUTH_TOKEN_KEY);
   if (cur) return cur;
-  // Migra token legado (mesma origem, chave única) só para a API padrão /
-  if (API_BASE_URL === "/api") {
-    const legacy =
-      localStorage.getItem(AUTH_TOKEN_KEY_LEGACY) || sessionStorage.getItem(AUTH_TOKEN_KEY_LEGACY);
-    if (legacy) {
-      setAuthToken(legacy);
-      localStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
-      sessionStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
-      return legacy;
-    }
+  // Migra token legado (localStorage / chave antiga) para sessionStorage — sessão só nesta aba
+  const legacy =
+    sessionStorage.getItem(AUTH_TOKEN_KEY_LEGACY) ||
+    localStorage.getItem(AUTH_TOKEN_KEY) ||
+    (API_BASE_URL === "/api" ? localStorage.getItem(AUTH_TOKEN_KEY_LEGACY) : null);
+  if (legacy) {
+    setAuthToken(legacy);
+    return legacy;
   }
   return null;
 }
 
 export function setAuthToken(token: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+  // Não persistir no localStorage: fechar o navegador encerra a sessão (mais seguro)
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
   sessionStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
 }
 
 export function clearAuthToken(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem(AUTH_TOKEN_KEY);
   sessionStorage.removeItem(AUTH_TOKEN_KEY);
-  localStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
   sessionStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_TOKEN_KEY_LEGACY);
 }
 
 function authHeaders(): Record<string, string> {

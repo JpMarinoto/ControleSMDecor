@@ -160,6 +160,10 @@ export function FornecedorDetalhe() {
   const [editingProdutoId, setEditingProdutoId] = useState<number | null>(null);
   const [editingProdutoPreco, setEditingProdutoPreco] = useState("");
   const [savingProdutoId, setSavingProdutoId] = useState<number | null>(null);
+  const [selectedProdutoIds, setSelectedProdutoIds] = useState<Set<number>>(new Set());
+  const [bulkPrecoOpen, setBulkPrecoOpen] = useState(false);
+  const [bulkPrecoCusto, setBulkPrecoCusto] = useState("");
+  const [savingBulkPreco, setSavingBulkPreco] = useState(false);
   const [selectedCompraIds, setSelectedCompraIds] = useState<Set<string>>(new Set());
   const [comprasPage, setComprasPage] = useState(1);
   const [historicoPage, setHistoricoPage] = useState(1);
@@ -258,6 +262,56 @@ export function FornecedorDetalhe() {
     } finally {
       setSavingProdutoId(null);
       setEditingProdutoId(null);
+    }
+  };
+
+  const toggleProdutoSelecionado = (produtoId: number) => {
+    setSelectedProdutoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(produtoId)) next.delete(produtoId);
+      else next.add(produtoId);
+      return next;
+    });
+  };
+
+  const toggleTodosProdutos = () => {
+    setSelectedProdutoIds((prev) => {
+      if (prev.size === produtos.length) return new Set();
+      return new Set(produtos.map((p) => p.id));
+    });
+  };
+
+  const handleBulkPrecoCusto = async () => {
+    const v = parseFloat(bulkPrecoCusto.replace(",", "."));
+    if (isNaN(v) || v < 0) {
+      toast.error("Informe um preço válido.");
+      return;
+    }
+    const ids = [...selectedProdutoIds];
+    if (ids.length === 0) {
+      toast.error("Selecione ao menos um produto.");
+      return;
+    }
+    setSavingBulkPreco(true);
+    let ok = 0;
+    let fail = 0;
+    try {
+      for (const pid of ids) {
+        try {
+          await api.updateProduto(String(pid), { preco_custo: v });
+          ok += 1;
+        } catch {
+          fail += 1;
+        }
+      }
+      if (ok > 0) toast.success(`${ok} preço(s) atualizado(s).`);
+      if (fail > 0) toast.error(`${fail} falha(s) ao atualizar.`);
+      setBulkPrecoOpen(false);
+      setBulkPrecoCusto("");
+      setSelectedProdutoIds(new Set());
+      loadProdutos();
+    } finally {
+      setSavingBulkPreco(false);
     }
   };
 
@@ -1071,13 +1125,46 @@ export function FornecedorDetalhe() {
         </CardHeader>
         <CollapsibleContent>
         <CardContent className="pt-0">
-          <div className="space-y-2">
+          <div className="space-y-3">
               {produtos.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhum produto vinculado a este fornecedor. Vincule no Cadastro (Produtos).</p>
               ) : (
+                <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {selectedProdutoIds.size > 0
+                      ? `${selectedProdutoIds.size} selecionado(s)`
+                      : "Selecione produtos para alterar o preço em massa"}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={selectedProdutoIds.size === 0}
+                    onClick={() => {
+                      setBulkPrecoCusto("");
+                      setBulkPrecoOpen(true);
+                    }}
+                  >
+                    Alterar preço em massa
+                  </Button>
+                </div>
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={
+                            produtos.length > 0 && selectedProdutoIds.size === produtos.length
+                              ? true
+                              : selectedProdutoIds.size > 0
+                                ? "indeterminate"
+                                : false
+                          }
+                          onCheckedChange={() => toggleTodosProdutos()}
+                          aria-label="Selecionar todos"
+                        />
+                      </TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead className="text-right w-44">Preço de custo</TableHead>
                       <TableHead className="text-right w-28">Estoque</TableHead>
@@ -1088,6 +1175,13 @@ export function FornecedorDetalhe() {
                       const precoAtual = Number(p.preco_custo ?? 0);
                       return (
                       <TableRow key={p.id} className={p.ativo === false ? "opacity-60" : ""}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedProdutoIds.has(p.id)}
+                            onCheckedChange={() => toggleProdutoSelecionado(p.id)}
+                            aria-label={`Selecionar ${p.nome}`}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">
                           <span className="inline-flex items-center gap-2">
                             {p.nome}
@@ -1123,6 +1217,7 @@ export function FornecedorDetalhe() {
                     })}
                   </TableBody>
                 </Table>
+                </>
               )}
           </div>
         </CardContent>
@@ -1131,30 +1226,30 @@ export function FornecedorDetalhe() {
       </Collapsible>
       )}
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-start min-w-0">
         <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Compras{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="w-full rounded-md border border-border/50">
-            <Table className="w-full table-fixed text-sm">
+            <div className="w-full overflow-x-auto rounded-md border border-border/50">
+            <Table className="w-full min-w-[36rem] table-fixed text-sm">
               <TableHeader>
                 <TableRow>
                   {isChefe && <TableHead className="w-11 align-middle">Sel.</TableHead>}
                   {isChefe && (
-                    <TableHead className="w-[5.5rem] align-middle text-xs font-semibold leading-tight" title="Marcada paga (só visual)">
+                    <TableHead className="w-16 align-middle text-xs font-semibold leading-tight" title="Marcada paga (só visual)">
                       Marcada
                     </TableHead>
                   )}
-                  <TableHead className="w-[5.25rem] whitespace-nowrap align-middle">Data</TableHead>
+                  <TableHead className="w-[5.75rem] whitespace-nowrap align-middle">Data</TableHead>
                   <TableHead className="min-w-0 align-middle">Detalhe</TableHead>
-                  <TableHead className="w-[4.5rem] text-right align-middle tabular-nums">Qtd</TableHead>
+                  <TableHead className="w-[4.75rem] text-right align-middle tabular-nums whitespace-nowrap">Qtd</TableHead>
                   {mostrarPrecosListaCompras && (
-                    <TableHead className="w-[5.25rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr uni</TableHead>
+                    <TableHead className="w-[5.5rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr uni</TableHead>
                   )}
                   {isChefe && mostrarPrecosListaCompras && (
-                    <TableHead className="w-[5.5rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr total</TableHead>
+                    <TableHead className="w-[6rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr total</TableHead>
                   )}
                 </TableRow>
               </TableHeader>
@@ -1217,20 +1312,24 @@ export function FornecedorDetalhe() {
                               </TableCell>
                             )}
                             <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
-                            <TableCell className="min-w-0 align-top">
+                            <TableCell className="min-w-0 align-top whitespace-normal">
                               <div className="space-y-0.5">
-                                <span className="font-medium">{rotuloOrdemFornecedor(g.ordemId!, g.numeroVendaFornecedor)}</span>
-                                <span className="block text-xs text-muted-foreground">{g.lines.length} item(ns) nesta compra</span>
+                                <span className="block font-medium break-words" title={rotuloOrdemFornecedor(g.ordemId!, g.numeroVendaFornecedor)}>
+                                  {rotuloOrdemFornecedor(g.ordemId!, g.numeroVendaFornecedor)}
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {g.lines.length} item(ns) nesta compra
+                                </span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-right align-top tabular-nums text-muted-foreground">
+                            <TableCell className="text-right align-top tabular-nums text-muted-foreground whitespace-nowrap">
                               {qtdTotalGrupo > 0 ? qtdTotalGrupo : "—"}
                             </TableCell>
                             {mostrarPrecosListaCompras && (
                               <TableCell className="text-right align-top tabular-nums text-muted-foreground">—</TableCell>
                             )}
                             {isChefe && mostrarPrecosListaCompras && (
-                              <TableCell className="text-right align-top font-medium tabular-nums text-foreground">
+                              <TableCell className="text-right align-top font-medium tabular-nums text-foreground whitespace-nowrap">
                                 {formatCurrencyBrl(g.totalGrupo)}
                               </TableCell>
                             )}
@@ -1250,8 +1349,8 @@ export function FornecedorDetalhe() {
                               {isChefe && <TableCell />}
                               {isChefe && <TableCell />}
                               <TableCell />
-                              <TableCell className="min-w-0">
-                                <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground">
+                              <TableCell className="min-w-0 whitespace-normal">
+                                <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground break-words">
                                   {linha.material}
                                 </span>
                               </TableCell>
@@ -1299,7 +1398,7 @@ export function FornecedorDetalhe() {
                           </TableCell>
                         )}
                         {isChefe && (
-                          <TableCell>
+                          <TableCell className="align-top">
                             <div className="flex flex-wrap items-center gap-2">
                               {mpAv ? (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600/12 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
@@ -1319,7 +1418,7 @@ export function FornecedorDetalhe() {
                           </TableCell>
                         )}
                         <TableCell className="text-muted-foreground align-top">{formatDateOnly(linha.data)}</TableCell>
-                        <TableCell className="min-w-0 align-top break-words">{linha.material}</TableCell>
+                        <TableCell className="min-w-0 align-top whitespace-normal break-words">{linha.material}</TableCell>
                         <TableCell className="text-right tabular-nums align-top">
                           {linha.quantidade != null ? linha.quantidade : "—"}
                         </TableCell>
@@ -1368,15 +1467,15 @@ export function FornecedorDetalhe() {
                     <TableHeader>
                       <TableRow>
                         {isChefe && <TableHead className="w-11" />}
-                        {isChefe && <TableHead className="w-[5.5rem]" />}
-                        <TableHead className="w-[5.25rem] whitespace-nowrap">Data</TableHead>
+                        {isChefe && <TableHead className="w-16" />}
+                        <TableHead className="w-[5.75rem] whitespace-nowrap">Data</TableHead>
                         <TableHead className="min-w-0">Detalhe</TableHead>
                         <TableHead className="w-[4.5rem] text-right tabular-nums">Qtd</TableHead>
                         {mostrarPrecosListaCompras && (
                           <TableHead className="w-[5.25rem] text-right tabular-nums whitespace-nowrap">Vlr uni</TableHead>
                         )}
                         {isChefe && mostrarPrecosListaCompras && (
-                          <TableHead className="w-[5.5rem] text-right tabular-nums whitespace-nowrap">Vlr total</TableHead>
+                          <TableHead className="w-[5.75rem] text-right tabular-nums whitespace-nowrap">Vlr total</TableHead>
                         )}
                       </TableRow>
                     </TableHeader>
@@ -1394,9 +1493,9 @@ export function FornecedorDetalhe() {
                                 {isChefe && <TableCell className="align-top" />}
                                 {isChefe && <TableCell className="align-top" />}
                                 <TableCell className="text-muted-foreground align-top">{formatDateOnly(g.dataRef)}</TableCell>
-                                <TableCell className="min-w-0 align-top">
+                                <TableCell className="min-w-0 align-top whitespace-normal">
                                   <div className="space-y-0.5">
-                                    <span className="inline-flex items-center gap-1.5 font-medium">
+                                    <span className="inline-flex items-center gap-1.5 font-medium break-words">
                                       <Ban className="size-3.5 shrink-0 text-destructive" aria-hidden />
                                       {rotuloOrdemFornecedor(g.ordemId!, g.numeroVendaFornecedor)}
                                     </span>
@@ -1420,8 +1519,8 @@ export function FornecedorDetalhe() {
                                   {isChefe && <TableCell />}
                                   {isChefe && <TableCell />}
                                   <TableCell />
-                                  <TableCell className="min-w-0">
-                                    <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground">
+                                  <TableCell className="min-w-0 whitespace-normal">
+                                    <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground break-words">
                                       {linha.material}
                                     </span>
                                   </TableCell>
@@ -1451,7 +1550,7 @@ export function FornecedorDetalhe() {
                             {isChefe && <TableCell />}
                             {isChefe && <TableCell />}
                             <TableCell className="text-muted-foreground align-top">{formatDateOnly(linha.data)}</TableCell>
-                            <TableCell className="min-w-0 align-top break-words">{linha.material}</TableCell>
+                            <TableCell className="min-w-0 align-top whitespace-normal break-words">{linha.material}</TableCell>
                             <TableCell className="text-right tabular-nums align-top">
                               {linha.quantidade != null ? linha.quantidade : "—"}
                             </TableCell>
@@ -1489,16 +1588,29 @@ export function FornecedorDetalhe() {
           <CardHeader>
             <CardTitle>Pagamentos{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-5 sm:px-6">
             <div className="w-full overflow-x-auto rounded-md border border-border/50">
-            <Table className="min-w-[520px] text-sm">
+            <Table className="min-w-[34rem] w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[18%]" />
+                {isChefe ? <col className="w-[20%]" /> : null}
+                {isChefe ? <col className="w-[24%]" /> : null}
+                {isChefe ? <col className="w-[22%]" /> : null}
+                {isChefe ? <col className="w-[16%]" /> : null}
+              </colgroup>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Data</TableHead>
-                  {isChefe && <TableHead className="min-w-[8.5rem] text-right whitespace-nowrap">Valor</TableHead>}
-                  {isChefe && <TableHead>Forma de pagamento</TableHead>}
-                  {isChefe && <TableHead>Conta</TableHead>}
-                  {isChefe && <TableHead className="w-[100px] text-right">Ações</TableHead>}
+                  <TableHead className="text-center whitespace-nowrap">Data</TableHead>
+                  {isChefe && (
+                    <TableHead className="text-center whitespace-nowrap">Valor</TableHead>
+                  )}
+                  {isChefe && (
+                    <TableHead className="text-center whitespace-nowrap">Forma de pagamento</TableHead>
+                  )}
+                  {isChefe && (
+                    <TableHead className="text-center">Observação</TableHead>
+                  )}
+                  {isChefe && <TableHead className="text-center">Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1511,19 +1623,30 @@ export function FornecedorDetalhe() {
                 ) : (
                   exibirPagamentos.map((p) => (
                     <TableRow key={p.id}>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-center text-muted-foreground whitespace-nowrap">
                         {formatDateOnly(p.data)}
                       </TableCell>
                       {isChefe && (
-                        <TableCell className="text-right text-green-600 whitespace-nowrap tabular-nums">
+                        <TableCell className="text-center text-green-600 whitespace-nowrap tabular-nums">
                           {formatCurrencyBrl(p.valor)}
                         </TableCell>
                       )}
-                      {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
-                      {isChefe && <TableCell className="text-muted-foreground">{p.conta_nome || "-"}</TableCell>}
                       {isChefe && (
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-0.5">
+                        <TableCell className="text-center text-muted-foreground whitespace-nowrap">
+                          {p.metodo || "—"}
+                        </TableCell>
+                      )}
+                      {isChefe && (
+                        <TableCell
+                          className="text-center text-muted-foreground truncate"
+                          title={p.observacao || undefined}
+                        >
+                          {p.observacao?.trim() || "—"}
+                        </TableCell>
+                      )}
+                      {isChefe && (
+                        <TableCell className="text-center whitespace-nowrap">
+                          <div className="inline-flex items-center justify-center gap-0.5">
                             <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Editar" onClick={() => abrirEdicaoPagamento(p)}>
                               <Pencil className="size-4" />
                             </Button>
@@ -1549,6 +1672,36 @@ export function FornecedorDetalhe() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={bulkPrecoOpen} onOpenChange={setBulkPrecoOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Alterar preço em massa</DialogTitle>
+            <DialogDescription>
+              Define o mesmo preço de custo para {selectedProdutoIds.size} produto(s) selecionado(s).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="bulk-preco-custo-forn">Novo preço de custo</Label>
+            <Input
+              id="bulk-preco-custo-forn"
+              type="text"
+              inputMode="decimal"
+              value={bulkPrecoCusto}
+              onChange={(e) => setBulkPrecoCusto(e.target.value)}
+              placeholder="0,00"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setBulkPrecoOpen(false)} disabled={savingBulkPreco}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void handleBulkPrecoCusto()} disabled={savingBulkPreco}>
+              {savingBulkPreco ? "Salvando…" : "Aplicar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmacaoComSenhaDialog
         open={pagamentoExcluir != null}

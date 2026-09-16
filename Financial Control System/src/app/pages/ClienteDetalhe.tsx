@@ -1644,30 +1644,30 @@ export function ClienteDetalhe() {
         </Card>
       )}
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
+      <div className="grid gap-6 md:grid-cols-2 md:items-start min-w-0">
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Vendas{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="w-full rounded-md border border-border/50">
-            <Table className="w-full table-fixed text-sm">
+            <div className="w-full overflow-x-auto rounded-md border border-border/50">
+            <Table className="w-full min-w-[36rem] table-fixed text-sm">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-11 align-middle">Sel.</TableHead>
                   {isChefe && (
-                    <TableHead className="w-[5.5rem] align-middle text-xs font-semibold leading-tight" title="Marcada paga (só visual)">
+                    <TableHead className="w-16 align-middle text-xs font-semibold leading-tight" title="Marcada paga (só visual)">
                       Marcada
                     </TableHead>
                   )}
-                  <TableHead className="w-[5.25rem] whitespace-nowrap align-middle">Data</TableHead>
+                  <TableHead className="w-[5.75rem] whitespace-nowrap align-middle">Data</TableHead>
                   <TableHead className="min-w-0 align-middle">Detalhe</TableHead>
-                  <TableHead className="w-[4.5rem] text-right align-middle tabular-nums">Qtd</TableHead>
+                  <TableHead className="w-[4.75rem] text-right align-middle tabular-nums whitespace-nowrap">Qtd</TableHead>
                   {isChefe && (
-                    <TableHead className="w-[5.25rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr uni</TableHead>
+                    <TableHead className="w-[5.5rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr uni</TableHead>
                   )}
                   {isChefe && (
-                    <TableHead className="w-[5.5rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr total</TableHead>
+                    <TableHead className="w-[6rem] text-right align-middle tabular-nums whitespace-nowrap">Vlr total</TableHead>
                   )}
                 </TableRow>
               </TableHeader>
@@ -1720,9 +1720,9 @@ export function ClienteDetalhe() {
                             </TableCell>
                           )}
                           <TableCell className="text-muted-foreground align-top">{formatDateOnly(v.data)}</TableCell>
-                          <TableCell className="min-w-0 align-top">
+                          <TableCell className="min-w-0 align-top whitespace-normal">
                             <div className="space-y-0.5">
-                              <span className="font-medium">Venda #{v.id}</span>
+                              <span className="block font-medium">Venda #{v.id}</span>
                               <span className="block text-xs text-muted-foreground">
                                 {itens.length} item(ns) nesta venda
                               </span>
@@ -1735,7 +1735,7 @@ export function ClienteDetalhe() {
                             <TableCell className="text-right align-top tabular-nums text-muted-foreground">—</TableCell>
                           )}
                           {isChefe && (
-                            <TableCell className="text-right align-top font-medium tabular-nums text-foreground">
+                            <TableCell className="text-right align-top font-medium tabular-nums text-foreground whitespace-nowrap">
                               {formatCurrencyBrl(v.total)}
                             </TableCell>
                           )}
@@ -1754,8 +1754,8 @@ export function ClienteDetalhe() {
                               <TableCell />
                               {isChefe && <TableCell />}
                               <TableCell />
-                              <TableCell className="min-w-0">
-                                <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground">
+                              <TableCell className="min-w-0 whitespace-normal">
+                                <span className="ml-1 block border-l-2 border-muted pl-3 text-muted-foreground break-words">
                                   {item.produto}
                                 </span>
                               </TableCell>
@@ -1788,7 +1788,7 @@ export function ClienteDetalhe() {
                             <TableCell />
                             {isChefe && <TableCell />}
                             <TableCell />
-                            <TableCell className="min-w-0 text-muted-foreground">Nenhum item registrado</TableCell>
+                            <TableCell className="min-w-0 text-muted-foreground whitespace-normal">Nenhum item registrado</TableCell>
                             <TableCell className="text-right tabular-nums">—</TableCell>
                             {isChefe && <TableCell className="text-right tabular-nums">—</TableCell>}
                             {isChefe && <TableCell className="text-right tabular-nums">—</TableCell>}
@@ -1810,19 +1810,33 @@ export function ClienteDetalhe() {
             />
           </CardContent>
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <CardHeader>
             <CardTitle>Pagamentos{limites ? " (no período)" : ""}</CardTitle>
           </CardHeader>
-          <CardContent>
-            <Table>
+          <CardContent className="px-5 sm:px-6">
+            <div className="w-full overflow-x-auto rounded-md border border-border/50">
+            <Table className="min-w-[34rem] w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-[18%]" />
+                {isChefe ? <col className="w-[20%]" /> : null}
+                {isChefe ? <col className="w-[24%]" /> : null}
+                {isChefe ? <col className="w-[22%]" /> : null}
+                {isChefe ? <col className="w-[16%]" /> : null}
+              </colgroup>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Data</TableHead>
-                  {isChefe && <TableHead className="text-right">Valor</TableHead>}
-                  {isChefe && <TableHead>Forma de pagamento</TableHead>}
-                  {isChefe && <TableHead>Conta</TableHead>}
-                  {isChefe && <TableHead className="w-[100px] text-right">Ações</TableHead>}
+                  <TableHead className="text-center whitespace-nowrap">Data</TableHead>
+                  {isChefe && (
+                    <TableHead className="text-center whitespace-nowrap">Valor</TableHead>
+                  )}
+                  {isChefe && (
+                    <TableHead className="text-center whitespace-nowrap">Forma de pagamento</TableHead>
+                  )}
+                  {isChefe && (
+                    <TableHead className="text-center">Observação</TableHead>
+                  )}
+                  {isChefe && <TableHead className="text-center">Ações</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1835,15 +1849,30 @@ export function ClienteDetalhe() {
                 ) : (
                   exibirPagamentos.map((p) => (
                     <TableRow key={p.id}>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="text-center text-muted-foreground whitespace-nowrap">
                         {formatDateOnly(p.data)}
                       </TableCell>
-                      {isChefe && <TableCell className="text-right text-green-600">{formatCurrencyBrl(p.valor)}</TableCell>}
-                      {isChefe && <TableCell className="text-muted-foreground">{p.metodo || "-"}</TableCell>}
-                      {isChefe && <TableCell className="text-muted-foreground">{p.conta_nome || "-"}</TableCell>}
                       {isChefe && (
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-0.5">
+                        <TableCell className="text-center text-green-600 whitespace-nowrap tabular-nums">
+                          {formatCurrencyBrl(p.valor)}
+                        </TableCell>
+                      )}
+                      {isChefe && (
+                        <TableCell className="text-center text-muted-foreground whitespace-nowrap">
+                          {p.metodo || "—"}
+                        </TableCell>
+                      )}
+                      {isChefe && (
+                        <TableCell
+                          className="text-center text-muted-foreground truncate"
+                          title={p.observacao || undefined}
+                        >
+                          {p.observacao?.trim() || "—"}
+                        </TableCell>
+                      )}
+                      {isChefe && (
+                        <TableCell className="text-center whitespace-nowrap">
+                          <div className="inline-flex items-center justify-center gap-0.5">
                             <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Editar" onClick={() => abrirEdicaoPagamento(p)}>
                               <Pencil className="size-4" />
                             </Button>
@@ -1865,6 +1894,7 @@ export function ClienteDetalhe() {
                 )}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       </div>

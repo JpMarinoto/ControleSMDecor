@@ -51,8 +51,12 @@ function clienteSearchText(c: {
   return [c.nome, c.cpf, c.cnpj, c.telefone].filter(Boolean).join(" ");
 }
 
-function produtoRotulo(p: { nome?: string; id?: number | string }): string {
-  return String(p.nome ?? "").trim() || `Produto #${p.id}`;
+function produtoRotulo(p: { nome?: string; id?: number | string }, nomesDuplicados?: Set<string>): string {
+  const base = String(p.nome ?? "").trim() || (p.id != null ? `Produto #${p.id}` : "Produto");
+  if (nomesDuplicados && nomesDuplicados.has(base.toLowerCase()) && p.id != null) {
+    return `${base} (#${p.id})`;
+  }
+  return base;
 }
 
 function precoUniProdutoVenda(p: {
@@ -787,6 +791,20 @@ export function Venda() {
 
   const produtoSelecionado = produtos.find((p: any) => String(p.id) === produtoId);
 
+  const nomesProdutoDuplicados = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of produtos) {
+      const n = String(p.nome ?? "").trim().toLowerCase();
+      if (!n) continue;
+      counts.set(n, (counts.get(n) ?? 0) + 1);
+    }
+    const dups = new Set<string>();
+    for (const [n, c] of counts) {
+      if (c > 1) dups.add(n);
+    }
+    return dups;
+  }, [produtos]);
+
   const produtosAgrupados = useMemo(() => {
     const m = new Map<string, typeof produtos>();
     for (const p of produtos) {
@@ -806,17 +824,17 @@ export function Venda() {
     const q = norm(produtoPickerQuery);
     if (!q) return produtosAgrupados;
     return produtosAgrupados
-      .map(([cat, list]) => [cat, list.filter((p: any) => norm(produtoRotulo(p)).includes(q))] as const)
+      .map(([cat, list]) => [cat, list.filter((p: any) => norm(produtoRotulo(p, nomesProdutoDuplicados)).includes(q))] as const)
       .filter(([, list]) => list.length > 0);
-  }, [produtosAgrupados, produtoPickerQuery]);
+  }, [produtosAgrupados, produtoPickerQuery, nomesProdutoDuplicados]);
 
   const addItemFiltradosAgrupados = useMemo(() => {
     const q = norm(addItemPickerQuery);
     if (!q) return produtosAgrupados;
     return produtosAgrupados
-      .map(([cat, list]) => [cat, list.filter((p: any) => norm(produtoRotulo(p)).includes(q))] as const)
+      .map(([cat, list]) => [cat, list.filter((p: any) => norm(produtoRotulo(p, nomesProdutoDuplicados)).includes(q))] as const)
       .filter(([, list]) => list.length > 0);
-  }, [produtosAgrupados, addItemPickerQuery]);
+  }, [produtosAgrupados, addItemPickerQuery, nomesProdutoDuplicados]);
   const precoNum = precoUnitario
     ? parseFloat(precoUnitario.replace(",", "."))
     : (produtoSelecionado?.preco_venda ?? produtoSelecionado?.precoInicial ?? 0);
@@ -1088,7 +1106,7 @@ export function Venda() {
                       aria-expanded={produtoPickerOpen}
                     >
                       <span className="truncate">
-                        {produtoSelecionado ? produtoRotulo(produtoSelecionado) : "Selecione um produto"}
+                        {produtoSelecionado ? produtoRotulo(produtoSelecionado, nomesProdutoDuplicados) : "Selecione um produto"}
                       </span>
                       <ChevronsUpDown className="size-4 opacity-60" />
                     </Button>
@@ -1115,13 +1133,13 @@ export function Venda() {
                               {list.map((p: any) => (
                                 <CommandItem
                                   key={p.id}
-                                  value={p.nome}
+                                  value={`${p.id} ${produtoRotulo(p, nomesProdutoDuplicados)}`}
                                   onSelect={() => {
                                     selecionarProdutoVenda(String(p.id));
                                     setProdutoPickerOpen(false);
                                   }}
                                 >
-                                  {produtoRotulo(p)}
+                                  {produtoRotulo(p, nomesProdutoDuplicados)}
                                 </CommandItem>
                               ))}
                             </CommandGroup>
@@ -1158,13 +1176,13 @@ export function Venda() {
                                     {list.map((p: any) => (
                                       <CommandItem
                                         key={p.id}
-                                        value={p.nome}
+                                        value={`${p.id} ${produtoRotulo(p, nomesProdutoDuplicados)}`}
                                         onSelect={() => {
                                           selecionarProdutoVenda(String(p.id));
                                           setProdutoPickerOpen(false);
                                         }}
                                       >
-                                        {produtoRotulo(p)}
+                                        {produtoRotulo(p, nomesProdutoDuplicados)}
                                       </CommandItem>
                                     ))}
                                   </div>
@@ -1772,7 +1790,7 @@ export function Venda() {
                         <span className="truncate">
                           {(() => {
                             const p = produtos.find((x: any) => String(x.id) === String(addItemProdutoId));
-                            return p ? produtoRotulo(p) : "Produto";
+                            return p ? produtoRotulo(p, nomesProdutoDuplicados) : "Produto";
                           })()}
                         </span>
                         <ChevronsUpDown className="size-4 opacity-60" />
@@ -1796,7 +1814,7 @@ export function Venda() {
                                 {list.map((p: any) => (
                                   <CommandItem
                                     key={p.id}
-                                    value={p.nome}
+                                    value={`${p.id} ${produtoRotulo(p, nomesProdutoDuplicados)}`}
                                     onSelect={() => {
                                       const pid = String(p.id);
                                       setAddItemProdutoId(pid);
@@ -1804,7 +1822,7 @@ export function Venda() {
                                       setAddItemPickerOpen(false);
                                     }}
                                   >
-                                    <span className="truncate">{produtoRotulo(p)}</span>
+                                    <span className="truncate">{produtoRotulo(p, nomesProdutoDuplicados)}</span>
                                     {isChefe && (
                                       <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                                         {formatCurrencyBrl(Number(p.preco_venda ?? p.precoInicial ?? 0))}
@@ -1846,7 +1864,7 @@ export function Venda() {
                                       {list.map((p: any) => (
                                         <CommandItem
                                           key={p.id}
-                                          value={p.nome}
+                                          value={`${p.id} ${produtoRotulo(p, nomesProdutoDuplicados)}`}
                                           onSelect={() => {
                                             const pid = String(p.id);
                                             setAddItemProdutoId(pid);
@@ -1854,7 +1872,7 @@ export function Venda() {
                                             setAddItemPickerOpen(false);
                                           }}
                                         >
-                                          <span className="truncate">{produtoRotulo(p)}</span>
+                                          <span className="truncate">{produtoRotulo(p, nomesProdutoDuplicados)}</span>
                                           {isChefe && (
                                             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                                               {formatCurrencyBrl(Number(p.preco_venda ?? p.precoInicial ?? 0))}

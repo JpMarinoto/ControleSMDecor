@@ -69,17 +69,24 @@ interface OrdemCompra {
   total: number;
 }
 
-type CompraPickOption = { id: string | number; nome: string };
+type CompraPickOption = { id: string | number; nome: string; categoria?: string };
 
 function compraOptionRotulo(o: CompraPickOption): string {
   return o.nome;
 }
 
-function produtoCompraOption(p: { id: number | string; nome?: string }): CompraPickOption {
+function produtoCompraOption(p: {
+  id: number | string;
+  nome?: string;
+  categoria_nome?: string | null;
+  categoriaNome?: string | null;
+}): CompraPickOption {
   const base = String(p.nome ?? "").trim() || `Produto #${p.id}`;
+  const cat = String(p.categoria_nome ?? p.categoriaNome ?? "").trim();
   return {
     id: p.id,
     nome: base,
+    categoria: cat || undefined,
   };
 }
 
@@ -152,7 +159,12 @@ function CompraSearchableSelect({
     () =>
       options.map((o) => {
         const label = compraOptionRotulo(o);
-        return { id: o.id, label, searchText: label };
+        return {
+          id: o.id,
+          label,
+          searchText: [label, o.categoria].filter(Boolean).join(" "),
+          group: o.categoria,
+        };
       }),
     [options],
   );
@@ -271,6 +283,17 @@ function parseQtdInteira(raw: string | number): number | null {
   return r > 0 ? r : null;
 }
 
+/** Preço unitário pt-BR (vírgula ou ponto) → número; inválido → NaN. */
+function parsePrecoDecimal(raw: string | number): number {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : NaN;
+  const s = String(raw ?? "").trim().replace(/\s/g, "");
+  if (!s) return NaN;
+  const milharOpcDecimal = /^(\d{1,3}(?:\.\d{3})+)(?:,\d+)?$/;
+  const norm = milharOpcDecimal.test(s) ? s.replace(/\./g, "").replace(",", ".") : s.replace(",", ".");
+  const n = parseFloat(norm);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 export function Compra() {
   const [ordens, setOrdens] = useState<OrdemCompra[]>([]);
   const [produtosCompra, setProdutosCompra] = useState<any[]>([]);
@@ -315,7 +338,15 @@ export function Compra() {
       fornecedorIdDetalheCompra
         ? produtosCompra
             .filter((p: any) => produtoDoFornecedor(p, fornecedorIdDetalheCompra))
-            .sort((a: any, b: any) => String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR"))
+            .sort((a: any, b: any) => {
+              const ca = String(a.categoria_nome ?? "").trim() || "Sem categoria";
+              const cb = String(b.categoria_nome ?? "").trim() || "Sem categoria";
+              if (ca === "Sem categoria" && cb !== "Sem categoria") return 1;
+              if (cb === "Sem categoria" && ca !== "Sem categoria") return -1;
+              const byCat = ca.localeCompare(cb, "pt-BR");
+              if (byCat !== 0) return byCat;
+              return String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR");
+            })
         : [],
     [produtosCompra, fornecedorIdDetalheCompra],
   );
@@ -722,7 +753,7 @@ export function Compra() {
       return;
     }
     if (isChefe) {
-      const preco = parseFloat(editPreco.replace(",", "."));
+      const preco = parsePrecoDecimal(editPreco);
       if (isNaN(preco) || preco < 0) {
         toast.error("Preço deve ser válido");
         return;
@@ -731,7 +762,13 @@ export function Compra() {
     setItensForm((prev) =>
       prev.map((i) =>
         i.id === editingItemId
-          ? { ...i, quantidade: String(qtd), ...(isChefe ? { precoUnitario: editPreco } : {}) }
+          ? {
+              ...i,
+              quantidade: String(qtd),
+              ...(isChefe
+                ? { precoUnitario: String(parsePrecoDecimal(editPreco)) }
+                : {}),
+            }
           : i
       )
     );
@@ -760,7 +797,7 @@ export function Compra() {
       toast.error("Quantidade deve ser válida");
       return;
     }
-    const preco = isChefe ? parseFloat(editCompraPreco.replace(",", ".")) : editingItem.preco_no_dia;
+    const preco = isChefe ? parsePrecoDecimal(editCompraPreco) : editingItem.preco_no_dia;
     if (isChefe && (isNaN(preco) || preco < 0)) {
       toast.error("Preço deve ser válido");
       return;
@@ -969,14 +1006,14 @@ export function Compra() {
     const itensPayload = itensForm
       .filter((item) => {
         const qtd = parseQtdInteira(item.quantidade);
-        const preco = parseFloat(item.precoUnitario.replace(',', '.'));
+        const preco = parsePrecoDecimal(item.precoUnitario);
         return item.produtoId && qtd !== null && qtd > 0 && !isNaN(preco) && preco > 0;
       })
       .map((item) => ({
         tipo: "produto" as const,
         produto: Number(item.produtoId),
         quantidade: parseQtdInteira(item.quantidade) as number,
-        preco_no_dia: parseFloat(item.precoUnitario.replace(',', '.')),
+        preco_no_dia: parsePrecoDecimal(item.precoUnitario),
       }));
     if (itensPayload.length === 0) {
       toast.error("Adicione itens válidos (produto, quantidade e preço)");
@@ -1129,9 +1166,15 @@ export function Compra() {
                     ) : (() => {
                       const produtosLista = produtosCompra
                         .filter((p: any) => produtoDoFornecedor(p, fornecedorId))
-                        .sort((a: any, b: any) =>
-                          String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR")
-                        );
+                        .sort((a: any, b: any) => {
+                          const ca = String(a.categoria_nome ?? "").trim() || "Sem categoria";
+                          const cb = String(b.categoria_nome ?? "").trim() || "Sem categoria";
+                          if (ca === "Sem categoria" && cb !== "Sem categoria") return 1;
+                          if (cb === "Sem categoria" && ca !== "Sem categoria") return -1;
+                          const byCat = ca.localeCompare(cb, "pt-BR");
+                          if (byCat !== 0) return byCat;
+                          return String(a.nome ?? "").localeCompare(String(b.nome ?? ""), "pt-BR");
+                        });
 
                       return produtosLista.length > 0 ? (
                         <CompraSearchableSelect
@@ -1187,7 +1230,12 @@ export function Compra() {
                   <Label>Total deste item</Label>
                   <div className="h-10 px-3 py-2 border rounded-md bg-muted flex items-center">
                     <span className="text-lg font-semibold">
-                      {formatCurrencyBrl(parseFloat(quantidade) * parseFloat(precoUnitario))}
+                      {(() => {
+                        const qtd = parseQtdInteira(quantidade) ?? parseFloat(String(quantidade).replace(",", "."));
+                        const preco = parsePrecoDecimal(precoUnitario);
+                        const total = Number.isFinite(qtd) && Number.isFinite(preco) ? qtd * preco : 0;
+                        return formatCurrencyBrl(total);
+                      })()}
                     </span>
                   </div>
                 </div>
@@ -1218,8 +1266,11 @@ export function Compra() {
                       }
                       const precoBase =
                         produtosCompra.find((p: any) => String(p.id) === produtoId)?.preco_custo ?? 0;
+                      const precoDigitado = parsePrecoDecimal(precoUnitario);
                       const precoParaItem = isChefe
-                        ? (parseFloat(String(precoUnitario).replace(',', '.')) || Number(precoBase))
+                        ? (Number.isFinite(precoDigitado) && precoDigitado > 0
+                            ? precoDigitado
+                            : Number(precoBase))
                         : Number(precoBase);
                       if (isNaN(precoParaItem) || precoParaItem <= 0) {
                         toast.error('Preço não definido. Informe o preço ou cadastre o valor base.');
@@ -1266,8 +1317,10 @@ export function Compra() {
                           ),
                         );
                         const qtdItem = parseQtdInteira(item.quantidade) ?? 0;
-                        const precoItem = parseFloat(item.precoUnitario.replace(',', '.') || '0');
+                        const precoItem = parsePrecoDecimal(item.precoUnitario);
                         const isEditing = editingItemId === item.id;
+                        const totalEdit =
+                          (parseQtdInteira(editQtd) ?? 0) * (parsePrecoDecimal(editPreco) || 0);
                         return (
                           <TableRow key={item.id} className={isEditing ? "bg-primary/5 border-l-2 border-l-primary" : ""}>
                             <TableCell className="align-middle truncate">{label}</TableCell>
@@ -1297,11 +1350,7 @@ export function Compra() {
                                 )}
                                 {isChefe && (
                                   <TableCell className="text-right align-middle tabular-nums">
-                                    {formatCurrencyBrl(
-                                      !isNaN(parseFloat(editQtd.replace(",", ".")) * parseFloat(editPreco.replace(",", ".")))
-                                        ? parseFloat(editQtd.replace(",", ".")) * parseFloat(editPreco.replace(",", "."))
-                                        : 0
-                                    )}
+                                    {formatCurrencyBrl(Number.isFinite(totalEdit) ? totalEdit : 0)}
                                   </TableCell>
                                 )}
                                 <TableCell className="text-right align-middle py-2">
@@ -1660,7 +1709,7 @@ export function Compra() {
                               toast.error("Informe a quantidade");
                               return;
                             }
-                            const preco = parseFloat(String(addDetailPreco).replace(",", "."));
+                            const preco = parsePrecoDecimal(addDetailPreco);
                             if (!Number.isFinite(preco) || preco < 0) {
                               toast.error("Informe o preço unitário");
                               return;
