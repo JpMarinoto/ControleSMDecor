@@ -1020,9 +1020,10 @@ export function Cadastro() {
     }).format(Number(value));
   };
 
-  const categoriasProduto = categorias.filter(c => c.tipo === 'produto');
-  const categoriasMaterial = categorias.filter(c => c.tipo === 'material');
-  const categoriasParaProdutoForm = categoriasProduto;
+  const categoriasParaProdutoForm = useMemo(
+    () => [...categorias].sort((a, b) => (a.nome || "").localeCompare(b.nome || "", "pt-BR")),
+    [categorias],
+  );
   const insumosDisponiveis = useMemo(
     () =>
       produtos
@@ -1628,7 +1629,7 @@ export function Cadastro() {
                         {categoriasParaProdutoForm.length > 0 ? (
                           categoriasParaProdutoForm.map((cat) => (
                             <SelectItem key={cat.id} value={String(cat.id)}>
-                              {cat.nome || "(Sem nome)"}{cat.tipo === "material" ? " (material)" : ""}
+                              {cat.nome || "(Sem nome)"}
                             </SelectItem>
                           ))
                         ) : (

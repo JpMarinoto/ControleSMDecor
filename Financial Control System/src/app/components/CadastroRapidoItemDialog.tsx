@@ -139,7 +139,7 @@ export function CadastroRapidoItemDialog({
       api.getProdutos().catch(() => []),
     ]).then(([cats, forns, prods]) => {
       const allCats = Array.isArray(cats) ? cats : [];
-      setCategorias(allCats.filter((c: Categoria) => c.tipo === "produto"));
+      setCategorias(allCats);
       setFornecedores(Array.isArray(forns) ? forns : []);
       const list = Array.isArray(prods) ? prods : [];
       setMateriais(
