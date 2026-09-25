@@ -204,37 +204,39 @@ export function Venda() {
     loadData();
   }, []);
 
-  const aplicarPrecoUniVenda = (pid: string, cliente?: string) => {
+  /** Preço da venda = preço de venda atual do cadastro (não o histórico do cliente). */
+  const recarregarProdutos = async () => {
+    const list = await api.getProdutos().catch(() => null);
+    if (Array.isArray(list)) {
+      setProdutos(list);
+      return list;
+    }
+    return produtos;
+  };
+
+  const aplicarPrecoUniVenda = async (pid: string) => {
     if (!pid) {
       setPrecoUnitario("");
       return;
     }
-    const prod = produtos.find((p: any) => String(p.id) === pid);
+    const list = await recarregarProdutos();
+    const prod = list.find((p: any) => String(p.id) === pid);
     setPrecoUnitario(precoUniProdutoVenda(prod));
-    const cid = cliente ?? clienteId;
-    if (!cid) return;
-    api.getUltimoPrecoClienteProduto(cid, pid).then((preco) => {
-      if (preco != null && preco > 0) setPrecoUnitario(String(preco));
-    }).catch(() => {});
   };
 
   const selecionarProdutoVenda = (pid: string) => {
     setProdutoId(pid);
-    aplicarPrecoUniVenda(pid);
+    void aplicarPrecoUniVenda(pid);
   };
 
-  const aplicarAddItemPrecoVenda = (pid: string) => {
+  const aplicarAddItemPrecoVenda = async (pid: string) => {
     if (!pid) {
       setAddItemPreco("");
       return;
     }
-    const prod = produtos.find((p: any) => String(p.id) === pid);
+    const list = await recarregarProdutos();
+    const prod = list.find((p: any) => String(p.id) === pid);
     setAddItemPreco(precoUniProdutoVenda(prod));
-    const clienteVenda = detailVenda?.cliente;
-    if (!clienteVenda) return;
-    api.getUltimoPrecoClienteProduto(String(clienteVenda), pid).then((preco) => {
-      if (preco != null && preco > 0) setAddItemPreco(String(preco));
-    }).catch(() => {});
   };
 
 
@@ -256,10 +258,15 @@ export function Venda() {
     }
   };
 
-  // Cada cliente tem seu preço: buscar último preço cobrado para este cliente neste produto
+  // Ao trocar o produto, preenche com o preço atual do cadastro
   useEffect(() => {
-    aplicarPrecoUniVenda(produtoId);
-  }, [clienteId, produtoId, produtos]);
+    if (!produtoId) {
+      setPrecoUnitario("");
+      return;
+    }
+    const prod = produtos.find((p: any) => String(p.id) === produtoId);
+    setPrecoUnitario(precoUniProdutoVenda(prod));
+  }, [produtoId]);
 
   const loadData = async () => {
     try {
@@ -716,12 +723,12 @@ export function Venda() {
       }
     } else {
       try {
-        const preco = await api.getUltimoPrecoClienteProduto(String(detailVenda.cliente), addItemProdutoId);
-        if (preco == null || preco <= 0) {
-          const prod = produtos.find((p: any) => String(p.id) === addItemProdutoId);
-          precoNumber = Number(prod?.preco_venda ?? prod?.precoInicial ?? 0) || 0;
-        } else {
-          precoNumber = preco;
+        const list = await recarregarProdutos();
+        const prod = list.find((p: any) => String(p.id) === addItemProdutoId);
+        precoNumber = Number(prod?.preco_venda ?? prod?.precoInicial ?? 0) || 0;
+        if (precoNumber <= 0) {
+          const preco = await api.getUltimoPrecoClienteProduto(String(detailVenda.cliente), addItemProdutoId);
+          precoNumber = preco != null && preco > 0 ? preco : 0;
         }
         if (precoNumber <= 0) {
           toast.error("Preço não disponível para este produto. Peça ao chefe para definir.");
@@ -853,20 +860,16 @@ export function Venda() {
 
     let precoParaItem = precoNum;
     if (isNaN(precoParaItem) || precoParaItem <= 0) {
-      if (!clienteId) {
-        toast.error("Selecione o cliente para usar o preço automático.");
-        return;
-      }
       try {
-        const precoApi = await api.getUltimoPrecoClienteProduto(clienteId, produtoId);
-        if (precoApi != null && precoApi > 0) {
-          precoParaItem = precoApi;
-        } else {
-          const prod = produtos.find((p: any) => String(p.id) === produtoId);
-          precoParaItem = Number(prod?.preco_venda ?? prod?.precoInicial ?? 0) || 0;
+        const list = await recarregarProdutos();
+        const prod = list.find((p: any) => String(p.id) === produtoId);
+        precoParaItem = Number(prod?.preco_venda ?? prod?.precoInicial ?? 0) || 0;
+        if (precoParaItem <= 0 && clienteId) {
+          const precoApi = await api.getUltimoPrecoClienteProduto(clienteId, produtoId);
+          if (precoApi != null && precoApi > 0) precoParaItem = precoApi;
         }
         if (precoParaItem <= 0) {
-          toast.error("Preço não definido para este cliente/produto. Informe o preço ou cadastre o valor.");
+          toast.error("Preço não definido no cadastro do produto. Informe o preço ou cadastre o valor.");
           return;
         }
       } catch {

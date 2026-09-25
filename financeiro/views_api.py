@@ -1359,13 +1359,18 @@ class UltimoPrecoClienteProduto(APIView):
         produto_id = request.GET.get('produto_id')
         if not cliente_id or not produto_id:
             return Response({'preco': None})
-        # 1) Preço específico cadastrado para este cliente (pelo chefe)
+        # Prioridade: preço atual do cadastro do produto (fonte da verdade na venda).
+        # Preço por cliente e histórico só entram se o cadastro estiver zerado.
+        prod = Produto.objects.filter(pk=produto_id).first()
+        if prod and prod.ativo:
+            pv = float(prod.preco_venda or 0)
+            if pv > 0:
+                return Response({'preco': pv})
         preco_cad = PrecoClienteProduto.objects.filter(
             cliente_id=cliente_id, produto_id=produto_id
         ).values('preco').first()
         if preco_cad is not None:
             return Response({'preco': float(preco_cad['preco'])})
-        # 2) Último preço cobrado neste cliente+produto
         item = (
             ItemVenda.objects
             .filter(venda__cliente_id=cliente_id, produto_id=produto_id)
@@ -1375,10 +1380,8 @@ class UltimoPrecoClienteProduto(APIView):
         )
         if item:
             return Response({'preco': float(item['preco_unitario'])})
-        # 3) Preço padrão do produto (só se ainda ativo no cadastro)
-        prod = Produto.objects.filter(pk=produto_id).first()
         if prod and prod.ativo:
-            return Response({'preco': float(prod.preco_venda)})
+            return Response({'preco': float(prod.preco_venda or 0)})
         return Response({'preco': None})
 
 
