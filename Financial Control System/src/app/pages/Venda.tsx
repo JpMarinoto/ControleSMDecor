@@ -8,7 +8,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import {
   AlertDialog,
@@ -1125,14 +1125,29 @@ export function Venda() {
                         />
                       </div>
                       <CommandList className="max-h-[320px]">
-                        <CommandEmpty>Nenhum produto encontrado.</CommandEmpty>
                         {produtos.length === 0 ? (
                           <CommandGroup heading="Produtos">
                             <CommandItem disabled>Nenhum produto cadastrado</CommandItem>
                           </CommandGroup>
+                        ) : produtoPickerQuery.trim() && produtosFiltradosAgrupados.length === 0 ? (
+                          <p className="py-6 text-center text-sm text-muted-foreground">
+                            Nenhum produto corresponde à pesquisa.
+                          </p>
                         ) : produtoPickerQuery.trim() ? (
                           produtosFiltradosAgrupados.map(([cat, list]) => (
-                            <CommandGroup key={cat} heading={cat}>
+                            <CommandGroup
+                              key={cat}
+                              heading={cat}
+                              className={
+                                "p-0 " +
+                                "[&_[cmdk-group-heading]]:sticky [&_[cmdk-group-heading]]:top-0 [&_[cmdk-group-heading]]:z-10 " +
+                                "[&_[cmdk-group-heading]]:bg-primary/5 [&_[cmdk-group-heading]]:text-primary " +
+                                "[&_[cmdk-group-heading]]:border-y [&_[cmdk-group-heading]]:border-primary/30 " +
+                                "[&_[cmdk-group-heading]]:border-l-4 [&_[cmdk-group-heading]]:border-l-primary " +
+                                "[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-2.5 " +
+                                "[&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide"
+                              }
+                            >
                               {list.map((p: any) => (
                                 <CommandItem
                                   key={p.id}
@@ -1166,10 +1181,10 @@ export function Venda() {
                                 <CollapsibleTrigger asChild>
                                   <button
                                     type="button"
-                                    className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold border-b hover:bg-muted/40"
+                                    className="flex w-full items-center justify-between border-y border-primary/30 border-l-4 border-l-primary bg-primary/5 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-primary hover:bg-primary/10"
                                   >
                                     <span className="truncate">{cat}</span>
-                                    <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                                    <span className="text-xs font-normal tabular-nums text-primary/70">
                                       {list.length}
                                     </span>
                                   </button>
@@ -1810,10 +1825,25 @@ export function Venda() {
                           />
                         </div>
                         <CommandList className="max-h-[320px]">
-                          <CommandEmpty>Nenhum produto encontrado.</CommandEmpty>
-                          {addItemPickerQuery.trim() ? (
+                          {addItemPickerQuery.trim() && addItemFiltradosAgrupados.length === 0 ? (
+                            <p className="py-6 text-center text-sm text-muted-foreground">
+                              Nenhum produto corresponde à pesquisa.
+                            </p>
+                          ) : addItemPickerQuery.trim() ? (
                             addItemFiltradosAgrupados.map(([cat, list]) => (
-                              <CommandGroup key={cat} heading={cat}>
+                              <CommandGroup
+                              key={cat}
+                              heading={cat}
+                              className={
+                                "p-0 " +
+                                "[&_[cmdk-group-heading]]:sticky [&_[cmdk-group-heading]]:top-0 [&_[cmdk-group-heading]]:z-10 " +
+                                "[&_[cmdk-group-heading]]:bg-primary/5 [&_[cmdk-group-heading]]:text-primary " +
+                                "[&_[cmdk-group-heading]]:border-y [&_[cmdk-group-heading]]:border-primary/30 " +
+                                "[&_[cmdk-group-heading]]:border-l-4 [&_[cmdk-group-heading]]:border-l-primary " +
+                                "[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-2.5 " +
+                                "[&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide"
+                              }
+                            >
                                 {list.map((p: any) => (
                                   <CommandItem
                                     key={p.id}
@@ -1854,10 +1884,10 @@ export function Venda() {
                                   <CollapsibleTrigger asChild>
                                     <button
                                       type="button"
-                                      className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold border-b hover:bg-muted/40"
+                                      className="flex w-full items-center justify-between border-y border-primary/30 border-l-4 border-l-primary bg-primary/5 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-primary hover:bg-primary/10"
                                     >
                                       <span className="truncate">{cat}</span>
-                                      <span className="text-xs font-normal text-muted-foreground tabular-nums">
+                                      <span className="text-xs font-normal tabular-nums text-primary/70">
                                         {list.length}
                                       </span>
                                     </button>

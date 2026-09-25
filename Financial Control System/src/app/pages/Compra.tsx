@@ -5,9 +5,12 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { SearchableSelect } from "../components/SearchableSelect";
+import { SearchableSelect, normalizeSearchText } from "../components/SearchableSelect";
 import { CadastroRapidoItemDialog, type CadastroRapidoModo } from "../components/CadastroRapidoItemDialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import {
   ShoppingCart,
   Plus,
@@ -23,6 +26,8 @@ import {
   Ban,
   MessageSquare,
   PanelRightOpen,
+  ChevronsUpDown,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "../lib/api";
@@ -135,7 +140,12 @@ function ordemDuplicadaNumeroVenda(
   );
 }
 
-/** Lista de produto com campo de pesquisa (aba Compra). */
+function categoriaLabel(raw?: string): string {
+  const t = (raw ?? "").trim();
+  return t || "Sem categoria";
+}
+
+/** Lista de produto com pesquisa; com 2+ categorias usa o mesmo UX agrupado/expansível da Venda. */
 function CompraSearchableSelect({
   value,
   onValueChange,
@@ -155,6 +165,10 @@ function CompraSearchableSelect({
   emptyHint?: string;
   searchPlaceholder?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
   const mapped = useMemo(
     () =>
       options.map((o) => {
@@ -168,18 +182,170 @@ function CompraSearchableSelect({
       }),
     [options],
   );
+
+  const agrupados = useMemo(() => {
+    const m = new Map<string, typeof mapped>();
+    for (const o of mapped) {
+      const g = categoriaLabel(o.group);
+      if (!m.has(g)) m.set(g, []);
+      m.get(g)!.push(o);
+    }
+    return [...m.entries()].sort(([a], [b]) => {
+      if (a === "Sem categoria") return 1;
+      if (b === "Sem categoria") return -1;
+      return a.localeCompare(b, "pt-BR");
+    });
+  }, [mapped]);
+
+  const multiCategoria = agrupados.length > 1;
+
+  const filtradosAgrupados = useMemo(() => {
+    const q = normalizeSearchText(query);
+    if (!q) return agrupados;
+    return agrupados
+      .map(
+        ([cat, list]) =>
+          [
+            cat,
+            list.filter((o) =>
+              normalizeSearchText([o.searchText ?? o.label, o.group].filter(Boolean).join(" ")).includes(q),
+            ),
+          ] as const,
+      )
+      .filter(([, list]) => list.length > 0);
+  }, [agrupados, query]);
+
+  const selected = mapped.find((o) => String(o.id) === value);
+
+  if (!multiCategoria) {
+    return (
+      <SearchableSelect
+        value={value}
+        onValueChange={onValueChange}
+        options={mapped}
+        placeholder={placeholder}
+        triggerId={triggerId}
+        disabled={disabled}
+        emptyHint={emptyHint}
+        searchPlaceholder={searchPlaceholder}
+        listClassName="w-[min(36rem,95vw)] p-0"
+      />
+    );
+  }
+
+  const selecionar = (id: string) => {
+    onValueChange(id);
+    setOpen(false);
+    setQuery("");
+  };
+
   return (
-    <SearchableSelect
-      value={value}
-      onValueChange={onValueChange}
-      options={mapped}
-      placeholder={placeholder}
-      triggerId={triggerId}
-      disabled={disabled}
-      emptyHint={emptyHint}
-      searchPlaceholder={searchPlaceholder}
-      listClassName="w-[min(36rem,95vw)] p-0"
-    />
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setQuery("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          id={triggerId}
+          disabled={disabled || options.length === 0}
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate text-left">{selected?.label ?? placeholder}</span>
+          <ChevronsUpDown className="size-4 shrink-0 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(36rem,95vw)] p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput placeholder={searchPlaceholder} value={query} onValueChange={setQuery} />
+          <CommandList className="max-h-[320px]">
+            {/* Sem CommandEmpty: categorias colapsadas fazem o cmdk achar a lista vazia */}
+            {options.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                {emptyHint ?? "Nenhum produto cadastrado."}
+              </p>
+            ) : query.trim() && filtradosAgrupados.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nenhum produto corresponde à pesquisa.
+              </p>
+            ) : query.trim() ? (
+              filtradosAgrupados.map(([cat, list]) => (
+                <CommandGroup
+                  key={cat}
+                  heading={cat}
+                  className={
+                    "p-0 " +
+                    "[&_[cmdk-group-heading]]:sticky [&_[cmdk-group-heading]]:top-0 [&_[cmdk-group-heading]]:z-10 " +
+                    "[&_[cmdk-group-heading]]:bg-primary/5 [&_[cmdk-group-heading]]:text-primary " +
+                    "[&_[cmdk-group-heading]]:border-y [&_[cmdk-group-heading]]:border-primary/30 " +
+                    "[&_[cmdk-group-heading]]:border-l-4 [&_[cmdk-group-heading]]:border-l-primary " +
+                    "[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-2.5 " +
+                    "[&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide"
+                  }
+                >
+                  {list.map((o) => (
+                    <CommandItem
+                      key={String(o.id)}
+                      value={`${o.id} ${o.label}`}
+                      onSelect={() => selecionar(String(o.id))}
+                    >
+                      <span className="truncate">{o.label}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ))
+            ) : (
+              agrupados.map(([cat, list]) => {
+                const isOpen = expanded.has(cat);
+                return (
+                  <Collapsible
+                    key={cat}
+                    open={isOpen}
+                    onOpenChange={(next) => {
+                      setExpanded((prev) => {
+                        const n = new Set(prev);
+                        if (next) n.add(cat);
+                        else n.delete(cat);
+                        return n;
+                      });
+                    }}
+                  >
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex w-full items-center justify-between border-y border-primary/30 border-l-4 border-l-primary bg-primary/5 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-primary hover:bg-primary/10"
+                      >
+                        <span className="truncate">{cat}</span>
+                        <span className="text-xs font-normal tabular-nums text-primary/70">{list.length}</span>
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="py-1">
+                        {list.map((o) => (
+                          <CommandItem
+                            key={String(o.id)}
+                            value={`${o.id} ${o.label}`}
+                            onSelect={() => selecionar(String(o.id))}
+                          >
+                            <span className="truncate">{o.label}</span>
+                          </CommandItem>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              })
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 

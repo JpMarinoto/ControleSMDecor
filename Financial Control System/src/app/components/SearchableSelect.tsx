@@ -149,7 +149,7 @@ export function SearchableSelect({
                   className={cn(
                     "p-0",
                     "[&_[cmdk-group-heading]]:sticky [&_[cmdk-group-heading]]:top-0 [&_[cmdk-group-heading]]:z-10",
-                    "[&_[cmdk-group-heading]]:bg-primary/20 [&_[cmdk-group-heading]]:text-primary",
+                    "[&_[cmdk-group-heading]]:bg-primary/5 [&_[cmdk-group-heading]]:text-primary",
                     "[&_[cmdk-group-heading]]:border-y [&_[cmdk-group-heading]]:border-primary/30",
                     "[&_[cmdk-group-heading]]:border-l-4 [&_[cmdk-group-heading]]:border-l-primary",
                     "[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-2.5",
